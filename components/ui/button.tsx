@@ -49,9 +49,20 @@ export function Button({
   ref,
   ...props
 }: ButtonProps & { ref?: React.Ref<HTMLButtonElement> }) {
-  const Comp = asChild ? Slot : "button";
+  if (asChild) {
+    return (
+      <Slot
+        ref={ref}
+        className={cn(buttonVariants({ variant, size, className }))}
+        {...props}
+      >
+        {children}
+      </Slot>
+    );
+  }
+
   return (
-    <Comp
+    <button
       ref={ref}
       className={cn(buttonVariants({ variant, size, className }))}
       disabled={disabled || loading}
@@ -59,6 +70,6 @@ export function Button({
     >
       {loading && <Loader2 className="animate-spin" />}
       {children}
-    </Comp>
+    </button>
   );
 }
