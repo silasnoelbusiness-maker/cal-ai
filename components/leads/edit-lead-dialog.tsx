@@ -18,7 +18,12 @@ import type { Lead } from "@prisma/client";
 
 const initialState: LeadFormState = {};
 
-export function EditLeadDialog({ lead }: { lead: Lead }) {
+// Server Components can't pass a Prisma `Decimal` across the RSC boundary
+// (it isn't a plain object), so callers must serialize `estimatedValue` to
+// a plain number/null before rendering this client component.
+type EditableLead = Omit<Lead, "estimatedValue"> & { estimatedValue: number | null };
+
+export function EditLeadDialog({ lead }: { lead: EditableLead }) {
   const [open, setOpen] = useState(false);
   const action = updateLeadDetailsAction.bind(null, lead.id);
   const [state, formAction, pending] = useActionState(action, initialState);
@@ -77,7 +82,7 @@ export function EditLeadDialog({ lead }: { lead: Lead }) {
               type="number"
               min={0}
               step="0.01"
-              defaultValue={lead.estimatedValue ? lead.estimatedValue.toString() : ""}
+              defaultValue={lead.estimatedValue !== null ? String(lead.estimatedValue) : ""}
             />
           </div>
           {state.error && (

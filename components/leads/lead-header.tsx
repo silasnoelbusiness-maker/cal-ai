@@ -30,7 +30,7 @@ export function LeadHeader({ lead }: { lead: Lead }) {
         <div className="flex flex-wrap items-center gap-2">
           <LeadStatusControl leadId={lead.id} status={lead.status} />
           <QualifyButton leadId={lead.id} />
-          <EditLeadDialog lead={lead} />
+          <EditLeadDialog lead={{ ...lead, estimatedValue: lead.estimatedValue ? Number(lead.estimatedValue) : null }} />
           <DeleteLeadButton leadId={lead.id} leadName={name} />
         </div>
       </div>

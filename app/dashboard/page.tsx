@@ -108,7 +108,7 @@ export default async function DashboardPage() {
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Card className="min-w-0">
           <CardHeader className="flex-row items-center justify-between space-y-0">
             <CardTitle>Recent leads</CardTitle>
             <Link href="/dashboard/leads" className="text-sm font-medium text-brand hover:underline">
@@ -138,7 +138,7 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="min-w-0">
           <CardHeader className="flex-row items-center justify-between space-y-0">
             <CardTitle>Recent conversations</CardTitle>
             <Link href="/dashboard/conversations" className="text-sm font-medium text-brand hover:underline">
@@ -173,7 +173,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
+        <Card className="min-w-0">
           <CardHeader className="flex-row items-center justify-between space-y-0">
             <CardTitle>Upcoming appointments</CardTitle>
             <Link href="/dashboard/appointments" className="text-sm font-medium text-brand hover:underline">
@@ -201,7 +201,7 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="min-w-0">
           <CardHeader className="flex-row items-center justify-between space-y-0">
             <CardTitle>Recent AI activity</CardTitle>
             <Sparkles className="h-4 w-4 text-brand" />
