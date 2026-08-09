@@ -11,7 +11,8 @@ and reports on recovered revenue.
 This is a real, working V1 — a Next.js app, Postgres database (via Prisma),
 Supabase auth, Anthropic AI, Stripe billing, and Twilio/Resend messaging, all
 wired together with server-side authorization and graceful fallbacks when a
-service isn't configured.
+service isn't configured. Inbound SMS (customers texting a business back) is
+fully wired end-to-end with Twilio signature verification; see §7.
 
 ---
 
@@ -32,11 +33,14 @@ Other useful scripts:
 ```bash
 npm run typecheck   # tsc --noEmit
 npm run lint         # eslint
-npm run test         # vitest (unit tests, no database required)
+npm run test         # vitest — 100+ unit/integration tests, no database required
 npm run build         # production build
 npm run db:studio    # Prisma Studio — browse your database
 npm run db:seed       # create a demo workspace (needs Supabase configured)
 ```
+
+Before deploying, run all four of `typecheck` / `lint` / `test` / `build` and
+confirm they're clean — see §17 for the full production checklist.
 
 ## 2. Environment variables
 
@@ -147,24 +151,76 @@ The webhook (`app/api/stripe/webhook/route.ts`) is the **only** place
 subscription state is written — checkout redirects and client state are
 never trusted.
 
-## 7. Twilio setup (SMS)
+## 7. Twilio setup (SMS — inbound and outbound)
 
 1. Create a Twilio account and buy a phone number.
-2. Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`.
+2. Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` (this
+   is the platform-wide fallback "from" number for outbound sends).
+3. In the Twilio Console, open your number → **Messaging** → "A message
+   comes in" → set to **Webhook**, **HTTP POST**, and paste:
 
-All SMS sends go through `lib/twilio/send-sms.ts`. Without credentials, SMS
-follow-ups are skipped with a logged warning instead of failing the request
-— set the SMS default follow-up channel to Email until Twilio is configured.
-Note: inbound SMS (customers replying by text) isn't wired to a webhook in
-V1 — see Known Limitations.
+   ```
+   https://yourdomain.com/api/webhooks/twilio/sms
+   ```
 
-## 8. Resend setup (email)
+That's the entire flow this webhook drives:
+
+```
+Customer texts the number
+  → Twilio POSTs to /api/webhooks/twilio/sms
+  → X-Twilio-Signature is verified against TWILIO_AUTH_TOKEN (rejected with
+    403 if missing/invalid — see lib/api/timing-safe-equal.ts usage in that
+    route for the constant-time comparison)
+  → STOP/START/UNSUBSCRIBE/CANCEL/END/QUIT opts the lead out (and
+    START/YES/UNSTOP opts back in) before anything else runs
+  → the lead is matched by Business.twilioPhoneNumber (the number that
+    received the text) and then by the sender's phone number against an
+    existing lead; a genuinely new number creates a new lead
+  → the message is appended to the conversation, the business is notified,
+    and — if AI is enabled and configured — the AI generates and sends a
+    reply in the same request
+  → a TwiML response is returned to Twilio (empty unless a STOP/START
+    confirmation needs to be spoken back)
+```
+
+**Multi-tenant routing:** with more than one business on a shared platform
+number, Twilio has no way to know which business a text is *for* — so
+per-business inbound routing needs a **dedicated number per business**, set
+in **Settings → Integrations → SMS (Twilio)** (stored as
+`Business.twilioPhoneNumber`). Point that number's webhook at the same URL
+above. Without a dedicated number, a business can still *send* SMS (via the
+shared `TWILIO_PHONE_NUMBER`) but can't *receive* replies — the settings
+page explains this inline.
+
+All SMS sends go through `lib/twilio/send-sms.ts`, which never throws: without
+credentials, sends are skipped with a logged warning instead of failing the
+request — set the default follow-up channel to Email until Twilio is
+configured.
+
+## 8. Resend setup (email — outbound only)
 
 1. Create a Resend account and verify a sending domain.
 2. Set `RESEND_API_KEY` and `RESEND_FROM_EMAIL` (e.g. `LeadLoop <notifications@yourdomain.com>`).
 
-All email sends go through `lib/resend/send-email.ts`, used for lead/appointment
-notifications and email follow-ups.
+All email sends go through `lib/resend/send-email.ts` (never throws — a
+missing key or a Resend-side failure just skips the send with a logged
+reason), used for lead/appointment notifications and email follow-ups.
+
+**Inbound email is not supported in V1 — this is not wired up, and nothing
+in the product claims otherwise.** If a customer replies to a LeadLoop email,
+that reply lands in the business's own inbox and LeadLoop never sees it; it
+is not added to the conversation and does not trigger AI processing. This is
+a materially bigger integration than inbound SMS: Resend has no built-in
+inbound-parse webhook (unlike e.g. SendGrid's Inbound Parse), so supporting
+it would mean either standing up your own MX records + mail receiver for a
+subdomain and parsing raw MIME, or switching/adding a provider that offers
+inbound email parsing, then matching the reply back to a lead (most
+naturally via a `reply+{leadId}@yourdomain.com` convention) and verifying
+the sender to prevent spoofed inbound "replies." None of that exists yet.
+Until then, email follow-ups are effectively one-way: the business can see
+and respond to email replies manually in their own mail client, but that
+reply won't appear in the LeadLoop conversation thread the way an inbound
+SMS reply does.
 
 ## 9. Deployment
 
@@ -176,7 +232,18 @@ Fly, Render, a Node server, etc.).
    it into your deploy pipeline).
 3. Point `NEXT_PUBLIC_APP_URL` at your real domain — it's used in emails,
    embed snippets, and Stripe redirect URLs.
-4. Configure the Stripe webhook and cron job (below) against the deployed URL.
+4. Configure the webhooks and cron job below against the deployed URL.
+
+### Webhook URLs (quick reference)
+
+| Service | URL to configure | Where |
+|---|---|---|
+| Stripe | `https://yourdomain.com/api/stripe/webhook` | Stripe Dashboard → Developers → Webhooks (see §6b for the exact events) |
+| Twilio | `https://yourdomain.com/api/webhooks/twilio/sms` | Twilio Console → your number → Messaging → "A message comes in" (see §7) — repeat per dedicated business number |
+
+Both are signature-verified server-side (`stripe.webhooks.constructEvent` /
+`twilio.validateRequest`) — requests without a valid signature are rejected
+before anything is written.
 
 ## 10. Configure the follow-up cron
 
@@ -217,15 +284,17 @@ Once logged in, go to **Settings → Integrations**:
 - Leads: filterable/sortable/searchable table, pagination, manual creation, detail page with timeline
 - AI: structured lead qualification (score/temperature/intent/urgency/etc.), lead summaries, AI first response, "Suggest AI Reply", human hand-off detection
 - Conversations: split list/detail UI, manual reply, AI-generated indicator, mobile-responsive
+- Inbound SMS: Twilio webhook with signature verification, STOP/START opt-out handling, lead matching by business number then phone number, AI auto-reply
 - Automated follow-up engine (30 min / 24 hr / 3 day, configurable, consent-aware, cron-driven)
 - Appointments: list + status workflow (confirm/cancel/complete)
-- Analytics: leads over time, funnel, temperature mix, response time, follow-up success rate
+- Analytics: leads over time, funnel, temperature mix, response time, follow-up success rate — always scoped to real (non-demo) leads only
 - Billing: Stripe Checkout, Customer Portal, webhook-driven subscription state, plan-limit enforcement
 - Lead capture API (`/api/leads`) with hashed API keys, plus a public embeddable form endpoint
-- Settings: business, AI assistant, follow-up, notifications, integrations, API keys, account
-- Demo mode: load/remove clearly-labeled sample data
+- Settings: business, AI assistant, follow-up, notifications, integrations (embed snippet, SMS number/webhook, lead capture API), API keys, account
+- Demo mode: load/remove clearly-labeled sample data, kept out of revenue/analytics and rolled back cleanly from plan usage on removal
 - Notifications: in-app bell + email, per-event preferences
-- Tests: plan limits, AI qualification parsing, lead isolation, API key auth, appointment creation, Stripe webhook mapping, follow-up eligibility
+- Error boundaries at the dashboard, app, and root-layout levels — a database or other unhandled failure shows a styled "something went wrong" page with a retry action instead of crashing
+- Tests: 100+ unit/integration tests covering plan limits, AI qualification parsing, lead/conversation isolation, API key auth, appointment creation, Stripe checkout + webhook mapping, follow-up eligibility, inbound SMS signature verification, demo-data integrity, and constant-time secret comparison
 
 ## 13. What needs manual configuration
 
@@ -236,17 +305,17 @@ credentials before it's live:
 - A Postgres database + `npm run db:migrate`
 - `ANTHROPIC_API_KEY` (AI features fall back to "AI unavailable, reply manually" without it)
 - Stripe account, products/prices, and webhook (billing page works but checkout/portal need this)
-- Resend account + verified domain (email notifications/follow-ups)
-- Twilio account + number (SMS follow-ups)
+- Resend account + verified domain (email notifications/follow-ups — outbound only, see §8)
+- Twilio account + number, with its webhook pointed at `/api/webhooks/twilio/sms` (outbound SMS follow-ups AND inbound replies both need this)
 - A scheduler pointed at `/api/cron/follow-ups` (otherwise follow-ups queue but never send)
 - `LEADLOOP_API_SECRET` for the cron endpoint
 
 ## 14. Known limitations (V1)
 
-- **No inbound SMS/email webhook.** Customers can't reply by text or email
-  yet — conversations continue on the web channel or via the business
-  replying manually in the dashboard. Outbound SMS/email sending is fully
-  wired.
+- **No inbound email.** Customers can't reply to a LeadLoop email and have it
+  land back in the conversation — see §8 for exactly why and what a fix
+  would require. Inbound SMS *is* fully wired (§7); outbound email/SMS
+  sending is fully wired either way.
 - **Single business per account** in the UI (the schema supports multiple
   via `business_members`, but onboarding creates one).
 - **No team invite flow yet** — the Account page shows current members, but
@@ -260,8 +329,9 @@ credentials before it's live:
 
 ## 15. Suggested V1.1 roadmap
 
-- Inbound SMS (Twilio) and email (Resend) webhooks so customers can reply
-  directly, with STOP-keyword opt-out handling wired end-to-end
+- Inbound email (a provider with inbound-parse support, or your own MX +
+  mail receiver) so email replies land back in the conversation the way
+  inbound SMS already does — see §8 for what this actually involves
 - Team invitations (email invite → accept → join business)
 - Calendar-grid appointment view with drag-to-reschedule
 - Saved views/segments for the leads table
@@ -270,24 +340,74 @@ credentials before it's live:
 - Configurable AI qualification score thresholds from Settings (currently
   centralized in `lib/ai/types.ts` — easy to change, not yet UI-exposed)
 
+## 16. Production-readiness audit notes
+
+This V1 went through a full production-readiness audit (auth/authorization,
+database integrity, AI behavior, the end-to-end lead flow, the follow-up
+engine, SMS, email, the embeddable form, Stripe billing, API keys, security,
+UX, demo-mode data integrity, error handling, mobile layout, and the
+production build) before launch. Real bugs found during that audit —
+cross-tenant data leaks, billing double-subscription/limit-bypass edge
+cases, a Decimal-serialization crash, a mobile layout overflow, demo data
+contaminating real revenue figures, and missing error boundaries, among
+others — were fixed and covered with tests, not just noted. Nothing above
+in §12–15 is aspirational marketing copy: every "supported" feature was
+exercised against a real database and, where applicable, a real running
+server during that audit.
+
+## 17. Production checklist
+
+Run through this before pointing real customers at a deployment:
+
+- [ ] `npm run typecheck`, `npm run lint`, `npm run test`, and `npm run build`
+      all pass cleanly (see §1)
+- [ ] Every environment variable in §2 is set in your hosting platform (not
+      just `.env.local`)
+- [ ] `npm run db:migrate` has been run against the production database
+- [ ] Supabase: Site URL and `{APP_URL}/auth/callback` redirect URL are set
+      to your real production domain, not localhost (§4)
+- [ ] Stripe: live-mode keys and price IDs (not test-mode), webhook
+      configured at `/api/stripe/webhook` with the events listed in §6b, and
+      `STRIPE_WEBHOOK_SECRET` matches that endpoint specifically (§6b)
+- [ ] Twilio: number's inbound webhook points at `/api/webhooks/twilio/sms`
+      over HTTPS (Twilio signature verification will reject everything
+      otherwise) — repeat for every business's dedicated number (§7)
+- [ ] Resend: sending domain is verified (SPF/DKIM), not just an API key (§8)
+- [ ] A scheduler is actually hitting `/api/cron/follow-ups` on an interval
+      — not just configured, but confirmed firing (check `FollowUp` rows
+      transition from `PENDING` to `SENT`) (§10)
+- [ ] `NEXT_PUBLIC_APP_URL` is the real production URL — it's baked into
+      email links, embed snippets, and Stripe redirect URLs
+- [ ] `LEADLOOP_API_SECRET` is a long random value, not the sample from
+      `.env.example`
+- [ ] Sign up as a brand-new business end-to-end in production once: create
+      a test lead, confirm the AI response, book an appointment, and check
+      the analytics/billing pages before inviting real customers
+
 ---
 
 ## Project structure
 
 ```
 app/              routes (marketing, auth, onboarding, dashboard, API)
+  error.tsx             error boundary for everything outside /dashboard
+  global-error.tsx      last-resort boundary for a root-layout failure
+  dashboard/error.tsx   error boundary for all dashboard pages
+  api/webhooks/twilio/sms/route.ts   inbound SMS webhook (signature-verified)
+  api/stripe/webhook/route.ts        Stripe webhook (signature-verified)
 components/       ui/, dashboard/, leads/, conversations/, appointments/,
                   analytics/, billing/, settings/, marketing/, auth/, embed/
 lib/
   ai/             centralized Anthropic integration
   stripe/         checkout, portal, status mapping
-  twilio/         SMS abstraction
-  resend/         email abstraction
+  twilio/         SMS abstraction (outbound) + inbound webhook logic
+  resend/         email abstraction (outbound only — see §8)
   auth/           Supabase clients, session/authorization helpers
   db/             Prisma client
   leads/          lead creation pipeline, query builders
   follow-ups/     follow-up scheduling
-  api/            shared API helpers (auth, rate limiting, responses)
+  api/            shared API helpers (auth, rate limiting, responses, timing-safe compare)
+  demo.ts         demo/sample data load + clean removal (revenue/usage-safe)
 prisma/           schema, migrations, seed script
-tests/            vitest unit tests
+tests/            vitest unit + integration tests (100+)
 ```
