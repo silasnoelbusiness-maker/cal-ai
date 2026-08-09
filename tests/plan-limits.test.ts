@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkPlanLimit, currentMonthKey, planFromPriceId, PLAN_LIMITS } from "@/lib/plans";
+import { checkPlanLimit, currentMonthKey, effectivePlan, planFromPriceId, PLAN_LIMITS } from "@/lib/plans";
 
 describe("checkPlanLimit", () => {
   it("allows usage below the plan's lead limit", () => {
@@ -46,6 +46,38 @@ describe("currentMonthKey", () => {
   it("pads single-digit months", () => {
     const key = currentMonthKey(new Date(2026, 8, 1));
     expect(key).toBe("2026-09");
+  });
+});
+
+describe("effectivePlan", () => {
+  it("grants the subscribed plan while active", () => {
+    expect(effectivePlan({ plan: "PRO", status: "ACTIVE" })).toBe("PRO");
+  });
+
+  it("grants the subscribed plan while trialing", () => {
+    expect(effectivePlan({ plan: "GROWTH", status: "TRIALING" })).toBe("GROWTH");
+  });
+
+  it("still grants the plan during a payment retry (past_due) — a grace period, not an instant cutoff", () => {
+    expect(effectivePlan({ plan: "PRO", status: "PAST_DUE" })).toBe("PRO");
+  });
+
+  it("falls back to STARTER once a subscription is canceled, regardless of what plan it was", () => {
+    expect(effectivePlan({ plan: "PRO", status: "CANCELED" })).toBe("STARTER");
+  });
+
+  it("falls back to STARTER for unpaid or incomplete subscriptions", () => {
+    expect(effectivePlan({ plan: "GROWTH", status: "UNPAID" })).toBe("STARTER");
+    expect(effectivePlan({ plan: "GROWTH", status: "INCOMPLETE" })).toBe("STARTER");
+  });
+
+  it("falls back to STARTER when there's no subscription record at all", () => {
+    expect(effectivePlan(null)).toBe("STARTER");
+    expect(effectivePlan(undefined)).toBe("STARTER");
+  });
+
+  it("falls back to STARTER for a NONE status (never subscribed)", () => {
+    expect(effectivePlan({ plan: "STARTER", status: "NONE" })).toBe("STARTER");
   });
 });
 

@@ -5,7 +5,7 @@ import { isTwilioConfigured } from "@/lib/auth/config";
 import { AIUnavailableError, generateBusinessReply, type AiMessage } from "@/lib/ai";
 import { createLead } from "@/lib/leads/create-lead";
 import { notifyBusiness } from "@/lib/notifications";
-import { checkPlanLimit, currentMonthKey } from "@/lib/plans";
+import { checkPlanLimit, currentMonthKey, effectivePlan } from "@/lib/plans";
 import { rateLimit } from "@/lib/api/rate-limit";
 
 const STOP_KEYWORDS = new Set(["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"]);
@@ -185,7 +185,7 @@ export async function POST(request: NextRequest) {
     update: {},
   });
   const subscription = await prisma.subscription.findUnique({ where: { businessId: business.id } });
-  const limitCheck = checkPlanLimit(subscription?.plan || "STARTER", "aiMessages", usage);
+  const limitCheck = checkPlanLimit(effectivePlan(subscription), "aiMessages", usage);
   if (!limitCheck.allowed) {
     // Message is stored either way — the business can still reply manually
     // from the dashboard even though the AI limit is reached.

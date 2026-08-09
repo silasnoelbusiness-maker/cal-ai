@@ -1,7 +1,7 @@
 import "server-only";
 import type { Business, ConversationChannel } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { checkPlanLimit, currentMonthKey } from "@/lib/plans";
+import { checkPlanLimit, currentMonthKey, effectivePlan } from "@/lib/plans";
 import { AIUnavailableError, generateBusinessReply, qualifyLead } from "@/lib/ai";
 import { notifyBusiness } from "@/lib/notifications";
 import { scheduleNextFollowUp } from "@/lib/follow-ups/schedule";
@@ -43,7 +43,7 @@ export async function createLead(
   });
 
   const subscription = await prisma.subscription.findUnique({ where: { businessId: business.id } });
-  const plan = subscription?.plan || "STARTER";
+  const plan = effectivePlan(subscription);
   const limitCheck = checkPlanLimit(plan, "leads", usage);
   if (!limitCheck.allowed) {
     return { ok: false, error: limitCheck.message };

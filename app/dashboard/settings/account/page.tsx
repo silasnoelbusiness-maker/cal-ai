@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { requireBusiness } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
-import { PLAN_LIMITS } from "@/lib/plans";
+import { PLAN_LIMITS, effectivePlan } from "@/lib/plans";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,8 @@ export default async function AccountSettingsPage() {
     prisma.businessMember.findMany({ where: { businessId: business.id }, include: { user: true } }),
     prisma.subscription.findUnique({ where: { businessId: business.id } }),
   ]);
-  const maxUsers = PLAN_LIMITS[subscription?.plan || "STARTER"].maxUsers;
+  const plan = effectivePlan(subscription);
+  const maxUsers = PLAN_LIMITS[plan].maxUsers;
 
   return (
     <div className="space-y-6">
@@ -40,8 +41,7 @@ export default async function AccountSettingsPage() {
         <CardHeader>
           <CardTitle>Team</CardTitle>
           <CardDescription>
-            {members.length} of {maxUsers} seats used on your {PLAN_LIMITS[subscription?.plan || "STARTER"].label}{" "}
-            plan.
+            {members.length} of {maxUsers} seats used on your {PLAN_LIMITS[plan].label} plan.
           </CardDescription>
         </CardHeader>
         <CardContent>

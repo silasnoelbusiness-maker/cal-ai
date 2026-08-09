@@ -1,4 +1,4 @@
-import type { Plan } from "@prisma/client";
+import type { Plan, SubscriptionStatus } from "@prisma/client";
 
 /**
  * Centralized plan-limit configuration. This is the single source of truth
@@ -141,6 +141,31 @@ export function checkPlanLimit(
       ? undefined
       : `Your ${limits.label} plan allows up to ${limits.maxUsers} team member${limits.maxUsers === 1 ? "" : "s"}. Upgrade to invite more.`,
   };
+}
+
+/**
+ * Statuses that mean "the business currently has paid access." PAST_DUE is
+ * included deliberately — Stripe is still retrying the payment (dunning),
+ * and cutting a customer off immediately on the first failed charge is
+ * harsher than most SaaS products do. Anything else (CANCELED, UNPAID,
+ * INCOMPLETE, NONE) means there's no active plan to honor.
+ */
+const LIMITS_ACTIVE_STATUSES: SubscriptionStatus[] = ["ACTIVE", "TRIALING", "PAST_DUE"];
+
+/**
+ * The plan to actually enforce limits against, given a subscription's
+ * current Stripe-driven status. A canceled/unpaid subscription's `plan`
+ * field is left as whatever it last was (useful for display/re-subscribe
+ * flows), but it must never keep granting that plan's limits — otherwise a
+ * business that cancels a Pro subscription would keep Pro-level usage
+ * forever. Always use this — never read `.plan` directly for limit checks.
+ */
+export function effectivePlan(
+  subscription: { plan: Plan; status: SubscriptionStatus } | null | undefined
+): Plan {
+  if (!subscription) return "STARTER";
+  if (LIMITS_ACTIVE_STATUSES.includes(subscription.status)) return subscription.plan;
+  return "STARTER";
 }
 
 export function planFromPriceId(priceId: string | null | undefined): Plan | null {

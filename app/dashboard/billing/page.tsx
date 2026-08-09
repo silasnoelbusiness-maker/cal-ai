@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { Check } from "lucide-react";
 import { requireBusiness } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
-import { PLAN_LIMITS, PLAN_ORDER, currentMonthKey } from "@/lib/plans";
+import { PLAN_LIMITS, PLAN_ORDER, currentMonthKey, effectivePlan } from "@/lib/plans";
 import { isStripeConfigured } from "@/lib/auth/config";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -36,6 +36,10 @@ export default async function BillingPage() {
   ]);
 
   const limits = PLAN_LIMITS[subscription.plan];
+  // What's actually enforced right now — differs from `limits` whenever the
+  // subscription isn't active (e.g. canceled), so a lapsed Pro subscriber
+  // doesn't keep seeing Pro-sized usage bars they no longer have access to.
+  const enforcedLimits = PLAN_LIMITS[effectivePlan(subscription)];
   const hasActiveBilling = Boolean(subscription.stripeCustomerId);
 
   return (
@@ -69,9 +73,19 @@ export default async function BillingPage() {
             </Badge>
           </CardHeader>
           <CardContent className="space-y-5">
-            <UsageBar label="Leads this month" used={usage.leadsCount} limit={limits.leadsPerMonth} />
-            <UsageBar label="AI messages this month" used={usage.aiMessagesCount} limit={limits.aiMessagesPerMonth} />
-            <UsageBar label="Team members" used={memberCount} limit={limits.maxUsers} />
+            {enforcedLimits.plan !== limits.plan && (
+              <p className="text-xs text-warning">
+                Your subscription isn&apos;t active, so {enforcedLimits.label} limits are currently enforced
+                instead of {limits.label}.
+              </p>
+            )}
+            <UsageBar label="Leads this month" used={usage.leadsCount} limit={enforcedLimits.leadsPerMonth} />
+            <UsageBar
+              label="AI messages this month"
+              used={usage.aiMessagesCount}
+              limit={enforcedLimits.aiMessagesPerMonth}
+            />
+            <UsageBar label="Team members" used={memberCount} limit={enforcedLimits.maxUsers} />
           </CardContent>
           {hasActiveBilling && (
             <div className="flex justify-end px-6 pb-6">

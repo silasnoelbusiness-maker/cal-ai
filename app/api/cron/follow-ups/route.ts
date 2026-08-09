@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { AIUnavailableError, generateFollowUp, type AiMessage } from "@/lib/ai";
 import { isLeadEligibleForFollowUp, scheduleNextFollowUp } from "@/lib/follow-ups/schedule";
-import { checkPlanLimit, currentMonthKey } from "@/lib/plans";
+import { checkPlanLimit, currentMonthKey, effectivePlan } from "@/lib/plans";
 import { sendEmail } from "@/lib/resend/send-email";
 import { sendSMS } from "@/lib/twilio/send-sms";
 
@@ -72,7 +72,7 @@ async function handle(request: NextRequest) {
       update: {},
     });
     const subscription = await prisma.subscription.findUnique({ where: { businessId: business.id } });
-    const limitCheck = checkPlanLimit(subscription?.plan || "STARTER", "aiMessages", usage);
+    const limitCheck = checkPlanLimit(effectivePlan(subscription), "aiMessages", usage);
     if (!limitCheck.allowed) {
       // Leave PENDING — will be retried on a future run once usage resets
       // or the business upgrades. Don't burn through the follow-up chain

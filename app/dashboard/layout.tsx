@@ -1,5 +1,6 @@
 import { requireBusiness } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
+import { effectivePlan } from "@/lib/plans";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { MobileNav } from "@/components/dashboard/mobile-nav";
 import { Topbar } from "@/components/dashboard/topbar";
@@ -16,7 +17,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar businessName={business.name} plan={subscription?.plan || "STARTER"} />
+      <Sidebar businessName={business.name} plan={effectivePlan(subscription)} />
       <div className="flex min-w-0 flex-1 flex-col pb-16 md:pb-0">
         <Topbar businessId={business.id} email={user.email} />
         <DemoBanner businessId={business.id} />

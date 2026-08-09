@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getApiAuthContext } from "@/lib/auth/session";
 import { apiError, apiNotFound, apiRateLimited, apiUnauthorized } from "@/lib/api/response";
 import { rateLimit } from "@/lib/api/rate-limit";
-import { checkPlanLimit, currentMonthKey } from "@/lib/plans";
+import { checkPlanLimit, currentMonthKey, effectivePlan } from "@/lib/plans";
 import { AIUnavailableError, generateBusinessReply, type AiMessage } from "@/lib/ai";
 
 const BodySchema = z.object({
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     update: {},
   });
   const subscription = await prisma.subscription.findUnique({ where: { businessId: auth.business.id } });
-  const limitCheck = checkPlanLimit(subscription?.plan || "STARTER", "aiMessages", usage);
+  const limitCheck = checkPlanLimit(effectivePlan(subscription), "aiMessages", usage);
   if (!limitCheck.allowed) return apiError(limitCheck.message || "AI message limit reached.", 402);
 
   try {
