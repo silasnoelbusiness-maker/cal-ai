@@ -17,6 +17,9 @@ export async function getDashboardMetrics(businessId: string) {
   const thisMonth = monthRange(0);
   const lastMonth = monthRange(1);
 
+  // isDemo: false everywhere below — these are the headline business metrics
+  // (including revenue), so sample/demo leads must never inflate them. Demo
+  // leads stay visible (tagged) in the activity feeds further down the page.
   const [
     leadsThisMonth,
     leadsLastMonth,
@@ -27,11 +30,16 @@ export async function getDashboardMetrics(businessId: string) {
     revenueThisMonth,
     revenueLastMonth,
   ] = await Promise.all([
-    prisma.lead.count({ where: { businessId, createdAt: { gte: thisMonth.start, lt: thisMonth.end } } }),
-    prisma.lead.count({ where: { businessId, createdAt: { gte: lastMonth.start, lt: lastMonth.end } } }),
+    prisma.lead.count({
+      where: { businessId, isDemo: false, createdAt: { gte: thisMonth.start, lt: thisMonth.end } },
+    }),
+    prisma.lead.count({
+      where: { businessId, isDemo: false, createdAt: { gte: lastMonth.start, lt: lastMonth.end } },
+    }),
     prisma.lead.count({
       where: {
         businessId,
+        isDemo: false,
         qualificationScore: { not: null },
         createdAt: { gte: thisMonth.start, lt: thisMonth.end },
       },
@@ -39,22 +47,33 @@ export async function getDashboardMetrics(businessId: string) {
     prisma.lead.count({
       where: {
         businessId,
+        isDemo: false,
         qualificationScore: { not: null },
         createdAt: { gte: lastMonth.start, lt: lastMonth.end },
       },
     }),
     prisma.appointment.count({
-      where: { businessId, createdAt: { gte: thisMonth.start, lt: thisMonth.end } },
+      where: { businessId, lead: { isDemo: false }, createdAt: { gte: thisMonth.start, lt: thisMonth.end } },
     }),
     prisma.appointment.count({
-      where: { businessId, createdAt: { gte: lastMonth.start, lt: lastMonth.end } },
+      where: { businessId, lead: { isDemo: false }, createdAt: { gte: lastMonth.start, lt: lastMonth.end } },
     }),
     prisma.lead.aggregate({
-      where: { businessId, status: "CONVERTED", convertedAt: { gte: thisMonth.start, lt: thisMonth.end } },
+      where: {
+        businessId,
+        isDemo: false,
+        status: "CONVERTED",
+        convertedAt: { gte: thisMonth.start, lt: thisMonth.end },
+      },
       _sum: { estimatedValue: true },
     }),
     prisma.lead.aggregate({
-      where: { businessId, status: "CONVERTED", convertedAt: { gte: lastMonth.start, lt: lastMonth.end } },
+      where: {
+        businessId,
+        isDemo: false,
+        status: "CONVERTED",
+        convertedAt: { gte: lastMonth.start, lt: lastMonth.end },
+      },
       _sum: { estimatedValue: true },
     }),
   ]);
@@ -76,7 +95,7 @@ export async function getDashboardMetrics(businessId: string) {
 export async function getPipelineSnapshot(businessId: string) {
   const grouped = await prisma.lead.groupBy({
     by: ["status"],
-    where: { businessId },
+    where: { businessId, isDemo: false },
     _count: { _all: true },
   });
   const counts: Record<string, number> = {};

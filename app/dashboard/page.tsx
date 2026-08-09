@@ -13,6 +13,7 @@ import {
 import { MetricCard } from "@/components/ui/metric-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Avatar } from "@/components/ui/avatar";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
@@ -124,8 +125,13 @@ export default async function DashboardPage() {
               >
                 <Avatar name={`${lead.firstName} ${lead.lastName || ""}`} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">
+                  <p className="flex items-center gap-1.5 truncate text-sm font-medium text-foreground">
                     {lead.firstName} {lead.lastName}
+                    {lead.isDemo && (
+                      <Badge variant="secondary" className="shrink-0">
+                        Demo
+                      </Badge>
+                    )}
                   </p>
                   <p className="truncate text-xs text-muted">{lead.serviceRequested || "Unknown service"}</p>
                 </div>
@@ -157,8 +163,13 @@ export default async function DashboardPage() {
                 >
                   <Avatar name={`${convo.lead.firstName} ${convo.lead.lastName || ""}`} />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-foreground">
+                    <p className="flex items-center gap-1.5 truncate text-sm font-medium text-foreground">
                       {convo.lead.firstName} {convo.lead.lastName}
+                      {convo.lead.isDemo && (
+                        <Badge variant="secondary" className="shrink-0">
+                          Demo
+                        </Badge>
+                      )}
                     </p>
                     <p className="truncate text-xs text-muted">
                       {convo.messages[0]?.content || "No messages yet"}
@@ -190,8 +201,13 @@ export default async function DashboardPage() {
                     <Calendar className="h-4 w-4" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-foreground">
+                    <p className="flex items-center gap-1.5 truncate text-sm font-medium text-foreground">
                       {appt.lead.firstName} {appt.lead.lastName}
+                      {appt.lead.isDemo && (
+                        <Badge variant="secondary" className="shrink-0">
+                          Demo
+                        </Badge>
+                      )}
                     </p>
                     <p className="truncate text-xs text-muted">{formatDateTime(appt.scheduledAt)}</p>
                   </div>
@@ -222,7 +238,10 @@ export default async function DashboardPage() {
                       </span>{" "}
                       · {message.content}
                     </p>
-                    <p className="text-[11px] text-muted">{formatRelativeTime(message.createdAt)}</p>
+                    <p className="flex items-center gap-1.5 text-[11px] text-muted">
+                      {formatRelativeTime(message.createdAt)}
+                      {message.conversation.lead.isDemo && <Badge variant="secondary">Demo</Badge>}
+                    </p>
                   </div>
                 </div>
               ))

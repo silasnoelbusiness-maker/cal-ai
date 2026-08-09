@@ -9,6 +9,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Avatar } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { TemperatureBadge } from "@/components/leads/temperature-badge";
 import { LeadRowActions } from "@/components/leads/lead-row-actions";
@@ -72,7 +73,14 @@ export function LeadsTable({
                 <Link href={`/dashboard/leads/${lead.id}`} className="flex items-center gap-2.5">
                   <Avatar name={name} className="h-7 w-7 text-[11px]" />
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-foreground">{name}</p>
+                    <p className="flex items-center gap-1.5 truncate text-sm font-medium text-foreground">
+                      {name}
+                      {lead.isDemo && (
+                        <Badge variant="secondary" className="shrink-0">
+                          Demo
+                        </Badge>
+                      )}
+                    </p>
                     <p className="truncate text-xs text-muted">{lead.email || lead.phone || "No contact info"}</p>
                   </div>
                 </Link>

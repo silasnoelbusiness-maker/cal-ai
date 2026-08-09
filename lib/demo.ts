@@ -254,6 +254,28 @@ export async function loadDemoData(businessId: string) {
 
 export async function removeDemoData(businessId: string) {
   await prisma.lead.deleteMany({ where: { businessId, isDemo: true } });
+
+  // loadDemoData() bumps the current month's Usage counters so the
+  // dashboard/analytics aren't empty during exploration. Undo exactly that
+  // bump here (clamped at 0) so removing demo data doesn't leave a business
+  // permanently counted against its real plan limits for leads/messages it
+  // never actually received. Only the current month is touched — plan-limit
+  // checks only ever look at currentMonthKey(), so an older month's row (if
+  // demo data was loaded and left in place across a month boundary) can't
+  // affect enforcement either way.
+  const month = currentMonthKey();
+  const usage = await prisma.usage.findUnique({ where: { businessId_month: { businessId, month } } });
+  if (usage) {
+    await prisma.usage.update({
+      where: { businessId_month: { businessId, month } },
+      data: {
+        leadsCount: Math.max(0, usage.leadsCount - 6),
+        messagesCount: Math.max(0, usage.messagesCount - 9),
+        aiMessagesCount: Math.max(0, usage.aiMessagesCount - 6),
+        appointmentsCount: Math.max(0, usage.appointmentsCount - 2),
+      },
+    });
+  }
 }
 
 export async function hasDemoData(businessId: string): Promise<boolean> {

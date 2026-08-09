@@ -19,8 +19,10 @@ export interface AnalyticsData {
 export async function getAnalytics(businessId: string, rangeDays = 30): Promise<AnalyticsData> {
   const since = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
 
+  // isDemo: false — analytics (especially recovered revenue) must reflect
+  // real business performance only; sample/demo leads are never counted here.
   const leads = await prisma.lead.findMany({
-    where: { businessId, createdAt: { gte: since } },
+    where: { businessId, isDemo: false, createdAt: { gte: since } },
     include: {
       appointments: true,
       conversations: { include: { messages: { orderBy: { createdAt: "asc" } } } },
