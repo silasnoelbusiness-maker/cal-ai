@@ -4,6 +4,7 @@ import { TemperatureBadge } from "@/components/leads/temperature-badge";
 import { LeadStatusControl } from "@/components/leads/lead-status-control";
 import { QualifyButton } from "@/components/leads/qualify-button";
 import { DeleteLeadButton } from "@/components/leads/delete-lead-button";
+import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
 import { Badge } from "@/components/ui/badge";
 import type { Lead } from "@prisma/client";
 
@@ -29,6 +30,7 @@ export function LeadHeader({ lead }: { lead: Lead }) {
         <div className="flex flex-wrap items-center gap-2">
           <LeadStatusControl leadId={lead.id} status={lead.status} />
           <QualifyButton leadId={lead.id} />
+          <EditLeadDialog lead={lead} />
           <DeleteLeadButton leadId={lead.id} leadName={name} />
         </div>
       </div>

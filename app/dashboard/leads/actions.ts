@@ -12,6 +12,15 @@ export interface LeadFormState {
   error?: string;
 }
 
+const EditLeadSchema = z.object({
+  firstName: z.string().trim().min(1, "First name is required."),
+  lastName: z.string().trim().optional(),
+  email: z.union([z.email("Enter a valid email."), z.literal("")]).optional(),
+  phone: z.string().trim().optional(),
+  serviceRequested: z.string().trim().optional(),
+  estimatedValue: z.string().trim().optional(),
+});
+
 const CreateLeadSchema = z.object({
   firstName: z.string().trim().min(1, "First name is required."),
   lastName: z.string().trim().optional(),
@@ -129,6 +138,46 @@ export async function createTestLeadAction() {
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/leads");
   return result;
+}
+
+export async function updateLeadDetailsAction(
+  leadId: string,
+  _prevState: LeadFormState,
+  formData: FormData
+): Promise<LeadFormState> {
+  const { business } = await requireBusiness();
+
+  const parsed = EditLeadSchema.safeParse({
+    firstName: formData.get("firstName") || "",
+    lastName: formData.get("lastName") || "",
+    email: formData.get("email") || "",
+    phone: formData.get("phone") || "",
+    serviceRequested: formData.get("serviceRequested") || "",
+    estimatedValue: formData.get("estimatedValue") || "",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const estimatedValue = parsed.data.estimatedValue ? Number(parsed.data.estimatedValue) : null;
+  if (parsed.data.estimatedValue && (Number.isNaN(estimatedValue) || (estimatedValue ?? 0) < 0)) {
+    return { error: "Enter a valid estimated value." };
+  }
+
+  const result = await prisma.lead.updateMany({
+    where: { id: leadId, businessId: business.id },
+    data: {
+      firstName: parsed.data.firstName,
+      lastName: parsed.data.lastName || null,
+      email: parsed.data.email || null,
+      phone: parsed.data.phone || null,
+      serviceRequested: parsed.data.serviceRequested || null,
+      estimatedValue,
+    },
+  });
+  if (result.count === 0) return { error: "Lead not found." };
+
+  revalidatePath(`/dashboard/leads/${leadId}`);
+  revalidatePath("/dashboard/leads");
+  return {};
 }
 
 /**
