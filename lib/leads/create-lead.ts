@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { checkPlanLimit, currentMonthKey } from "@/lib/plans";
 import { AIUnavailableError, generateBusinessReply, qualifyLead } from "@/lib/ai";
 import { notifyBusiness } from "@/lib/notifications";
+import { scheduleNextFollowUp } from "@/lib/follow-ups/schedule";
 
 export interface CreateLeadInput {
   firstName: string;
@@ -101,8 +102,17 @@ export async function createLead(
     });
   }
 
-  if (business.aiEnabled) {
+  const followUpSettings = await prisma.followUpSettings.findUnique({ where: { businessId: business.id } });
+  const immediateResponseEnabled = followUpSettings ? followUpSettings.immediateResponse : true;
+
+  if (business.aiEnabled && immediateResponseEnabled) {
     await runInitialAiPipeline(business, lead.id, conversation.id, usage.aiMessagesCount, plan);
+  }
+
+  try {
+    await scheduleNextFollowUp(business, lead, 1);
+  } catch (err) {
+    console.error("[leads] failed to schedule initial follow-up", err);
   }
 
   return { ok: true, leadId: lead.id };

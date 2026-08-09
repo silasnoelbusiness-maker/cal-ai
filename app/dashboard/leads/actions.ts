@@ -130,3 +130,23 @@ export async function createTestLeadAction() {
   revalidatePath("/dashboard/leads");
   return result;
 }
+
+/**
+ * Toggles a lead's opt-out flag (Section 68 SMS/email compliance). Opted-out
+ * leads are excluded from all follow-up automation.
+ */
+export async function toggleLeadOptOutAction(leadId: string, optedOut: boolean) {
+  const { business } = await requireBusiness();
+  await prisma.lead.updateMany({ where: { id: leadId, businessId: business.id }, data: { optedOut } });
+  await prisma.leadEvent.create({
+    data: {
+      leadId,
+      businessId: business.id,
+      type: "STATUS_CHANGED",
+      description: optedOut
+        ? "Lead marked as opted out — automated follow-ups stopped."
+        : "Lead opt-out removed — automated follow-ups re-enabled.",
+    },
+  });
+  revalidatePath(`/dashboard/leads/${leadId}`);
+}

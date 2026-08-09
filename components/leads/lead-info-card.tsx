@@ -1,6 +1,7 @@
 import { Mail, Phone, MapPin, Wrench, Tag, DollarSign, MessageSquareText } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { OptOutToggle } from "@/components/leads/opt-out-toggle";
 import { formatCurrency, formatDate, unknownOr } from "@/lib/utils";
 import type { Lead } from "@prisma/client";
 
@@ -54,7 +55,7 @@ export function LeadInfoCard({ lead }: { lead: Lead }) {
           <Badge variant={lead.emailConsent ? "success" : "outline"}>
             Email consent {lead.emailConsent ? "granted" : "not on file"}
           </Badge>
-          {lead.optedOut && <Badge variant="danger">Opted out</Badge>}
+          <OptOutToggle leadId={lead.id} optedOut={lead.optedOut} />
         </div>
       </CardContent>
     </Card>
