@@ -1,4 +1,8 @@
-import "server-only";
+// Note: intentionally no `import "server-only"` here — this module is also
+// imported by prisma/seed.ts, which runs as a plain Node script outside
+// Next.js's server-component bundling, where the server-only guard throws
+// unconditionally. It's still only ever called from server actions, route
+// handlers, and this seed script.
 import { prisma } from "@/lib/db/prisma";
 import { currentMonthKey } from "@/lib/plans";
 
