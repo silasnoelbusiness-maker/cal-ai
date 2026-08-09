@@ -55,33 +55,33 @@ model BusinessMember {
 // ---------------------------------------------------------------------------
 
 model Business {
-  id         String  @id @default(uuid()) @db.Uuid
-  ownerId    String  @map("owner_id") @db.Uuid
-  name       String
-  industry   String?
-  website    String?
-  phone      String?
-  email      String?
-  serviceArea String? @map("service_area")
+  id            String  @id @default(uuid()) @db.Uuid
+  ownerId       String  @map("owner_id") @db.Uuid
+  name          String
+  industry      String?
+  website       String?
+  phone         String?
+  email         String?
+  serviceArea   String? @map("service_area")
   /// Free-form weekly hours, e.g. {"mon":"8:00-18:00", ...}
   businessHours Json?   @map("business_hours")
   timezone      String  @default("America/Chicago")
   aiEnabled     Boolean @default(true) @map("ai_enabled")
 
   // --- AI / assistant configuration (Section 19/20) ---
-  aiDescription        String? @map("ai_description") @db.Text
-  aiServices           String? @map("ai_services") @db.Text
-  aiTypicalCustomer    String? @map("ai_typical_customer") @db.Text
-  aiTone               String  @default("professional") @map("ai_tone")
-  aiBookingUrl         String? @map("ai_booking_url")
+  aiDescription           String? @map("ai_description") @db.Text
+  aiServices              String? @map("ai_services") @db.Text
+  aiTypicalCustomer       String? @map("ai_typical_customer") @db.Text
+  aiTone                  String  @default("professional") @map("ai_tone")
+  aiBookingUrl            String? @map("ai_booking_url")
   aiEmergencyInstructions String? @map("ai_emergency_instructions") @db.Text
-  aiPricingInfo        String? @map("ai_pricing_info") @db.Text
-  aiFaqs               Json?   @map("ai_faqs")
-  aiCustomInstructions String? @map("ai_custom_instructions") @db.Text
+  aiPricingInfo           String? @map("ai_pricing_info") @db.Text
+  aiFaqs                  Json?   @map("ai_faqs")
+  aiCustomInstructions    String? @map("ai_custom_instructions") @db.Text
 
-  onboardingCompleted Boolean  @default(false) @map("onboarding_completed")
-  onboardingStep      Int      @default(0) @map("onboarding_step")
-  isDemo              Boolean  @default(false) @map("is_demo")
+  onboardingCompleted Boolean @default(false) @map("onboarding_completed")
+  onboardingStep      Int     @default(0) @map("onboarding_step")
+  isDemo              Boolean @default(false) @map("is_demo")
 
   leadloopApiSecretHash String? @map("leadloop_api_secret_hash")
 
@@ -91,15 +91,15 @@ model Business {
   owner   User             @relation("BusinessOwner", fields: [ownerId], references: [id])
   members BusinessMember[]
 
-  leads              Lead[]
-  conversations      Conversation[]
-  appointments       Appointment[]
-  followUps          FollowUp[]
-  subscription       Subscription?
-  usageRecords       Usage[]
-  apiKeys            ApiKey[]
-  notifications      Notification[]
-  followUpSettings   FollowUpSettings?
+  leads                Lead[]
+  conversations        Conversation[]
+  appointments         Appointment[]
+  followUps            FollowUp[]
+  subscription         Subscription?
+  usageRecords         Usage[]
+  apiKeys              ApiKey[]
+  notifications        Notification[]
+  followUpSettings     FollowUpSettings?
   notificationSettings NotificationSettings?
 
   @@map("businesses")
@@ -130,12 +130,12 @@ model Lead {
   businessId String @map("business_id") @db.Uuid
 
   firstName        String  @map("first_name")
-  lastName          String? @map("last_name")
-  email             String?
-  phone             String?
-  source            String  @default("manual")
-  serviceRequested  String? @map("service_requested")
-  message           String? @db.Text
+  lastName         String? @map("last_name")
+  email            String?
+  phone            String?
+  source           String  @default("manual")
+  serviceRequested String? @map("service_requested")
+  message          String? @db.Text
 
   status      LeadStatus      @default(NEW)
   temperature LeadTemperature @default(COLD)
@@ -143,15 +143,15 @@ model Lead {
   estimatedValue Decimal? @map("estimated_value") @db.Decimal(10, 2)
 
   // AI qualification (Section 16) — never fabricated, null = unknown
-  qualificationScore Int?    @map("qualification_score")
-  aiIntent           String? @map("ai_intent")
-  aiUrgency          String? @map("ai_urgency")
-  aiLocation         String? @map("ai_location")
-  aiBudget           String? @map("ai_budget")
-  aiAvailability     String? @map("ai_availability")
-  aiSummary          String? @map("ai_summary") @db.Text
+  qualificationScore  Int?    @map("qualification_score")
+  aiIntent            String? @map("ai_intent")
+  aiUrgency           String? @map("ai_urgency")
+  aiLocation          String? @map("ai_location")
+  aiBudget            String? @map("ai_budget")
+  aiAvailability      String? @map("ai_availability")
+  aiSummary           String? @map("ai_summary") @db.Text
   aiRecommendedAction String? @map("ai_recommended_action") @db.Text
-  needsHuman         Boolean @default(false) @map("needs_human")
+  needsHuman          Boolean @default(false) @map("needs_human")
 
   // SMS/email compliance (Section 68)
   smsConsent   Boolean @default(false) @map("sms_consent")
@@ -171,6 +171,7 @@ model Lead {
   appointments  Appointment[]
   followUps     FollowUp[]
   events        LeadEvent[]
+  notifications Notification[]
 
   @@index([businessId, status])
   @@index([businessId, temperature])
@@ -180,13 +181,13 @@ model Lead {
 
 /// Lightweight audit/timeline entry shown on the lead detail page.
 model LeadEvent {
-  id         String   @id @default(uuid()) @db.Uuid
-  leadId     String   @map("lead_id") @db.Uuid
-  businessId String   @map("business_id") @db.Uuid
-  type       String
-  description String  @db.Text
-  meta       Json?
-  createdAt  DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid()) @db.Uuid
+  leadId      String   @map("lead_id") @db.Uuid
+  businessId  String   @map("business_id") @db.Uuid
+  type        String
+  description String   @db.Text
+  meta        Json?
+  createdAt   DateTime @default(now()) @map("created_at")
 
   lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
@@ -238,12 +239,12 @@ enum MessageSender {
 }
 
 model Message {
-  id             String   @id @default(uuid()) @db.Uuid
-  conversationId String   @map("conversation_id") @db.Uuid
+  id             String        @id @default(uuid()) @db.Uuid
+  conversationId String        @map("conversation_id") @db.Uuid
   sender         MessageSender
-  content        String   @db.Text
-  aiGenerated    Boolean  @default(false) @map("ai_generated")
-  createdAt      DateTime @default(now()) @map("created_at")
+  content        String        @db.Text
+  aiGenerated    Boolean       @default(false) @map("ai_generated")
+  createdAt      DateTime      @default(now()) @map("created_at")
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
@@ -323,13 +324,13 @@ model FollowUp {
 model FollowUpSettings {
   businessId String @id @map("business_id") @db.Uuid
 
-  enabled              Boolean         @default(true)
-  immediateResponse    Boolean         @default(true) @map("immediate_response")
-  delay30MinEnabled    Boolean         @default(true) @map("delay_30_min_enabled")
-  delay24HourEnabled   Boolean         @default(true) @map("delay_24_hour_enabled")
-  delay3DayEnabled     Boolean         @default(true) @map("delay_3_day_enabled")
-  maxFollowUps         Int             @default(4) @map("max_follow_ups")
-  defaultChannel       FollowUpChannel @default(EMAIL) @map("default_channel")
+  enabled            Boolean         @default(true)
+  immediateResponse  Boolean         @default(true) @map("immediate_response")
+  delay30MinEnabled  Boolean         @default(true) @map("delay_30_min_enabled")
+  delay24HourEnabled Boolean         @default(true) @map("delay_24_hour_enabled")
+  delay3DayEnabled   Boolean         @default(true) @map("delay_3_day_enabled")
+  maxFollowUps       Int             @default(4) @map("max_follow_ups")
+  defaultChannel     FollowUpChannel @default(EMAIL) @map("default_channel")
 
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -403,7 +404,9 @@ model ApiKey {
   /// Non-secret prefix shown in the UI, e.g. "ll_live_ab12"
   keyPrefix  String    @map("key_prefix")
   /// SHA-256 hash of the full secret key — the plaintext is never stored.
-  hashedKey  String    @map("hashed_key")
+  /// Unique so every authenticated API request resolves via an index
+  /// lookup instead of a full table scan.
+  hashedKey  String    @unique @map("hashed_key")
   lastUsedAt DateTime? @map("last_used_at")
   revokedAt  DateTime? @map("revoked_at")
   createdAt  DateTime  @default(now()) @map("created_at")
@@ -438,6 +441,7 @@ model Notification {
   createdAt  DateTime         @default(now()) @map("created_at")
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  lead     Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
 
   @@index([businessId, read, createdAt])
   @@map("notifications")
@@ -450,10 +454,10 @@ model NotificationSettings {
   smsEnabled   Boolean @default(false) @map("sms_enabled")
 
   onNewLead           Boolean @default(true) @map("on_new_lead")
-  onHotLead            Boolean @default(true) @map("on_hot_lead")
-  onQualifiedLead       Boolean @default(true) @map("on_qualified_lead")
-  onAppointmentBooked   Boolean @default(true) @map("on_appointment_booked")
-  onNeedsHuman          Boolean @default(true) @map("on_needs_human")
+  onHotLead           Boolean @default(true) @map("on_hot_lead")
+  onQualifiedLead     Boolean @default(true) @map("on_qualified_lead")
+  onAppointmentBooked Boolean @default(true) @map("on_appointment_booked")
+  onNeedsHuman        Boolean @default(true) @map("on_needs_human")
 
   updatedAt DateTime @updatedAt @map("updated_at")
 

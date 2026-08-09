@@ -126,32 +126,42 @@ async function runInitialAiPipeline(
   plan: Parameters<typeof checkPlanLimit>[0]
 ) {
   const month = currentMonthKey();
-  const aiLimitCheck = checkPlanLimit(plan, "aiMessages", { leadsCount: 0, aiMessagesCount: aiMessagesUsed });
-  if (!aiLimitCheck.allowed) return;
+  // Re-checked before each AI call below (not just once up front) — this
+  // pipeline makes up to two AI calls (reply + qualify) per lead, and a
+  // single check against a stale count would let a business exceed its
+  // plan's AI message limit by one call every time it's near the ceiling.
+  let aiMessagesRunningTotal = aiMessagesUsed;
 
   const lead = await prisma.lead.findUnique({ where: { id: leadId } });
   if (!lead) return;
 
-  try {
-    const reply = await generateBusinessReply({
-      business,
-      lead,
-      messages: lead.message ? [{ sender: "CUSTOMER", content: lead.message }] : [],
-    });
+  if (checkPlanLimit(plan, "aiMessages", { leadsCount: 0, aiMessagesCount: aiMessagesRunningTotal }).allowed) {
+    try {
+      const reply = await generateBusinessReply({
+        business,
+        lead,
+        messages: lead.message ? [{ sender: "CUSTOMER", content: lead.message }] : [],
+      });
 
-    await prisma.message.create({
-      data: { conversationId, sender: "AI", content: reply.content, aiGenerated: true },
-    });
-    await prisma.lead.update({
-      where: { id: leadId },
-      data: { status: "CONTACTED", lastContactedAt: new Date() },
-    });
-    await prisma.usage.update({
-      where: { businessId_month: { businessId: business.id, month } },
-      data: { aiMessagesCount: { increment: 1 }, messagesCount: { increment: 1 } },
-    });
-  } catch (err) {
-    if (!(err instanceof AIUnavailableError)) console.error("[leads] AI first response failed", err);
+      await prisma.message.create({
+        data: { conversationId, sender: "AI", content: reply.content, aiGenerated: true },
+      });
+      await prisma.lead.update({
+        where: { id: leadId },
+        data: { status: "CONTACTED", lastContactedAt: new Date() },
+      });
+      await prisma.usage.update({
+        where: { businessId_month: { businessId: business.id, month } },
+        data: { aiMessagesCount: { increment: 1 }, messagesCount: { increment: 1 } },
+      });
+      aiMessagesRunningTotal += 1;
+    } catch (err) {
+      if (!(err instanceof AIUnavailableError)) console.error("[leads] AI first response failed", err);
+    }
+  }
+
+  if (!checkPlanLimit(plan, "aiMessages", { leadsCount: 0, aiMessagesCount: aiMessagesRunningTotal }).allowed) {
+    return;
   }
 
   try {
@@ -184,6 +194,13 @@ async function runInitialAiPipeline(
         type: "AI_QUALIFIED",
         description: `AI qualified this lead as ${qualification.temperature} (score ${qualification.qualification_score}).`,
       },
+    });
+
+    // qualifyLead() is a second, separate AI call in this pipeline — it must
+    // be counted too, or usage tracking under-reports actual AI spend.
+    await prisma.usage.update({
+      where: { businessId_month: { businessId: business.id, month } },
+      data: { aiMessagesCount: { increment: 1 } },
     });
 
     if (qualification.temperature === "HOT") {

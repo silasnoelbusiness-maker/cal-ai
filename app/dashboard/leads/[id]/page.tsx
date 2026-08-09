@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { requireBusiness } from "@/lib/auth/session";
+import { requireBusiness, getCurrentBusiness } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import { LeadHeader } from "@/components/leads/lead-header";
 import { LeadInfoCard } from "@/components/leads/lead-info-card";
@@ -11,8 +11,15 @@ import { ConversationPanel } from "@/components/conversations/conversation-panel
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 
 export async function generateMetadata({ params }: PageProps<"/dashboard/leads/[id]">): Promise<Metadata> {
+  // Scoped by businessId, same as the page body below — metadata generation
+  // runs independently of the page component, so an unscoped lookup here
+  // would leak another business's lead name into the <title> tag even
+  // though the page itself correctly 404s.
+  const business = await getCurrentBusiness();
+  if (!business) return { title: "Lead" };
+
   const { id } = await params;
-  const lead = await prisma.lead.findUnique({ where: { id } });
+  const lead = await prisma.lead.findFirst({ where: { id, businessId: business.id } });
   return { title: lead ? `${lead.firstName} ${lead.lastName || ""}`.trim() : "Lead" };
 }
 

@@ -321,6 +321,9 @@ CREATE UNIQUE INDEX "subscriptions_business_id_key" ON "subscriptions"("business
 CREATE UNIQUE INDEX "usage_business_id_month_key" ON "usage"("business_id", "month");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "api_keys_hashed_key_key" ON "api_keys"("hashed_key");
+
+-- CreateIndex
 CREATE INDEX "api_keys_key_prefix_idx" ON "api_keys"("key_prefix");
 
 -- CreateIndex
@@ -376,6 +379,9 @@ ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_business_id_fkey" FOREIGN KEY ("
 
 -- AddForeignKey
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_business_id_fkey" FOREIGN KEY ("business_id") REFERENCES "businesses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_lead_id_fkey" FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "notification_settings" ADD CONSTRAINT "notification_settings_business_id_fkey" FOREIGN KEY ("business_id") REFERENCES "businesses"("id") ON DELETE CASCADE ON UPDATE CASCADE;

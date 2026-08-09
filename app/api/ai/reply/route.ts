@@ -44,6 +44,16 @@ export async function POST(request: NextRequest) {
       content: m.content,
     }));
     const reply = await generateBusinessReply({ business: auth.business, lead: conversation.lead, messages });
+
+    // Record usage even though this is a "suggest" call that doesn't store a
+    // message yet — a real AI call was made and must count against the
+    // plan's AI message limit, or a business could call this endpoint
+    // without ever hitting its cap.
+    await prisma.usage.update({
+      where: { businessId_month: { businessId: auth.business.id, month } },
+      data: { aiMessagesCount: { increment: 1 } },
+    });
+
     return NextResponse.json({ content: reply.content });
   } catch (err) {
     if (err instanceof AIUnavailableError) return apiError(err.message, 503);
