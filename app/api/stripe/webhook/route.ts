@@ -5,7 +5,8 @@ import { isStripeConfigured } from "@/lib/auth/config";
 import { prisma } from "@/lib/db/prisma";
 import { planFromPriceId } from "@/lib/plans";
 import { notifyBusiness } from "@/lib/notifications";
-import type { Plan, SubscriptionStatus } from "@prisma/client";
+import { mapStripeStatus } from "@/lib/stripe/status";
+import type { Plan } from "@prisma/client";
 
 /**
  * Stripe webhook handler — the ONLY place subscription state is written.
@@ -61,26 +62,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ received: true });
 }
 
-function mapStatus(status: Stripe.Subscription.Status): SubscriptionStatus {
-  switch (status) {
-    case "trialing":
-      return "TRIALING";
-    case "active":
-      return "ACTIVE";
-    case "past_due":
-      return "PAST_DUE";
-    case "canceled":
-    case "incomplete_expired":
-      return "CANCELED";
-    case "incomplete":
-      return "INCOMPLETE";
-    case "unpaid":
-      return "UNPAID";
-    default:
-      return "NONE";
-  }
-}
-
 async function resolveBusinessId(subscription: Stripe.Subscription): Promise<string | null> {
   if (subscription.metadata?.businessId) return subscription.metadata.businessId;
   const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id;
@@ -118,14 +99,14 @@ async function handleSubscriptionUpsert(subscription: Stripe.Subscription) {
       stripeCustomerId: customerId,
       stripeSubscriptionId: subscription.id,
       plan,
-      status: mapStatus(subscription.status),
+      status: mapStripeStatus(subscription.status),
       currentPeriodEnd,
     },
     update: {
       stripeCustomerId: customerId,
       stripeSubscriptionId: subscription.id,
       plan,
-      status: mapStatus(subscription.status),
+      status: mapStripeStatus(subscription.status),
       currentPeriodEnd,
     },
   });
