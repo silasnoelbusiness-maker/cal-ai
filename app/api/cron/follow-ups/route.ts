@@ -5,6 +5,7 @@ import { isLeadEligibleForFollowUp, scheduleNextFollowUp } from "@/lib/follow-up
 import { checkPlanLimit, currentMonthKey, effectivePlan } from "@/lib/plans";
 import { sendEmail } from "@/lib/resend/send-email";
 import { sendSMS } from "@/lib/twilio/send-sms";
+import { safeCompare } from "@/lib/api/timing-safe-equal";
 
 const BATCH_SIZE = 25;
 
@@ -12,9 +13,9 @@ function isAuthorized(request: NextRequest): boolean {
   const secret = process.env.LEADLOOP_API_SECRET;
   if (!secret) return false;
   const header = request.headers.get("authorization");
-  if (header === `Bearer ${secret}`) return true;
+  if (header && safeCompare(header, `Bearer ${secret}`)) return true;
   const query = request.nextUrl.searchParams.get("secret");
-  return query === secret;
+  return Boolean(query) && safeCompare(query!, secret);
 }
 
 /**

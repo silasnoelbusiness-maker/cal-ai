@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { resolveRequestAuth } from "@/lib/api/auth";
-import { apiError, apiNotFound, apiUnauthorized } from "@/lib/api/response";
+import { apiError, apiNotFound, apiRateLimited, apiUnauthorized } from "@/lib/api/response";
+import { rateLimit } from "@/lib/api/rate-limit";
 import type { LeadStatus, LeadTemperature } from "@prisma/client";
 
 const PatchSchema = z.object({
@@ -19,6 +20,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const auth = await resolveRequestAuth(request);
   if (!auth) return apiUnauthorized("Invalid or missing API key.");
 
+  const { allowed, retryAfterMs } = rateLimit(`leads-get:${auth.business.id}`, 120, 60_000);
+  if (!allowed) return apiRateLimited(retryAfterMs);
+
   const { id } = await params;
   const lead = await prisma.lead.findFirst({ where: { id, businessId: auth.business.id } });
   if (!lead) return apiNotFound("Lead not found.");
@@ -29,6 +33,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await resolveRequestAuth(request);
   if (!auth) return apiUnauthorized("Invalid or missing API key.");
+
+  const { allowed, retryAfterMs } = rateLimit(`leads-patch:${auth.business.id}`, 120, 60_000);
+  if (!allowed) return apiRateLimited(retryAfterMs);
 
   const { id } = await params;
   const existing = await prisma.lead.findFirst({ where: { id, businessId: auth.business.id } });
@@ -50,6 +57,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await resolveRequestAuth(request);
   if (!auth) return apiUnauthorized("Invalid or missing API key.");
+
+  const { allowed, retryAfterMs } = rateLimit(`leads-delete:${auth.business.id}`, 60, 60_000);
+  if (!allowed) return apiRateLimited(retryAfterMs);
 
   const { id } = await params;
   const result = await prisma.lead.deleteMany({ where: { id, businessId: auth.business.id } });

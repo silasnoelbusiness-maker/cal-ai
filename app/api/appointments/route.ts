@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { getApiAuthContext } from "@/lib/auth/session";
-import { apiError, apiNotFound, apiUnauthorized } from "@/lib/api/response";
+import { apiError, apiNotFound, apiRateLimited, apiUnauthorized } from "@/lib/api/response";
+import { rateLimit } from "@/lib/api/rate-limit";
 import { notifyBusiness } from "@/lib/notifications";
 
 const CreateSchema = z.object({
@@ -14,6 +15,9 @@ const CreateSchema = z.object({
 export async function GET(request: NextRequest) {
   const auth = await getApiAuthContext();
   if (!auth) return apiUnauthorized();
+
+  const { allowed, retryAfterMs } = rateLimit(`appointments-list:${auth.business.id}`, 120, 60_000);
+  if (!allowed) return apiRateLimited(retryAfterMs);
 
   const page = Math.max(Number(request.nextUrl.searchParams.get("page")) || 1, 1);
   const pageSize = 25;
@@ -35,6 +39,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await getApiAuthContext();
   if (!auth) return apiUnauthorized();
+
+  const { allowed, retryAfterMs } = rateLimit(`appointments-create:${auth.business.id}`, 60, 60_000);
+  if (!allowed) return apiRateLimited(retryAfterMs);
 
   const json = await request.json().catch(() => null);
   const parsed = CreateSchema.safeParse(json);

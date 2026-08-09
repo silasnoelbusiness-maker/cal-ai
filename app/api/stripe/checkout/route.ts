@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { getApiAuthContext } from "@/lib/auth/session";
-import { apiError, apiUnauthorized } from "@/lib/api/response";
+import { apiError, apiRateLimited, apiUnauthorized } from "@/lib/api/response";
+import { rateLimit } from "@/lib/api/rate-limit";
 import { changeSubscriptionPlan, createCheckoutSession, hasBillableSubscription } from "@/lib/stripe/checkout";
 import { BillingUnavailableError } from "@/lib/stripe/client";
 import { prisma } from "@/lib/db/prisma";
@@ -11,6 +12,9 @@ const BodySchema = z.object({ plan: z.enum(["STARTER", "GROWTH", "PRO"]) });
 export async function POST(request: NextRequest) {
   const auth = await getApiAuthContext();
   if (!auth) return apiUnauthorized();
+
+  const { allowed, retryAfterMs } = rateLimit(`stripe-checkout:${auth.business.id}`, 10, 60_000);
+  if (!allowed) return apiRateLimited(retryAfterMs);
 
   const json = await request.json().catch(() => null);
   const parsed = BodySchema.safeParse(json);
