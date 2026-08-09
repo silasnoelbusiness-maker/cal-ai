@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { requireBusiness } from "@/lib/auth/session";
+import { isAnthropicConfigured } from "@/lib/auth/config";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { updateAiSettingsAction } from "../actions";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { ConfigNotice } from "@/components/ui/config-notice";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,6 +34,13 @@ export default async function AiSettingsPage() {
         </CardDescription>
       </CardHeader>
       <CardContent>
+        {!isAnthropicConfigured && (
+          <ConfigNotice
+            className="mb-6"
+            title="AI isn't configured on this deployment"
+            description="Set ANTHROPIC_API_KEY to enable AI qualification and replies. Everything below is still saved and will take effect as soon as it's configured — until then, leads fall back to manual replies."
+          />
+        )}
         <SettingsForm action={updateAiSettingsAction}>
           <div className="space-y-1.5">
             <Label htmlFor="aiDescription">Business description</Label>
