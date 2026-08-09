@@ -1,8 +1,93 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import { prisma } from "@/lib/db/prisma";
 import { requireBusiness } from "@/lib/auth/session";
 import { createLead } from "@/lib/leads/create-lead";
+import type { LeadStatus, LeadTemperature } from "@prisma/client";
+
+export interface LeadFormState {
+  error?: string;
+}
+
+const CreateLeadSchema = z.object({
+  firstName: z.string().trim().min(1, "First name is required."),
+  lastName: z.string().trim().optional(),
+  email: z.union([z.email("Enter a valid email."), z.literal("")]).optional(),
+  phone: z.string().trim().optional(),
+  serviceRequested: z.string().trim().optional(),
+  source: z.string().trim().optional(),
+  message: z.string().trim().optional(),
+  smsConsent: z.boolean().optional(),
+});
+
+export async function createLeadAction(
+  _prevState: LeadFormState,
+  formData: FormData
+): Promise<LeadFormState> {
+  const { business } = await requireBusiness();
+
+  const parsed = CreateLeadSchema.safeParse({
+    firstName: formData.get("firstName") || "",
+    lastName: formData.get("lastName") || "",
+    email: formData.get("email") || "",
+    phone: formData.get("phone") || "",
+    serviceRequested: formData.get("serviceRequested") || "",
+    source: formData.get("source") || "manual",
+    message: formData.get("message") || "",
+    smsConsent: formData.get("smsConsent") === "on",
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0].message };
+  }
+
+  const result = await createLead(business, parsed.data);
+  if (!result.ok) {
+    return { error: result.error };
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/leads");
+  redirect(`/dashboard/leads/${result.leadId}`);
+}
+
+export async function updateLeadStatusAction(leadId: string, status: LeadStatus) {
+  const { business } = await requireBusiness();
+  const data: { status: LeadStatus; convertedAt?: Date } = { status };
+  if (status === "CONVERTED") data.convertedAt = new Date();
+
+  await prisma.lead.updateMany({ where: { id: leadId, businessId: business.id }, data });
+  await prisma.leadEvent.create({
+    data: {
+      leadId,
+      businessId: business.id,
+      type: "STATUS_CHANGED",
+      description: `Status changed to ${status}.`,
+    },
+  });
+
+  revalidatePath("/dashboard/leads");
+  revalidatePath(`/dashboard/leads/${leadId}`);
+  revalidatePath("/dashboard");
+}
+
+export async function updateLeadTemperatureAction(leadId: string, temperature: LeadTemperature) {
+  const { business } = await requireBusiness();
+  await prisma.lead.updateMany({ where: { id: leadId, businessId: business.id }, data: { temperature } });
+  revalidatePath("/dashboard/leads");
+  revalidatePath(`/dashboard/leads/${leadId}`);
+}
+
+export async function deleteLeadAction(leadId: string) {
+  const { business } = await requireBusiness();
+  await prisma.lead.deleteMany({ where: { id: leadId, businessId: business.id } });
+  revalidatePath("/dashboard/leads");
+  revalidatePath("/dashboard");
+  redirect("/dashboard/leads");
+}
 
 const TEST_LEADS = [
   {
