@@ -9,10 +9,27 @@ import { safeCompare } from "@/lib/api/timing-safe-equal";
 
 const BATCH_SIZE = 25;
 
+/**
+ * This route does real work per follow-up (an AI generation call plus an
+ * SMS/email send), up to BATCH_SIZE of them sequentially, so it needs far
+ * more than a serverless platform's default function timeout. 60s is the
+ * highest value valid on every Vercel plan including Hobby; Pro/Enterprise
+ * allow up to 300 if you raise BATCH_SIZE.
+ */
+export const maxDuration = 60;
+
 function isAuthorized(request: NextRequest): boolean {
+  const header = request.headers.get("authorization");
+
+  // Vercel Cron cannot send custom headers — it sends
+  // `Authorization: Bearer $CRON_SECRET` using the CRON_SECRET env var.
+  // Accepting it here means a Vercel deployment doesn't have to duplicate
+  // the same secret under two different names.
+  const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret && header && safeCompare(header, `Bearer ${cronSecret}`)) return true;
+
   const secret = process.env.LEADLOOP_API_SECRET;
   if (!secret) return false;
-  const header = request.headers.get("authorization");
   if (header && safeCompare(header, `Bearer ${secret}`)) return true;
   const query = request.nextUrl.searchParams.get("secret");
   return Boolean(query) && safeCompare(query!, secret);
@@ -20,9 +37,10 @@ function isAuthorized(request: NextRequest): boolean {
 
 /**
  * Processes due follow-ups (Section 26/59/67). Trigger this on a schedule —
- * e.g. a Vercel Cron job or any external scheduler — pointed at this route
- * with `Authorization: Bearer $LEADLOOP_API_SECRET`. Every step re-verifies
- * the lead is still eligible before sending anything.
+ * a Vercel Cron job (see vercel.json; authenticates via CRON_SECRET) or any
+ * external scheduler pointed at this route with
+ * `Authorization: Bearer $LEADLOOP_API_SECRET`. Every step re-verifies the
+ * lead is still eligible before sending anything.
  */
 export async function POST(request: NextRequest) {
   return handle(request);
