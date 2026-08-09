@@ -424,6 +424,7 @@ enum NotificationType {
   QUALIFIED_LEAD
   APPOINTMENT_BOOKED
   NEEDS_HUMAN
+  PAYMENT_FAILED
 }
 
 model Notification {

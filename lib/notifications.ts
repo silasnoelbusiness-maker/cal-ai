@@ -63,6 +63,9 @@ function isEventEnabled(
       return settings.onAppointmentBooked;
     case "NEEDS_HUMAN":
       return settings.onNeedsHuman;
+    case "PAYMENT_FAILED":
+      // Billing issues are always surfaced regardless of preference.
+      return true;
     default:
       return true;
   }
