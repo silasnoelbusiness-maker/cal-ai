@@ -1,0 +1,462 @@
+// LeadLoop database schema
+// Postgres + Prisma. Every business-scoped table carries a businessId used
+// for server-side authorization — never trust a client-supplied businessId.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth / accounts
+// ---------------------------------------------------------------------------
+
+/// Mirrors the Supabase Auth user (id matches auth.users.id). Created via a
+/// trigger/callback on first sign-in.
+model User {
+  id        String   @id @db.Uuid
+  email     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  ownedBusinesses Business[]       @relation("BusinessOwner")
+  memberships     BusinessMember[]
+
+  @@map("users")
+}
+
+enum BusinessRole {
+  OWNER
+  MEMBER
+}
+
+/// Join table between users and businesses. Every business has exactly one
+/// OWNER row (the creator) plus optional MEMBER rows, capped by plan limits.
+model BusinessMember {
+  id         String       @id @default(uuid()) @db.Uuid
+  businessId String       @map("business_id") @db.Uuid
+  userId     String       @map("user_id") @db.Uuid
+  role       BusinessRole @default(MEMBER)
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+  @@map("business_members")
+}
+
+// ---------------------------------------------------------------------------
+// Business
+// ---------------------------------------------------------------------------
+
+model Business {
+  id         String  @id @default(uuid()) @db.Uuid
+  ownerId    String  @map("owner_id") @db.Uuid
+  name       String
+  industry   String?
+  website    String?
+  phone      String?
+  email      String?
+  serviceArea String? @map("service_area")
+  /// Free-form weekly hours, e.g. {"mon":"8:00-18:00", ...}
+  businessHours Json?   @map("business_hours")
+  timezone      String  @default("America/Chicago")
+  aiEnabled     Boolean @default(true) @map("ai_enabled")
+
+  // --- AI / assistant configuration (Section 19/20) ---
+  aiDescription        String? @map("ai_description") @db.Text
+  aiServices           String? @map("ai_services") @db.Text
+  aiTypicalCustomer    String? @map("ai_typical_customer") @db.Text
+  aiTone               String  @default("professional") @map("ai_tone")
+  aiBookingUrl         String? @map("ai_booking_url")
+  aiEmergencyInstructions String? @map("ai_emergency_instructions") @db.Text
+  aiPricingInfo        String? @map("ai_pricing_info") @db.Text
+  aiFaqs               Json?   @map("ai_faqs")
+  aiCustomInstructions String? @map("ai_custom_instructions") @db.Text
+
+  onboardingCompleted Boolean  @default(false) @map("onboarding_completed")
+  onboardingStep      Int      @default(0) @map("onboarding_step")
+  isDemo              Boolean  @default(false) @map("is_demo")
+
+  leadloopApiSecretHash String? @map("leadloop_api_secret_hash")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  owner   User             @relation("BusinessOwner", fields: [ownerId], references: [id])
+  members BusinessMember[]
+
+  leads              Lead[]
+  conversations      Conversation[]
+  appointments       Appointment[]
+  followUps          FollowUp[]
+  subscription       Subscription?
+  usageRecords       Usage[]
+  apiKeys            ApiKey[]
+  notifications      Notification[]
+  followUpSettings   FollowUpSettings?
+  notificationSettings NotificationSettings?
+
+  @@map("businesses")
+}
+
+// ---------------------------------------------------------------------------
+// Leads
+// ---------------------------------------------------------------------------
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  APPOINTMENT
+  CONVERTED
+  LOST
+  CLOSED
+}
+
+enum LeadTemperature {
+  HOT
+  WARM
+  COLD
+}
+
+model Lead {
+  id         String @id @default(uuid()) @db.Uuid
+  businessId String @map("business_id") @db.Uuid
+
+  firstName        String  @map("first_name")
+  lastName          String? @map("last_name")
+  email             String?
+  phone             String?
+  source            String  @default("manual")
+  serviceRequested  String? @map("service_requested")
+  message           String? @db.Text
+
+  status      LeadStatus      @default(NEW)
+  temperature LeadTemperature @default(COLD)
+
+  estimatedValue Decimal? @map("estimated_value") @db.Decimal(10, 2)
+
+  // AI qualification (Section 16) — never fabricated, null = unknown
+  qualificationScore Int?    @map("qualification_score")
+  aiIntent           String? @map("ai_intent")
+  aiUrgency          String? @map("ai_urgency")
+  aiLocation         String? @map("ai_location")
+  aiBudget           String? @map("ai_budget")
+  aiAvailability     String? @map("ai_availability")
+  aiSummary          String? @map("ai_summary") @db.Text
+  aiRecommendedAction String? @map("ai_recommended_action") @db.Text
+  needsHuman         Boolean @default(false) @map("needs_human")
+
+  // SMS/email compliance (Section 68)
+  smsConsent   Boolean @default(false) @map("sms_consent")
+  emailConsent Boolean @default(true) @map("email_consent")
+  optedOut     Boolean @default(false) @map("opted_out")
+
+  isDemo Boolean @default(false) @map("is_demo")
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  lastContactedAt DateTime? @map("last_contacted_at")
+  nextFollowUpAt  DateTime? @map("next_follow_up_at")
+  convertedAt     DateTime? @map("converted_at")
+
+  business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  appointments  Appointment[]
+  followUps     FollowUp[]
+  events        LeadEvent[]
+
+  @@index([businessId, status])
+  @@index([businessId, temperature])
+  @@index([businessId, createdAt])
+  @@map("leads")
+}
+
+/// Lightweight audit/timeline entry shown on the lead detail page.
+model LeadEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  leadId     String   @map("lead_id") @db.Uuid
+  businessId String   @map("business_id") @db.Uuid
+  type       String
+  description String  @db.Text
+  meta       Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@map("lead_events")
+}
+
+// ---------------------------------------------------------------------------
+// Conversations / messages
+// ---------------------------------------------------------------------------
+
+enum ConversationChannel {
+  WEB
+  SMS
+  EMAIL
+  PHONE
+}
+
+enum ConversationStatus {
+  OPEN
+  CLOSED
+}
+
+model Conversation {
+  id         String @id @default(uuid()) @db.Uuid
+  leadId     String @map("lead_id") @db.Uuid
+  businessId String @map("business_id") @db.Uuid
+
+  channel    ConversationChannel @default(WEB)
+  status     ConversationStatus  @default(OPEN)
+  needsHuman Boolean             @default(false) @map("needs_human")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  lead     Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([businessId, updatedAt])
+  @@map("conversations")
+}
+
+enum MessageSender {
+  CUSTOMER
+  AI
+  BUSINESS
+  SYSTEM
+}
+
+model Message {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  sender         MessageSender
+  content        String   @db.Text
+  aiGenerated    Boolean  @default(false) @map("ai_generated")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// ---------------------------------------------------------------------------
+// Appointments
+// ---------------------------------------------------------------------------
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+model Appointment {
+  id         String @id @default(uuid()) @db.Uuid
+  businessId String @map("business_id") @db.Uuid
+  leadId     String @map("lead_id") @db.Uuid
+
+  scheduledAt DateTime          @map("scheduled_at")
+  status      AppointmentStatus @default(PENDING)
+  notes       String?           @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  lead     Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, scheduledAt])
+  @@map("appointments")
+}
+
+// ---------------------------------------------------------------------------
+// Follow-ups
+// ---------------------------------------------------------------------------
+
+enum FollowUpChannel {
+  SMS
+  EMAIL
+}
+
+enum FollowUpStatus {
+  PENDING
+  SENT
+  CANCELLED
+  FAILED
+  SKIPPED
+}
+
+model FollowUp {
+  id         String @id @default(uuid()) @db.Uuid
+  businessId String @map("business_id") @db.Uuid
+  leadId     String @map("lead_id") @db.Uuid
+
+  scheduledFor DateTime        @map("scheduled_for")
+  channel      FollowUpChannel @default(EMAIL)
+  status       FollowUpStatus  @default(PENDING)
+  message      String?         @db.Text
+  stepIndex    Int             @default(0) @map("step_index")
+  sentAt       DateTime?       @map("sent_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  lead     Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledFor])
+  @@index([businessId, leadId])
+  @@map("follow_ups")
+}
+
+model FollowUpSettings {
+  businessId String @id @map("business_id") @db.Uuid
+
+  enabled              Boolean         @default(true)
+  immediateResponse    Boolean         @default(true) @map("immediate_response")
+  delay30MinEnabled    Boolean         @default(true) @map("delay_30_min_enabled")
+  delay24HourEnabled   Boolean         @default(true) @map("delay_24_hour_enabled")
+  delay3DayEnabled     Boolean         @default(true) @map("delay_3_day_enabled")
+  maxFollowUps         Int             @default(4) @map("max_follow_ups")
+  defaultChannel       FollowUpChannel @default(EMAIL) @map("default_channel")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@map("follow_up_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Billing
+// ---------------------------------------------------------------------------
+
+enum Plan {
+  STARTER
+  GROWTH
+  PRO
+}
+
+enum SubscriptionStatus {
+  NONE
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+  UNPAID
+}
+
+model Subscription {
+  id                   String             @id @default(uuid()) @db.Uuid
+  businessId           String             @unique @map("business_id") @db.Uuid
+  stripeCustomerId     String?            @map("stripe_customer_id")
+  stripeSubscriptionId String?            @map("stripe_subscription_id")
+  plan                 Plan               @default(STARTER)
+  status               SubscriptionStatus @default(NONE)
+  currentPeriodEnd     DateTime?          @map("current_period_end")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+model Usage {
+  id         String @id @default(uuid()) @db.Uuid
+  businessId String @map("business_id") @db.Uuid
+  /// "YYYY-MM"
+  month      String
+
+  leadsCount        Int @default(0) @map("leads_count")
+  messagesCount     Int @default(0) @map("messages_count")
+  aiMessagesCount   Int @default(0) @map("ai_messages_count")
+  appointmentsCount Int @default(0) @map("appointments_count")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, month])
+  @@map("usage")
+}
+
+// ---------------------------------------------------------------------------
+// API keys (Section 29/31)
+// ---------------------------------------------------------------------------
+
+model ApiKey {
+  id         String    @id @default(uuid()) @db.Uuid
+  businessId String    @map("business_id") @db.Uuid
+  name       String
+  /// Non-secret prefix shown in the UI, e.g. "ll_live_ab12"
+  keyPrefix  String    @map("key_prefix")
+  /// SHA-256 hash of the full secret key — the plaintext is never stored.
+  hashedKey  String    @map("hashed_key")
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([keyPrefix])
+  @@map("api_keys")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+enum NotificationType {
+  NEW_LEAD
+  HOT_LEAD
+  QUALIFIED_LEAD
+  APPOINTMENT_BOOKED
+  NEEDS_HUMAN
+}
+
+model Notification {
+  id         String           @id @default(uuid()) @db.Uuid
+  businessId String           @map("business_id") @db.Uuid
+  type       NotificationType
+  title      String
+  body       String           @db.Text
+  leadId     String?          @map("lead_id") @db.Uuid
+  read       Boolean          @default(false)
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, read, createdAt])
+  @@map("notifications")
+}
+
+model NotificationSettings {
+  businessId String @id @map("business_id") @db.Uuid
+
+  emailEnabled Boolean @default(true) @map("email_enabled")
+  smsEnabled   Boolean @default(false) @map("sms_enabled")
+
+  onNewLead           Boolean @default(true) @map("on_new_lead")
+  onHotLead            Boolean @default(true) @map("on_hot_lead")
+  onQualifiedLead       Boolean @default(true) @map("on_qualified_lead")
+  onAppointmentBooked   Boolean @default(true) @map("on_appointment_booked")
+  onNeedsHuman          Boolean @default(true) @map("on_needs_human")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@map("notification_settings")
+}
