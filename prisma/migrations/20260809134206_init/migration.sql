@@ -35,7 +35,7 @@ CREATE TYPE "Plan" AS ENUM ('STARTER', 'GROWTH', 'PRO');
 CREATE TYPE "SubscriptionStatus" AS ENUM ('NONE', 'TRIALING', 'ACTIVE', 'PAST_DUE', 'CANCELED', 'INCOMPLETE', 'UNPAID');
 
 -- CreateEnum
-CREATE TYPE "NotificationType" AS ENUM ('NEW_LEAD', 'HOT_LEAD', 'QUALIFIED_LEAD', 'APPOINTMENT_BOOKED', 'NEEDS_HUMAN', 'PAYMENT_FAILED');
+CREATE TYPE "NotificationType" AS ENUM ('NEW_LEAD', 'HOT_LEAD', 'QUALIFIED_LEAD', 'APPOINTMENT_BOOKED', 'NEEDS_HUMAN', 'PAYMENT_FAILED', 'NEW_MESSAGE');
 
 -- CreateTable
 CREATE TABLE "users" (
@@ -84,6 +84,7 @@ CREATE TABLE "businesses" (
     "onboarding_step" INTEGER NOT NULL DEFAULT 0,
     "is_demo" BOOLEAN NOT NULL DEFAULT false,
     "leadloop_api_secret_hash" TEXT,
+    "twilio_phone_number" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -286,6 +287,9 @@ CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "business_members_business_id_user_id_key" ON "business_members"("business_id", "user_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "businesses_twilio_phone_number_key" ON "businesses"("twilio_phone_number");
 
 -- CreateIndex
 CREATE INDEX "leads_business_id_status_idx" ON "leads"("business_id", "status");

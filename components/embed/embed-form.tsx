@@ -86,7 +86,7 @@ export function EmbedForm({ businessId, businessName }: { businessId: string; bu
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="service">Service needed</Label>
-        <Input id="service" name="service" placeholder="AC Repair" />
+        <Input id="service" name="service" placeholder="What service do you need?" />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="message">Message</Label>

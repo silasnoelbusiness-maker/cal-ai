@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import Link from "next/link";
-import { Bell, Flame, Calendar, UserPlus, ShieldAlert, CheckCircle2, CreditCard } from "lucide-react";
+import { Bell, Flame, Calendar, UserPlus, ShieldAlert, CheckCircle2, CreditCard, MessageSquare } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +33,7 @@ const ICONS: Record<NotificationType, typeof Bell> = {
   APPOINTMENT_BOOKED: Calendar,
   NEEDS_HUMAN: ShieldAlert,
   PAYMENT_FAILED: CreditCard,
+  NEW_MESSAGE: MessageSquare,
 };
 
 export function NotificationBell({ notifications }: { notifications: NotificationItem[] }) {

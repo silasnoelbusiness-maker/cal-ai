@@ -154,3 +154,37 @@ export async function updateNotificationSettingsAction(
   revalidatePath("/dashboard/settings/notifications");
   return { success: "Notification preferences saved." };
 }
+
+const SmsSettingsSchema = z.object({
+  twilioPhoneNumber: z.union([
+    z.string().trim().regex(/^\+[1-9]\d{6,14}$/, "Enter the number in E.164 format, e.g. +15125550100."),
+    z.literal(""),
+  ]),
+});
+
+export async function updateSmsSettingsAction(
+  _prevState: SettingsFormState,
+  formData: FormData
+): Promise<SettingsFormState> {
+  const { business } = await requireBusiness();
+
+  const parsed = SmsSettingsSchema.safeParse({
+    twilioPhoneNumber: formData.get("twilioPhoneNumber") || "",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  try {
+    await prisma.business.update({
+      where: { id: business.id },
+      data: { twilioPhoneNumber: parsed.data.twilioPhoneNumber || null },
+    });
+  } catch (err) {
+    if (err instanceof Error && "code" in err && (err as { code?: string }).code === "P2002") {
+      return { error: "That number is already configured on another LeadLoop account." };
+    }
+    throw err;
+  }
+
+  revalidatePath("/dashboard/settings/integrations");
+  return { success: "SMS number saved." };
+}

@@ -111,7 +111,7 @@ async function handle(request: NextRequest) {
       });
 
       if (followUp.channel === "SMS" && lead.phone && lead.smsConsent) {
-        await sendSMS({ to: lead.phone, body: followUpMessage.content });
+        await sendSMS({ to: lead.phone, body: followUpMessage.content, from: business.twilioPhoneNumber });
       } else if (followUp.channel === "EMAIL" && lead.email && lead.emailConsent) {
         await sendEmail({ to: lead.email, subject: `Following up — ${business.name}`, text: followUpMessage.content });
       }

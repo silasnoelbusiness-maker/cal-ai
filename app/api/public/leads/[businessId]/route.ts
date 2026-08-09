@@ -17,7 +17,17 @@ const BodySchema = z.object({
 });
 
 function clientIp(request: NextRequest): string {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  // Most hosts (Vercel, Cloudflare, etc.) set one of these. Without a proxy
+  // that sets any of them, every anonymous visitor falls into the same
+  // "unknown" bucket and the per-IP limit degrades to one shared global
+  // limit — fine as a fail-safe, but confirm your host forwards one of
+  // these headers before relying on per-visitor limiting in production.
+  return (
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip")?.trim() ||
+    request.headers.get("cf-connecting-ip")?.trim() ||
+    "unknown"
+  );
 }
 
 /**

@@ -73,7 +73,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   // Best-effort outbound delivery — never fails the request if it doesn't go through.
   if (conversation.channel === "SMS" && conversation.lead.phone && conversation.lead.smsConsent) {
-    await sendSMS({ to: conversation.lead.phone, body: parsed.data.content });
+    await sendSMS({ to: conversation.lead.phone, body: parsed.data.content, from: auth.business.twilioPhoneNumber });
   } else if (conversation.channel === "EMAIL" && conversation.lead.email && conversation.lead.emailConsent) {
     await sendEmail({ to: conversation.lead.email, subject: "New message", text: parsed.data.content });
   }

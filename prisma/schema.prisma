@@ -85,6 +85,14 @@ model Business {
 
   leadloopApiSecretHash String? @map("leadloop_api_secret_hash")
 
+  /// Dedicated Twilio number for this business, in E.164 format (e.g.
+  /// +15125550100). Used to route inbound SMS webhooks to the right
+  /// business and, when set, as the "from" number for outbound SMS sent to
+  /// this business's leads. Optional — a business can also just rely on the
+  /// platform-wide TWILIO_PHONE_NUMBER for outbound-only use, but inbound
+  /// replies can only be routed unambiguously when this is configured.
+  twilioPhoneNumber String? @unique @map("twilio_phone_number")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -428,6 +436,7 @@ enum NotificationType {
   APPOINTMENT_BOOKED
   NEEDS_HUMAN
   PAYMENT_FAILED
+  NEW_MESSAGE
 }
 
 model Notification {

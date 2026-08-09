@@ -66,6 +66,10 @@ function isEventEnabled(
     case "PAYMENT_FAILED":
       // Billing issues are always surfaced regardless of preference.
       return true;
+    case "NEW_MESSAGE":
+      // No dedicated per-event toggle for inbound replies yet — always
+      // notify, same as the fallback below. (V1.1: add onNewMessage.)
+      return true;
     default:
       return true;
   }

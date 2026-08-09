@@ -14,6 +14,12 @@ function getClient() {
 export interface SendSmsParams {
   to: string;
   body: string;
+  /**
+   * Send from a specific number (e.g. a business's own dedicated Twilio
+   * number, so replies route back to the right business). Falls back to
+   * the platform-wide TWILIO_PHONE_NUMBER when omitted.
+   */
+  from?: string | null;
 }
 
 export interface SendSmsResult {
@@ -35,10 +41,16 @@ export async function sendSMS(params: SendSmsParams): Promise<SendSmsResult> {
     };
   }
 
+  const from = params.from || process.env.TWILIO_PHONE_NUMBER;
+  if (!from) {
+    console.warn("[sms] No sending number available (no business number and no TWILIO_PHONE_NUMBER)");
+    return { sent: false, reason: "No Twilio sending number configured." };
+  }
+
   try {
     await getClient().messages.create({
       to: params.to,
-      from: process.env.TWILIO_PHONE_NUMBER,
+      from,
       body: params.body,
     });
     return { sent: true };
