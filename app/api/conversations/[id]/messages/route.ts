@@ -71,12 +71,31 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     update: { messagesCount: { increment: 1 } },
   });
 
-  // Best-effort outbound delivery — never fails the request if it doesn't go through.
+  // Best-effort outbound delivery — never fails the request if it doesn't go
+  // through, but the outcome is reported back so the UI can tell the business
+  // their reply was saved yet not actually delivered (e.g. a trial-limited
+  // Twilio account). Silently returning 201 would let them believe a customer
+  // received a message that never left the building.
+  let delivery: { sent: boolean; reason?: string } = { sent: true };
   if (conversation.channel === "SMS" && conversation.lead.phone && conversation.lead.smsConsent) {
-    await sendSMS({ to: conversation.lead.phone, body: parsed.data.content, from: auth.business.twilioPhoneNumber });
+    delivery = await sendSMS({
+      to: conversation.lead.phone,
+      body: parsed.data.content,
+      from: auth.business.twilioPhoneNumber,
+    });
   } else if (conversation.channel === "EMAIL" && conversation.lead.email && conversation.lead.emailConsent) {
-    await sendEmail({ to: conversation.lead.email, subject: "New message", text: parsed.data.content });
+    delivery = await sendEmail({
+      to: conversation.lead.email,
+      subject: "New message",
+      text: parsed.data.content,
+    });
   }
 
-  return NextResponse.json({ message }, { status: 201 });
+  if (!delivery.sent) {
+    console.warn(
+      `[conversations/messages] ${conversation.channel} delivery failed for conversation ${conversation.id}: ${delivery.reason}`
+    );
+  }
+
+  return NextResponse.json({ message, delivery }, { status: 201 });
 }

@@ -63,6 +63,7 @@ async function handle(request: NextRequest) {
   });
 
   let sent = 0;
+  let failed = 0;
   let skipped = 0;
   let cancelled = 0;
 
@@ -129,37 +130,82 @@ async function handle(request: NextRequest) {
         },
       });
 
+      // Capture the delivery outcome. sendSMS/sendEmail never throw — they
+      // report {sent,reason} — so the result MUST be inspected here. Marking
+      // a follow-up SENT when delivery actually failed (e.g. a trial-limited
+      // Twilio account that can only text verified numbers) would tell the
+      // business a customer was contacted when they were not, which is the
+      // exact failure this product exists to prevent.
+      let delivery: { sent: boolean; reason?: string };
       if (followUp.channel === "SMS" && lead.phone && lead.smsConsent) {
-        await sendSMS({ to: lead.phone, body: followUpMessage.content, from: business.twilioPhoneNumber });
+        delivery = await sendSMS({
+          to: lead.phone,
+          body: followUpMessage.content,
+          from: business.twilioPhoneNumber,
+        });
       } else if (followUp.channel === "EMAIL" && lead.email && lead.emailConsent) {
-        await sendEmail({ to: lead.email, subject: `Following up — ${business.name}`, text: followUpMessage.content });
+        delivery = await sendEmail({
+          to: lead.email,
+          subject: `Following up — ${business.name}`,
+          text: followUpMessage.content,
+        });
+      } else {
+        delivery = {
+          sent: false,
+          reason: `No deliverable ${followUp.channel} contact details, or consent not granted.`,
+        };
+      }
+
+      if (!delivery.sent) {
+        console.warn(
+          `[cron/follow-ups] delivery failed for follow-up ${followUp.id} via ${followUp.channel}: ${delivery.reason}`
+        );
       }
 
       await prisma.$transaction([
         prisma.followUp.update({
           where: { id: followUp.id },
-          data: { status: "SENT", sentAt: new Date(), message: followUpMessage.content },
+          data: {
+            status: delivery.sent ? "SENT" : "FAILED",
+            sentAt: delivery.sent ? new Date() : null,
+            message: followUpMessage.content,
+          },
         }),
-        prisma.lead.update({
-          where: { id: lead.id },
-          data: { lastContactedAt: new Date(), status: lead.status === "NEW" ? "CONTACTED" : lead.status },
-        }),
+        // Only claim the lead was contacted if it actually reached them.
+        ...(delivery.sent
+          ? [
+              prisma.lead.update({
+                where: { id: lead.id },
+                data: {
+                  lastContactedAt: new Date(),
+                  status: lead.status === "NEW" ? "CONTACTED" : lead.status,
+                },
+              }),
+            ]
+          : []),
         prisma.leadEvent.create({
           data: {
             leadId: lead.id,
             businessId: business.id,
-            type: "FOLLOW_UP_SENT",
-            description: `Follow-up #${followUp.stepIndex} sent via ${followUp.channel}.`,
+            type: delivery.sent ? "FOLLOW_UP_SENT" : "FOLLOW_UP_FAILED",
+            description: delivery.sent
+              ? `Follow-up #${followUp.stepIndex} sent via ${followUp.channel}.`
+              : `Follow-up #${followUp.stepIndex} could not be delivered via ${followUp.channel}. ${delivery.reason ?? ""}`.trim(),
           },
         }),
+        // The AI generation really happened and cost money, and the message
+        // row exists either way, so usage is counted regardless of delivery.
         prisma.usage.update({
           where: { businessId_month: { businessId: business.id, month } },
           data: { aiMessagesCount: { increment: 1 }, messagesCount: { increment: 1 } },
         }),
       ]);
 
+      // The next step is still scheduled after a delivery failure so a
+      // transient outage doesn't permanently kill the follow-up chain.
       await scheduleNextFollowUp(business, { ...lead, status: "CONTACTED" }, followUp.stepIndex + 1);
-      sent++;
+      if (delivery.sent) sent++;
+      else failed++;
     } catch (err) {
       if (err instanceof AIUnavailableError) {
         skipped++;
@@ -170,9 +216,11 @@ async function handle(request: NextRequest) {
     }
   }
 
-  if (sent > 0) {
-    console.log(`[cron/follow-ups] sent=${sent} skipped=${skipped} cancelled=${cancelled}`);
+  if (sent > 0 || failed > 0) {
+    console.log(
+      `[cron/follow-ups] sent=${sent} failed=${failed} skipped=${skipped} cancelled=${cancelled}`
+    );
   }
 
-  return NextResponse.json({ processed: due.length, sent, skipped, cancelled });
+  return NextResponse.json({ processed: due.length, sent, failed, skipped, cancelled });
 }

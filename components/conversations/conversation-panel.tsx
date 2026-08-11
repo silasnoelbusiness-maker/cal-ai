@@ -48,6 +48,14 @@ export function ConversationPanel({
         setDraft("");
         scrollToBottom();
         router.refresh();
+
+        // The message is saved either way, but say so plainly when it wasn't
+        // actually delivered — otherwise the business assumes the customer
+        // received it. Deliberately a generic message: never surface raw
+        // provider errors to the user.
+        if (data.delivery && data.delivery.sent === false) {
+          toast.warning("Message saved, but it couldn't be delivered. Check your messaging setup in Settings.");
+        }
       } catch {
         toast.error("Couldn't send message. Check your connection.");
       }

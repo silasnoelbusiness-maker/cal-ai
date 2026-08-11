@@ -1,4 +1,4 @@
-import { Sparkles, UserPlus, ArrowRightLeft, CalendarCheck, MessageCircle, Clock } from "lucide-react";
+import { Sparkles, UserPlus, ArrowRightLeft, CalendarCheck, MessageCircle, MessageCircleOff, Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/utils";
 import type { LeadEvent } from "@prisma/client";
@@ -9,6 +9,7 @@ const ICONS: Record<string, typeof Sparkles> = {
   STATUS_CHANGED: ArrowRightLeft,
   APPOINTMENT_BOOKED: CalendarCheck,
   FOLLOW_UP_SENT: MessageCircle,
+  FOLLOW_UP_FAILED: MessageCircleOff,
 };
 
 export function LeadTimeline({ events }: { events: LeadEvent[] }) {
