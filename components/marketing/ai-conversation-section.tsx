@@ -11,7 +11,7 @@ export function AiConversationSection() {
               A professional first response, every time.
             </h2>
             <p className="mt-4 text-lg text-muted">
-              LeadLoop&apos;s AI assistant asks one useful question at a time, collects the
+              Converana&apos;s AI assistant asks one useful question at a time, collects the
               details your team needs, and flags the lead the moment it&apos;s ready to book —
               without ever inventing prices or pretending to be human.
             </p>
@@ -38,7 +38,7 @@ export function AiConversationSection() {
                   <Sparkles className="h-4 w-4" />
                 </span>
                 <div>
-                  <p className="text-sm font-medium text-foreground">LeadLoop AI</p>
+                  <p className="text-sm font-medium text-foreground">Converana AI</p>
                   <p className="text-xs text-muted">Web chat · PeakFlow HVAC</p>
                 </div>
               </div>

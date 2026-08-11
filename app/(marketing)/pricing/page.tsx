@@ -5,7 +5,7 @@ import { FinalCtaSection } from "@/components/marketing/final-cta-section";
 
 export const metadata: Metadata = {
   title: "Pricing",
-  description: "Simple, transparent pricing for LeadLoop's AI-powered lead recovery platform.",
+  description: "Simple, transparent pricing for Converana's AI-powered lead recovery platform.",
 };
 
 export default function PricingPage() {
@@ -25,7 +25,7 @@ export default function PricingPage() {
       </div>
       <div className="mx-auto max-w-3xl px-4 pb-16 text-center text-sm text-muted sm:px-6">
         Need more leads, users, or AI messages than Pro allows?{" "}
-        <Link href="mailto:hello@leadloop.dev" className="text-brand hover:underline">
+        <Link href="mailto:hello@converana.com" className="text-brand hover:underline">
           Talk to us
         </Link>{" "}
         about a custom plan.

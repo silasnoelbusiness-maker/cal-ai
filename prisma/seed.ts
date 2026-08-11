@@ -1,7 +1,7 @@
 /**
- * Development seed script — creates a demo LeadLoop workspace you can log
+ * Development seed script — creates a demo Converana workspace you can log
  * into locally. Requires Supabase to be configured (it creates a real auth
- * user) since LeadLoop users are Supabase-auth-backed.
+ * user) since Converana users are Supabase-auth-backed.
  *
  * Usage: npm run db:seed
  * Configure DEMO_USER_EMAIL / DEMO_USER_PASSWORD in .env.local first.

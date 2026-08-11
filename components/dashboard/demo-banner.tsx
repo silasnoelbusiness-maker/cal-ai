@@ -11,7 +11,7 @@ export async function DemoBanner({ businessId }: { businessId: string }) {
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning/30 bg-warning-surface px-4 py-2 text-sm sm:px-6">
       <span className="flex items-center gap-2 text-foreground">
         <FlaskConical className="h-4 w-4 text-warning" />
-        You&apos;re viewing sample data so you can explore LeadLoop.
+        You&apos;re viewing sample data so you can explore Converana.
       </span>
       <form action={removeDemoDataAction}>
         <Button type="submit" size="sm" variant="outline">

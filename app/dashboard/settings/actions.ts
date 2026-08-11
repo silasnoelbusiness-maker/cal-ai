@@ -180,7 +180,7 @@ export async function updateSmsSettingsAction(
     });
   } catch (err) {
     if (err instanceof Error && "code" in err && (err as { code?: string }).code === "P2002") {
-      return { error: "That number is already configured on another LeadLoop account." };
+      return { error: "That number is already configured on another Converana account." };
     }
     throw err;
   }

@@ -46,7 +46,7 @@ export function SignupForm() {
         Create account
       </Button>
       <p className="text-center text-xs text-muted">
-        By continuing you agree to LeadLoop&apos;s{" "}
+        By continuing you agree to Converana&apos;s{" "}
         <a href="/terms" className="underline hover:text-foreground">
           Terms
         </a>{" "}

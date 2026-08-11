@@ -44,7 +44,7 @@ export function NewLeadDialog() {
         <DialogHeader>
           <DialogTitle>Add a lead</DialogTitle>
           <DialogDescription>
-            LeadLoop will automatically send an AI first response and qualify this lead.
+            Converana will automatically send an AI first response and qualify this lead.
           </DialogDescription>
         </DialogHeader>
         <form action={formAction} className="space-y-4">

@@ -15,7 +15,7 @@ export function HeroSection() {
             Stop Losing Leads While You&apos;re Busy.
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted">
-            LeadLoop automatically follows up with new and missed leads, qualifies them with AI,
+            Converana automatically follows up with new and missed leads, qualifies them with AI,
             and helps turn more conversations into booked customers.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">

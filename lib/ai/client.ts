@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { isAnthropicConfigured } from "@/lib/auth/config";
 
 /**
- * Default model for all LeadLoop AI features. Override with ANTHROPIC_MODEL
+ * Default model for all Converana AI features. Override with ANTHROPIC_MODEL
  * if needed (e.g. to pin a specific dated snapshot).
  */
 export const AI_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";

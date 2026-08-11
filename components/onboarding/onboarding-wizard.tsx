@@ -71,7 +71,7 @@ export function OnboardingWizard({ business }: { business: Business | null }) {
 
         <div className={cn(step !== 0 && "hidden")}>
           <h2 className="text-lg font-semibold text-foreground">What&apos;s your business called?</h2>
-          <p className="mt-1 text-sm text-muted">This is how LeadLoop will refer to your business.</p>
+          <p className="mt-1 text-sm text-muted">This is how Converana will refer to your business.</p>
           <div className="mt-6 space-y-1.5">
             <Label htmlFor="name">Business name</Label>
             <Input
@@ -88,7 +88,7 @@ export function OnboardingWizard({ business }: { business: Business | null }) {
 
         <div className={cn(step !== 1 && "hidden")}>
           <h2 className="text-lg font-semibold text-foreground">What industry are you in?</h2>
-          <p className="mt-1 text-sm text-muted">This helps LeadLoop tailor AI qualification.</p>
+          <p className="mt-1 text-sm text-muted">This helps Converana tailor AI qualification.</p>
           <input type="hidden" name="industry" value={industry} />
           <div className="mt-6 grid grid-cols-2 gap-2">
             {INDUSTRIES.map((ind) => (
@@ -198,7 +198,7 @@ export function OnboardingWizard({ business }: { business: Business | null }) {
               <div>
                 <p className="text-sm font-medium text-foreground">Lead capture API</p>
                 <p className="text-xs text-muted">
-                  Send leads from any form, CRM, or ad platform using your LeadLoop API key.
+                  Send leads from any form, CRM, or ad platform using your Converana API key.
                 </p>
               </div>
             </div>
@@ -207,12 +207,12 @@ export function OnboardingWizard({ business }: { business: Business | null }) {
 
         <div className={cn(step !== 7 && "hidden")}>
           <h2 className="text-lg font-semibold text-foreground">You&apos;re all set.</h2>
-          <p className="mt-1 text-sm text-muted">Your LeadLoop workspace is ready.</p>
+          <p className="mt-1 text-sm text-muted">Your Converana workspace is ready.</p>
           <div className="mt-6 flex items-start justify-between gap-4 rounded-md border border-border p-4">
             <div>
               <p className="text-sm font-medium text-foreground">Load sample data</p>
               <p className="text-xs text-muted">
-                Explore LeadLoop with a few realistic sample leads, conversations, and an
+                Explore Converana with a few realistic sample leads, conversations, and an
                 appointment. Clearly labeled as demo data — remove anytime from Settings.
               </p>
             </div>

@@ -52,7 +52,7 @@ export default async function FollowUpSettingsPage() {
       <CardHeader>
         <CardTitle>Follow-up automation</CardTitle>
         <CardDescription>
-          Control how and when LeadLoop automatically follows up with leads who go quiet.
+          Control how and when Converana automatically follows up with leads who go quiet.
         </CardDescription>
       </CardHeader>
       <CardContent>

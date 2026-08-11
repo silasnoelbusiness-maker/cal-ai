@@ -53,7 +53,7 @@ export default async function DashboardPage() {
         <EmptyState
           icon={Users}
           title="No leads yet"
-          description="Connect your website form or API, or add a test lead to see how LeadLoop captures, qualifies, and follows up automatically."
+          description="Connect your website form or API, or add a test lead to see how Converana captures, qualifies, and follows up automatically."
           action={<AddTestLeadButton />}
         />
       </div>

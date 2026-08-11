@@ -42,7 +42,7 @@ export default async function IntegrationsPage() {
           <CardTitle>Embeddable lead form</CardTitle>
           <CardDescription>
             Paste this snippet into your website&apos;s HTML — no coding required. It shows a
-            simple form that sends new leads straight into LeadLoop.
+            simple form that sends new leads straight into Converana.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

@@ -1,8 +1,8 @@
-# LeadLoop
+# Converana
 
 **Turn missed leads into booked customers.**
 
-LeadLoop is an AI-powered lead recovery and follow-up platform for local service
+Converana is an AI-powered lead recovery and follow-up platform for local service
 businesses (HVAC, plumbing, roofing, electrical, dental, med spa, auto detailing,
 cleaning, real estate, and similar). It captures leads, automatically follows up,
 qualifies them with AI, flags hot leads, tracks conversations and appointments,
@@ -62,7 +62,7 @@ feature shows a clear "isn't configured" notice instead of crashing.
 
 ## 3. Database setup
 
-LeadLoop uses PostgreSQL via Prisma. Any Postgres works (Supabase's built-in
+Converana uses PostgreSQL via Prisma. Any Postgres works (Supabase's built-in
 Postgres is the easiest since you need a Supabase project anyway for auth).
 
 ```bash
@@ -89,10 +89,10 @@ and sorted by.
    `NEXT_PUBLIC_APP_URL`, and add `{NEXT_PUBLIC_APP_URL}/auth/callback` as a
    Redirect URL (needed for email confirmation and password reset links).
 5. Authentication → Providers → Email: leave "Confirm email" on for
-   production; LeadLoop handles both the confirmed and unconfirmed sign-up
+   production; Converana handles both the confirmed and unconfirmed sign-up
    paths.
 
-LeadLoop mirrors each Supabase auth user into its own `users` table on first
+Converana mirrors each Supabase auth user into its own `users` table on first
 sign-in, and links users to businesses via `business_members` — a user never
 sees another business's data, enforced server-side on every query.
 
@@ -120,13 +120,13 @@ In the Stripe Dashboard → Product catalog, create three recurring monthly
 products/prices (or via CLI):
 
 ```bash
-stripe products create --name "LeadLoop Starter"
+stripe products create --name "Converana Starter"
 stripe prices create --product <id> --unit-amount 4900 --currency usd --recurring[interval]=month
 
-stripe products create --name "LeadLoop Growth"
+stripe products create --name "Converana Growth"
 stripe prices create --product <id> --unit-amount 9900 --currency usd --recurring[interval]=month
 
-stripe products create --name "LeadLoop Pro"
+stripe products create --name "Converana Pro"
 stripe prices create --product <id> --unit-amount 19900 --currency usd --recurring[interval]=month
 ```
 
@@ -200,15 +200,15 @@ configured.
 ## 8. Resend setup (email — outbound only)
 
 1. Create a Resend account and verify a sending domain.
-2. Set `RESEND_API_KEY` and `RESEND_FROM_EMAIL` (e.g. `LeadLoop <notifications@yourdomain.com>`).
+2. Set `RESEND_API_KEY` and `RESEND_FROM_EMAIL` (e.g. `Converana <notifications@yourdomain.com>`).
 
 All email sends go through `lib/resend/send-email.ts` (never throws — a
 missing key or a Resend-side failure just skips the send with a logged
 reason), used for lead/appointment notifications and email follow-ups.
 
 **Inbound email is not supported in V1 — this is not wired up, and nothing
-in the product claims otherwise.** If a customer replies to a LeadLoop email,
-that reply lands in the business's own inbox and LeadLoop never sees it; it
+in the product claims otherwise.** If a customer replies to a Converana email,
+that reply lands in the business's own inbox and Converana never sees it; it
 is not added to the conversation and does not trigger AI processing. This is
 a materially bigger integration than inbound SMS: Resend has no built-in
 inbound-parse webhook (unlike e.g. SendGrid's Inbound Parse), so supporting
@@ -219,12 +219,12 @@ naturally via a `reply+{leadId}@yourdomain.com` convention) and verifying
 the sender to prevent spoofed inbound "replies." None of that exists yet.
 Until then, email follow-ups are effectively one-way: the business can see
 and respond to email replies manually in their own mail client, but that
-reply won't appear in the LeadLoop conversation thread the way an inbound
+reply won't appear in the Converana conversation thread the way an inbound
 SMS reply does.
 
 ## 9. Deployment
 
-LeadLoop is a standard Next.js app — deploy it anywhere Next.js runs (Vercel,
+Converana is a standard Next.js app — deploy it anywhere Next.js runs (Vercel,
 Fly, Render, a Node server, etc.).
 
 1. Set every environment variable from §2 in your hosting platform.
@@ -312,7 +312,7 @@ credentials before it's live:
 
 ## 14. Known limitations (V1)
 
-- **No inbound email.** Customers can't reply to a LeadLoop email and have it
+- **No inbound email.** Customers can't reply to a Converana email and have it
   land back in the conversation — see §8 for exactly why and what a fix
   would require. Inbound SMS *is* fully wired (§7); outbound email/SMS
   sending is fully wired either way.

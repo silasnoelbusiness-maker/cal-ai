@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 
 /**
- * A real (non-screenshot) preview of the LeadLoop dashboard, built from the
+ * A real (non-screenshot) preview of the Converana dashboard, built from the
  * same UI primitives as the app itself. Illustrative data only.
  */
 export function ProductPreview() {

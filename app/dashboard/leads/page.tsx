@@ -72,7 +72,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/dashboard/
         <EmptyState
           icon={Users}
           title="No leads yet"
-          description="Connect your website form or create your first lead to see LeadLoop in action."
+          description="Connect your website form or create your first lead to see Converana in action."
           action={<AddTestLeadButton />}
         />
       ) : (

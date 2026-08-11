@@ -34,7 +34,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
       >
         <h1 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Something went wrong</h1>
         <p style={{ marginTop: 8, maxWidth: 380, fontSize: 14, color: "#64748b" }}>
-          LeadLoop hit an unexpected error and couldn&apos;t load. Please try again.
+          Converana hit an unexpected error and couldn&apos;t load. Please try again.
         </p>
         <button
           onClick={() => reset()}

@@ -54,7 +54,7 @@ export function RoiCalculator() {
           suffix="%"
         />
         <SliderField
-          label="Leads LeadLoop helps you recover"
+          label="Leads Converana helps you recover"
           value={recoveredPct}
           onChange={setRecoveredPct}
           suffix="%"

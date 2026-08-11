@@ -28,7 +28,7 @@ export function DashboardPreviewSection() {
             One dashboard, every recovered lead.
           </h2>
           <p className="mt-4 text-lg text-muted">
-            See exactly what LeadLoop is doing for your business — in real time.
+            See exactly what Converana is doing for your business — in real time.
           </p>
         </div>
 

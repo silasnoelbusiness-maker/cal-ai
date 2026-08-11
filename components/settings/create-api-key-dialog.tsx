@@ -46,7 +46,7 @@ export function CreateApiKeyDialog() {
           <DialogTitle>{state.key ? "API key created" : "Create API key"}</DialogTitle>
           {!state.key && (
             <DialogDescription>
-              Use this key to send leads into LeadLoop from your website, CRM, or ad platform.
+              Use this key to send leads into Converana from your website, CRM, or ad platform.
             </DialogDescription>
           )}
         </DialogHeader>

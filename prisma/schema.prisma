@@ -1,4 +1,4 @@
-// LeadLoop database schema
+// Converana database schema
 // Postgres + Prisma. Every business-scoped table carries a businessId used
 // for server-side authorization — never trust a client-supplied businessId.
 

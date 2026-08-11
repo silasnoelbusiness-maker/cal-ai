@@ -47,7 +47,7 @@ export default async function NotificationSettingsPage() {
     <Card>
       <CardHeader>
         <CardTitle>Notifications</CardTitle>
-        <CardDescription>Choose when and how LeadLoop alerts you.</CardDescription>
+        <CardDescription>Choose when and how Converana alerts you.</CardDescription>
       </CardHeader>
       <CardContent>
         {(!isResendConfigured || !isTwilioConfigured) && (

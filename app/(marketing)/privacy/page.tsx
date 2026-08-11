@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
-  description: "How LeadLoop collects, uses, and protects data.",
+  description: "How Converana collects, uses, and protects data.",
 };
 
 const EFFECTIVE_DATE = "January 1, 2026";
@@ -15,10 +15,10 @@ export default function PrivacyPage() {
 
       <div className="prose-sm mt-10 space-y-6 text-sm leading-relaxed text-foreground [&_h2]:mt-8 [&_h2]:text-base [&_h2]:font-semibold [&_p]:text-muted [&_li]:text-muted">
         <p className="text-muted">
-          This Privacy Policy explains what information LeadLoop collects, how it is used, and
-          the choices available to you. LeadLoop is software used by businesses to manage their
+          This Privacy Policy explains what information Converana collects, how it is used, and
+          the choices available to you. Converana is software used by businesses to manage their
           own customers&apos; contact information — businesses are the data controller for the
-          lead data they store in LeadLoop, and are responsible for how they collect and use it.
+          lead data they store in Converana, and are responsible for how they collect and use it.
         </p>
 
         <section>
@@ -60,10 +60,10 @@ export default function PrivacyPage() {
         <section>
           <h2>4. Third-party services</h2>
           <p>
-            LeadLoop relies on service providers to operate: Supabase (authentication and
+            Converana relies on service providers to operate: Supabase (authentication and
             database hosting), Anthropic (AI), Stripe (billing), Resend (email delivery), and
             Twilio (SMS delivery), each of which processes data solely to provide their respective
-            service to LeadLoop.
+            service to Converana.
           </p>
         </section>
 
@@ -80,7 +80,7 @@ export default function PrivacyPage() {
         <section>
           <h2>6. SMS and email consent</h2>
           <p>
-            LeadLoop provides consent and opt-out fields for leads so businesses can track and
+            Converana provides consent and opt-out fields for leads so businesses can track and
             honor communication preferences, including STOP requests for SMS. Businesses are
             responsible for obtaining appropriate consent before contacting a lead, consistent
             with applicable law.
@@ -112,8 +112,8 @@ export default function PrivacyPage() {
           <h2>10. Contact</h2>
           <p>
             Questions about this policy can be sent to{" "}
-            <a href="mailto:privacy@leadloop.dev" className="text-brand hover:underline">
-              privacy@leadloop.dev
+            <a href="mailto:privacy@converana.com" className="text-brand hover:underline">
+              privacy@converana.com
             </a>
             .
           </p>

@@ -53,7 +53,7 @@ describe("resolveApiKey", () => {
   });
 
   it("rejects a key that doesn't start with the expected prefix without querying the database", async () => {
-    const result = await resolveApiKey("sk_not_a_leadloop_key");
+    const result = await resolveApiKey("sk_not_a_converana_key");
     expect(result).toBeNull();
     expect(mockApiKey.findFirst).not.toHaveBeenCalled();
   });

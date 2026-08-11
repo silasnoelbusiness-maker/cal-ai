@@ -135,6 +135,6 @@ async function handlePaymentFailed(invoice: Stripe.Invoice) {
     businessId: subscription.businessId,
     type: "PAYMENT_FAILED",
     title: "Payment failed",
-    body: "Your last payment didn't go through. Update your billing details to keep LeadLoop active.",
+    body: "Your last payment didn't go through. Update your billing details to keep Converana active.",
   });
 }

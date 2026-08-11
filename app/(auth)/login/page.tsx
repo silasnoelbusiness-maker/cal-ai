@@ -16,7 +16,7 @@ export default async function LoginPage({
     <div className="space-y-6">
       <div className="space-y-1.5 text-center">
         <h1 className="text-xl font-semibold text-foreground">Welcome back</h1>
-        <p className="text-sm text-muted">Log in to your LeadLoop dashboard.</p>
+        <p className="text-sm text-muted">Log in to your Converana dashboard.</p>
       </div>
       {!isSupabaseConfigured && (
         <ConfigNotice

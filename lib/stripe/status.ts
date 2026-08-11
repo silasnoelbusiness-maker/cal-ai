@@ -1,7 +1,7 @@
 import type Stripe from "stripe";
 import type { SubscriptionStatus } from "@prisma/client";
 
-/** Maps a Stripe subscription status to LeadLoop's SubscriptionStatus enum. */
+/** Maps a Stripe subscription status to Converana's SubscriptionStatus enum. */
 export function mapStripeStatus(status: Stripe.Subscription.Status): SubscriptionStatus {
   switch (status) {
     case "trialing":

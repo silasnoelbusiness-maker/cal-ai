@@ -24,7 +24,7 @@ export function ConversationBubble({
   }
 
   const isCustomer = sender === "CUSTOMER";
-  const senderLabel = sender === "AI" ? "LeadLoop AI" : sender === "BUSINESS" ? "You" : "Customer";
+  const senderLabel = sender === "AI" ? "Converana AI" : sender === "BUSINESS" ? "You" : "Customer";
 
   return (
     <div className={cn("flex flex-col gap-1", isCustomer ? "items-start" : "items-end")}>

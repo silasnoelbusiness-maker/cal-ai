@@ -10,7 +10,7 @@ export function FinalCtaSection() {
           Stop letting good leads go cold.
         </h2>
         <p className="mt-4 text-lg text-white/70">
-          Set up LeadLoop in minutes and start responding to every lead automatically.
+          Set up Converana in minutes and start responding to every lead automatically.
         </p>
         <div className="mt-8 flex justify-center">
           <Button size="lg" asChild>

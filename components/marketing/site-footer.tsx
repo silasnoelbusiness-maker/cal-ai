@@ -30,7 +30,7 @@ export function SiteFooter() {
         </nav>
       </div>
       <div className="border-t border-border px-4 py-4 text-center text-xs text-muted sm:px-6">
-        © {new Date().getFullYear()} LeadLoop. All rights reserved.
+        © {new Date().getFullYear()} Converana. All rights reserved.
       </div>
     </footer>
   );

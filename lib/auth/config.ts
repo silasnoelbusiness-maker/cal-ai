@@ -1,5 +1,5 @@
 /**
- * Centralized "is this external service configured" checks. LeadLoop must
+ * Centralized "is this external service configured" checks. Converana must
  * start and render a clear setup message instead of crashing when a service
  * (Supabase, Anthropic, Stripe, Twilio, Resend) has no credentials yet.
  */

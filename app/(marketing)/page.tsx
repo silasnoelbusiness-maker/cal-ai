@@ -10,7 +10,10 @@ import { PricingSection } from "@/components/marketing/pricing-section";
 import { FinalCtaSection } from "@/components/marketing/final-cta-section";
 
 export const metadata: Metadata = {
-  title: "LeadLoop — Turn Missed Leads Into Booked Customers",
+  // No `title` here on purpose: the root layout's `title.default` already
+  // supplies the full homepage title. Setting one here would instead run
+  // through `title.template` ("%s — Converana") and duplicate the brand
+  // name in the browser tab and search results.
   description:
     "AI-powered lead follow-up for local businesses. Automatically respond to new leads, qualify prospects, and help turn more conversations into booked customers.",
 };

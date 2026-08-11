@@ -34,7 +34,7 @@ export default async function ApiKeysPage() {
           <EmptyState
             icon={KeyRound}
             title="No API keys yet"
-            description="Create a key to send leads into LeadLoop from an external form, CRM, or ad platform."
+            description="Create a key to send leads into Converana from an external form, CRM, or ad platform."
             className="border-0 py-10"
           />
         ) : (

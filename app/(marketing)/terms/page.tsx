@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Terms of Service",
-  description: "The terms that govern use of the LeadLoop platform.",
+  description: "The terms that govern use of the Converana platform.",
 };
 
 const EFFECTIVE_DATE = "January 1, 2026";
@@ -15,16 +15,16 @@ export default function TermsPage() {
 
       <div className="prose-sm mt-10 space-y-6 text-sm leading-relaxed text-foreground [&_h2]:mt-8 [&_h2]:text-base [&_h2]:font-semibold [&_p]:text-muted [&_li]:text-muted">
         <p className="text-muted">
-          These Terms of Service (&quot;Terms&quot;) govern access to and use of LeadLoop (the
-          &quot;Service&quot;), provided by LeadLoop (&quot;LeadLoop,&quot; &quot;we,&quot;
+          These Terms of Service (&quot;Terms&quot;) govern access to and use of Converana (the
+          &quot;Service&quot;), provided by Converana (&quot;Converana,&quot; &quot;we,&quot;
           &quot;us&quot;). By creating an account or using the Service, you agree to these Terms.
         </p>
 
         <section>
           <h2>1. The Service</h2>
           <p>
-            LeadLoop is software that helps businesses capture, store, and follow up with leads,
-            including AI-assisted qualification and automated messaging. LeadLoop is a tool — it
+            Converana is software that helps businesses capture, store, and follow up with leads,
+            including AI-assisted qualification and automated messaging. Converana is a tool — it
             does not provide legal, medical, financial, or other professional advice, and it does
             not guarantee any specific business outcome, revenue, or number of customers.
           </p>
@@ -38,7 +38,7 @@ export default function TermsPage() {
             choose to send or automate), and for complying with all applicable laws regarding
             customer communications, including telemarketing, SMS (e.g., TCPA), email (e.g.,
             CAN-SPAM), and data protection laws relevant to your business and jurisdiction.
-            LeadLoop provides consent-tracking fields and opt-out handling as tools, but you are
+            Converana provides consent-tracking fields and opt-out handling as tools, but you are
             responsible for using them correctly and for obtaining any consent required by law
             before contacting a lead.
           </p>
@@ -47,7 +47,7 @@ export default function TermsPage() {
         <section>
           <h2>3. AI features</h2>
           <p>
-            LeadLoop&apos;s AI assistant is configured using information you provide about your
+            Converana&apos;s AI assistant is configured using information you provide about your
             business. It is designed not to invent pricing, availability, or promises on your
             behalf, and to escalate situations that need a human. You remain responsible for
             reviewing AI-suggested replies before they are sent where applicable, and for the
@@ -85,7 +85,7 @@ export default function TermsPage() {
         <section>
           <h2>6. No guarantees</h2>
           <p>
-            LeadLoop helps automate and speed up lead follow-up, but we do not guarantee
+            Converana helps automate and speed up lead follow-up, but we do not guarantee
             increased revenue, conversions, or customer acquisition. Results depend on your
             business, market, and how you use the Service.
           </p>
@@ -103,7 +103,7 @@ export default function TermsPage() {
           <h2>8. Disclaimers and limitation of liability</h2>
           <p>
             The Service is provided &quot;as is&quot; without warranties of any kind. To the
-            maximum extent permitted by law, LeadLoop is not liable for indirect, incidental, or
+            maximum extent permitted by law, Converana is not liable for indirect, incidental, or
             consequential damages arising from use of the Service.
           </p>
         </section>
@@ -120,8 +120,8 @@ export default function TermsPage() {
           <h2>10. Contact</h2>
           <p>
             Questions about these Terms can be sent to{" "}
-            <a href="mailto:legal@leadloop.dev" className="text-brand hover:underline">
-              legal@leadloop.dev
+            <a href="mailto:legal@converana.com" className="text-brand hover:underline">
+              legal@converana.com
             </a>
             .
           </p>
