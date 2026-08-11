@@ -1,9 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [
-    {
-      "path": "/api/cron/follow-ups",
-      "schedule": "*/15 * * * *"
-    }
-  ]
+  "regions": ["dub1"]
 }

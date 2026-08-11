@@ -231,8 +231,15 @@ Fly, Render, a Node server, etc.).
 2. Run `npm run db:migrate` against your production database once (or wire
    it into your deploy pipeline).
 3. Point `NEXT_PUBLIC_APP_URL` at your real domain — it's used in emails,
-   embed snippets, and Stripe redirect URLs.
-4. Configure the webhooks and cron job below against the deployed URL.
+   embed snippets, and Stripe redirect URLs. Note that `NEXT_PUBLIC_*`
+   variables are inlined at **build** time, so it must be set before the
+   first build, and changing it later needs a redeploy (not just a restart).
+4. Configure the webhooks and scheduler below against the deployed URL.
+
+`vercel.json` pins serverless functions to `dub1` (Dublin) to sit next to a
+Supabase project in `eu-west-1`. If your database lives elsewhere, change
+`regions` to the Vercel region closest to it — every request makes several
+sequential database round-trips, so co-locating matters more than it looks.
 
 ### Webhook URLs (quick reference)
 
@@ -256,12 +263,20 @@ curl -X POST https://yourdomain.com/api/cron/follow-ups \
   -H "Authorization: Bearer $LEADLOOP_API_SECRET"
 ```
 
-- **Vercel:** add a `vercel.json` cron entry pointing at that URL (or use
-  Vercel's built-in Cron Jobs UI) — pass the secret via the `secret` query
-  param if you can't set headers: `.../api/cron/follow-ups?secret=...`.
-- **Anything else:** GitHub Actions on a schedule, cron-job.org, a system
-  crontab with `curl`, etc. — any scheduler that can make an HTTPS request
-  works.
+- **Vercel Hobby:** Hobby plans only allow *daily* cron jobs, so `vercel.json`
+  intentionally contains **no** `crons` block — including one would make the
+  deployment itself fail. Use an external scheduler instead (below). A daily
+  cron would leave the 30-minute follow-up up to 24 hours late anyway, which
+  defeats the feature.
+- **Vercel Pro/Enterprise:** you can add a `crons` entry to `vercel.json`
+  (e.g. `{"path": "/api/cron/follow-ups", "schedule": "*/15 * * * *"}`).
+  Vercel Cron cannot send custom headers — it sends
+  `Authorization: Bearer $CRON_SECRET`, which this route already accepts, so
+  set `CRON_SECRET` to the same value as `LEADLOOP_API_SECRET`.
+- **External scheduler (works on any plan):** GitHub Actions on a schedule,
+  cron-job.org, a system crontab with `curl`, etc. Prefer the
+  `Authorization` header over the `?secret=` query param — query strings get
+  written to proxy, CDN, and access logs.
 
 ## 11. Connect a business's website
 
