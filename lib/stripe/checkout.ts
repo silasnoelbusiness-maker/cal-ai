@@ -11,6 +11,28 @@ function priceIdForPlan(plan: Plan): string | null {
 }
 
 /**
+ * Stripe pins a currency to a Customer once that customer has been billed,
+ * and then refuses any price in a different currency:
+ *
+ *   "The price specified only supports `usd`. This doesn't match the
+ *    expected currency: `eur`."
+ *
+ * A cancelled subscription still leaves its stripeCustomerId on the row (the
+ * webhook only changes status), so without this the stale customer would
+ * block every future checkout after a currency change — permanently, with no
+ * way out from inside the app.
+ *
+ * Stripe gives no dedicated error code for this, so the message is matched.
+ * Kept deliberately narrow: only a currency-mismatch is retried, and only by
+ * dropping the customer so Stripe creates a fresh one. Every other error
+ * still propagates untouched.
+ */
+function isCurrencyMismatchError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /expected currency|only supports `?[a-z]{3}`?/i.test(message) && /currency/i.test(message);
+}
+
+/**
  * True when the business has a subscription Stripe is actively billing —
  * changing plans for these must update the existing subscription, never
  * start a second Checkout Session (which would create a second, parallel
@@ -83,20 +105,41 @@ export async function createCheckoutSession(business: Business, plan: Plan, appU
     throw new Error("This business already has an active subscription — change its plan instead of starting a new checkout.");
   }
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
+  const baseParams = {
+    mode: "subscription" as const,
     line_items: [{ price: priceId, quantity: 1 }],
     client_reference_id: business.id,
-    customer: subscription?.stripeCustomerId || undefined,
-    customer_email: subscription?.stripeCustomerId ? undefined : business.email || undefined,
     metadata: { businessId: business.id, plan },
     subscription_data: { metadata: { businessId: business.id, plan } },
     allow_promotion_codes: true,
     success_url: `${appUrl}/dashboard/billing?checkout=success`,
     cancel_url: `${appUrl}/dashboard/billing?checkout=cancelled`,
-  });
+  };
 
-  return session;
+  try {
+    return await stripe.checkout.sessions.create({
+      ...baseParams,
+      customer: subscription?.stripeCustomerId || undefined,
+      customer_email: subscription?.stripeCustomerId ? undefined : business.email || undefined,
+    });
+  } catch (err) {
+    // Only a stored customer can cause a currency mismatch — with no customer
+    // Stripe creates one in the price's own currency.
+    if (!subscription?.stripeCustomerId || !isCurrencyMismatchError(err)) throw err;
+
+    console.warn(
+      `[stripe/checkout] customer ${subscription.stripeCustomerId} is pinned to a different ` +
+        `currency than the ${plan} price; starting checkout with a fresh customer for business ${business.id}`
+    );
+
+    // Retry once without the stale customer. The resulting subscription's new
+    // customer id is written back by the webhook's normal upsert, so the
+    // database self-heals with no manual step.
+    return await stripe.checkout.sessions.create({
+      ...baseParams,
+      customer_email: business.email || undefined,
+    });
+  }
 }
 
 export async function createPortalSession(business: Business, appUrl: string) {

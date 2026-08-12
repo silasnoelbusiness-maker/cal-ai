@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth/session";
 import { isAdminEmail } from "@/lib/admin/config";
-import { grantPaidAccess, lookupAccess, revokePaidAccess } from "@/lib/admin/access";
+import {
+  grantPaidAccess,
+  lookupAccess,
+  resetStripeBillingLink,
+  revokePaidAccess,
+} from "@/lib/admin/access";
 
 export interface AdminAccessState {
   error?: string;
@@ -98,5 +103,29 @@ export async function lookupAccessAction(
       plan: result.subscription?.plan ?? null,
       status: result.subscription?.status ?? null,
     },
+  };
+}
+
+/**
+ * Clears the stored Stripe customer/subscription ids so the next checkout
+ * starts a fresh Stripe customer — used when the stored customer is pinned to
+ * an old currency. Guarded server-side against running on a live subscription.
+ */
+export async function resetStripeLinkAction(
+  _prev: AdminAccessState,
+  formData: FormData
+): Promise<AdminAccessState> {
+  const denied = await assertAdmin();
+  if (denied) return { error: denied };
+
+  const parsed = EmailSchema.safeParse({ email: formData.get("email") });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const result = await resetStripeBillingLink(parsed.data.email);
+  if (!result.ok) return { error: result.error };
+
+  revalidatePath("/dashboard/admin");
+  return {
+    success: `Stripe billing link cleared for ${result.businessName}. The next checkout will create a new Stripe customer.`,
   };
 }

@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db/prisma";
+import { hasBillableSubscription } from "@/lib/stripe/checkout";
 import type { Plan } from "@prisma/client";
 
 /**
@@ -98,6 +99,47 @@ export async function revokePaidAccess(email: string): Promise<AccessResult> {
   await prisma.subscription.update({
     where: { businessId: business.id },
     data: { status: "CANCELED" },
+  });
+
+  return { ok: true, businessId: business.id, businessName: business.name, plan: existing.plan };
+}
+
+/**
+ * Detaches a business from its stored Stripe customer/subscription ids so the
+ * next checkout starts a brand-new Stripe customer.
+ *
+ * Needed when the stored customer is pinned to a currency that no longer
+ * matches the configured prices (Stripe locks a customer's currency once
+ * billed). createCheckoutSession already recovers from this automatically, so
+ * this is a manual lever for support rather than a required step.
+ *
+ * Refuses to run while Stripe is still actively billing the subscription —
+ * clearing the ids then would orphan a live subscription that keeps charging
+ * the customer with nothing in Converana pointing at it.
+ */
+export async function resetStripeBillingLink(email: string): Promise<AccessResult> {
+  const found = await findBusinessByEmail(email);
+  if (!found.found) return { ok: false, error: found.error };
+
+  const { business } = found;
+  const existing = await prisma.subscription.findUnique({ where: { businessId: business.id } });
+
+  if (!existing) {
+    return { ok: false, error: "That business has no subscription record, so there is nothing to reset." };
+  }
+
+  if (hasBillableSubscription(existing)) {
+    return {
+      ok: false,
+      error:
+        "That subscription is still being billed by Stripe. Cancel it in the Stripe dashboard first — " +
+        "clearing the link now would leave a live subscription charging with nothing pointing at it.",
+    };
+  }
+
+  await prisma.subscription.update({
+    where: { businessId: business.id },
+    data: { stripeCustomerId: null, stripeSubscriptionId: null, status: "NONE" },
   });
 
   return { ok: true, businessId: business.id, businessName: business.name, plan: existing.plan };

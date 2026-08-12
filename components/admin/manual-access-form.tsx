@@ -16,6 +16,7 @@ import {
 import {
   grantAccessAction,
   lookupAccessAction,
+  resetStripeLinkAction,
   revokeAccessAction,
   type AdminAccessState,
 } from "@/app/dashboard/admin/actions";
@@ -41,6 +42,7 @@ export function ManualAccessForm() {
   const grant = useAdminAction(grantAccessAction);
   const revoke = useAdminAction(revokeAccessAction);
   const lookup = useAdminAction(lookupAccessAction);
+  const resetLink = useAdminAction(resetStripeLinkAction);
 
   const found = lookup.state.lookup;
 
@@ -116,6 +118,20 @@ export function ManualAccessForm() {
           </p>
           <Button type="submit" variant="outline" loading={revoke.pending}>
             Revoke access
+          </Button>
+        </div>
+      </form>
+
+      <form action={resetLink.formAction} className="border-t border-border pt-6">
+        <input type="hidden" name="email" value={email} />
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-sm text-muted">
+            Clear the stored Stripe customer so the next checkout starts a fresh one. Only needed if a
+            checkout fails because the customer is locked to an old currency — refused while Stripe is
+            still billing them.
+          </p>
+          <Button type="submit" variant="outline" loading={resetLink.pending}>
+            Reset Stripe link
           </Button>
         </div>
       </form>
