@@ -58,7 +58,7 @@ export function ManualAccessForm() {
           onChange={(e) => setEmail(e.target.value)}
         />
         <p className="text-xs text-muted">
-          The email they signed up to Converana with — not necessarily the one they used on Whop.
+          The email the customer signed up to Converana with.
         </p>
       </div>
 

@@ -11,8 +11,11 @@ export const metadata: Metadata = { title: "Admin" };
 export const dynamic = "force-dynamic";
 
 /**
- * Internal admin page for manually granting paid access after a customer
- * buys through Whop.
+ * Emergency admin tool for subscription recovery.
+ *
+ * Customers are activated automatically by the Stripe webhook after checkout;
+ * this page exists only for support cases where that didn't happen or needs
+ * overriding.
  *
  * Not linked from the dashboard navigation — reachable only by typing the
  * URL. It returns a 404 for anyone whose email isn't in ADMIN_EMAILS, so its
@@ -29,7 +32,7 @@ export default async function AdminPage() {
     <div>
       <PageHeader
         title="Admin"
-        description="Manually grant or revoke paid access after confirming a Whop purchase."
+        description="Emergency subscription recovery. Not part of the normal customer flow."
       />
 
       {!hasAdminsConfigured() && (
@@ -44,8 +47,11 @@ export default async function AdminPage() {
         <CardHeader>
           <CardTitle>Manual subscription access</CardTitle>
           <CardDescription>
-            Writes the same subscription record Stripe uses, so plan limits and billing display work
-            exactly as normal. Customers cannot reach this page or activate themselves.
+            For support and recovery only — customers are normally activated automatically by the
+            Stripe webhook after checkout. Use this when that didn&apos;t happen. Writes the same
+            subscription record Stripe uses, so plan limits and the billing page behave exactly as
+            normal. A manual grant has no Stripe subscription behind it, so it won&apos;t renew, and
+            a later Stripe event for the same account will overwrite it.
           </CardDescription>
         </CardHeader>
         <CardContent>

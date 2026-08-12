@@ -3,16 +3,23 @@ import { prisma } from "@/lib/db/prisma";
 import type { Plan } from "@prisma/client";
 
 /**
- * Manual paid-access control for the V1 launch.
+ * Emergency/support-only manual paid-access control.
  *
- * Customers buy through Whop externally; an admin then activates them here
- * after confirming the purchase. This writes the SAME Subscription row that
- * Stripe writes, so `effectivePlan()` and every plan-limit check keep working
- * untouched — there is no second source of truth for access.
+ * This is NOT part of the customer flow. Customers subscribe through Stripe
+ * Checkout and are activated automatically by the Stripe webhook
+ * (app/api/stripe/webhook), which is the authoritative writer of subscription
+ * state. These helpers exist purely so support can recover an account when
+ * something goes wrong — a webhook that never arrived, a billing dispute, a
+ * goodwill comp — without waiting on a fix.
  *
- * Reuses the existing schema exactly as-is: no new columns, no migration.
- * A manual grant is recorded with status ACTIVE and no Stripe identifiers,
- * which is what distinguishes it from a Stripe-billed subscription.
+ * It writes the SAME Subscription row Stripe writes, so `effectivePlan()` and
+ * every plan-limit check keep working untouched and there is no second source
+ * of truth for access. Reuses the existing schema exactly as-is: no new
+ * columns, no migration.
+ *
+ * Caveat worth knowing when using it: a manual grant has no Stripe
+ * subscription behind it, so Stripe will not renew or cancel it, and a later
+ * Stripe webhook for the same business will overwrite whatever was set here.
  */
 
 export type AccessResult =
