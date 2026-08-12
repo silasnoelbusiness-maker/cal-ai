@@ -368,26 +368,13 @@ enum SubscriptionStatus {
 }
 
 model Subscription {
-  id                   String  @id @default(uuid()) @db.Uuid
-  businessId           String  @unique @map("business_id") @db.Uuid
-  stripeCustomerId     String? @map("stripe_customer_id")
-  stripeSubscriptionId String? @map("stripe_subscription_id")
-
-  /// Whop billing (Section: Whop migration). Kept alongside the Stripe
-  /// columns rather than replacing them so both providers can coexist during
-  /// the migration — `plan` and `status` remain the single source of truth
-  /// for access, whichever provider last wrote them.
-  whopMembershipId String?   @unique @map("whop_membership_id")
-  whopUserId       String?   @map("whop_user_id")
-  whopPlanId       String?   @map("whop_plan_id")
-  /// Signing timestamp of the most recently applied Whop event. Used to drop
-  /// stale/out-of-order deliveries so a late "went_invalid" cannot revoke a
-  /// membership that was subsequently reactivated.
-  whopLastEventAt  DateTime? @map("whop_last_event_at")
-
-  plan             Plan               @default(STARTER)
-  status           SubscriptionStatus @default(NONE)
-  currentPeriodEnd DateTime?          @map("current_period_end")
+  id                   String             @id @default(uuid()) @db.Uuid
+  businessId           String             @unique @map("business_id") @db.Uuid
+  stripeCustomerId     String?            @map("stripe_customer_id")
+  stripeSubscriptionId String?            @map("stripe_subscription_id")
+  plan                 Plan               @default(STARTER)
+  status               SubscriptionStatus @default(NONE)
+  currentPeriodEnd     DateTime?          @map("current_period_end")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
