@@ -5,6 +5,7 @@ import { requireBusiness } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import { PLAN_LIMITS, PLAN_ORDER, currentMonthKey, effectivePlan } from "@/lib/plans";
 import { isStripeConfigured } from "@/lib/auth/config";
+import { hasBillableSubscription } from "@/lib/stripe/checkout";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +42,9 @@ export default async function BillingPage() {
   // doesn't keep seeing Pro-sized usage bars they no longer have access to.
   const enforcedLimits = PLAN_LIMITS[effectivePlan(subscription)];
   const hasActiveBilling = Boolean(subscription.stripeCustomerId);
+  // Mirrors the server-side rule in changeSubscriptionPlan: only a live,
+  // Stripe-billed subscription turns "Subscribe" into a plan *change*.
+  const hasLiveBilling = hasBillableSubscription(subscription);
 
   return (
     <div>
@@ -133,7 +137,13 @@ export default async function BillingPage() {
                     Current plan
                   </Badge>
                 ) : (
-                  <UpgradeButton plan={planId} variant={planId === "GROWTH" ? "default" : "outline"}>
+                  <UpgradeButton
+                    plan={planId}
+                    variant={planId === "GROWTH" ? "default" : "outline"}
+                    currentPlan={subscription.plan}
+                    currentPeriodEnd={subscription.currentPeriodEnd}
+                    isSubscribed={Boolean(subscription.stripeSubscriptionId) && hasLiveBilling}
+                  >
                     {subscription.status === "ACTIVE" ? "Switch plan" : "Subscribe"}
                   </UpgradeButton>
                 )}

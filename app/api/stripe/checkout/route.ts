@@ -30,10 +30,27 @@ export async function POST(request: NextRequest) {
       // of starting a second Checkout Session, which would create a second
       // parallel subscription and double-bill the customer.
       if (subscription!.plan === parsed.data.plan) {
-        return NextResponse.json({ url: `${appUrl}/dashboard/billing` });
+        return NextResponse.json({ changed: false, message: "You're already on that plan." });
       }
-      await changeSubscriptionPlan(auth.business, parsed.data.plan);
-      return NextResponse.json({ url: `${appUrl}/dashboard/billing?checkout=success` });
+
+      const result = await changeSubscriptionPlan(auth.business, parsed.data.plan);
+
+      if (result.kind === "unchanged") {
+        return NextResponse.json({ changed: false, message: "You're already on that plan." });
+      }
+      if (result.kind === "downgrade_scheduled") {
+        return NextResponse.json({
+          changed: true,
+          kind: "downgrade_scheduled",
+          effectiveAt: result.effectiveAt.toISOString(),
+          message: "Downgrade scheduled. Your current plan stays active until the end of this billing period.",
+        });
+      }
+      return NextResponse.json({
+        changed: true,
+        kind: "upgraded",
+        message: "Upgraded. You've been charged the prorated difference for the rest of this period.",
+      });
     }
 
     const session = await createCheckoutSession(auth.business, parsed.data.plan, appUrl);

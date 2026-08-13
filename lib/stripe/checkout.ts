@@ -2,6 +2,7 @@ import "server-only";
 import type { Business, Plan } from "@prisma/client";
 import { getStripeClient } from "./client";
 import { prisma } from "@/lib/db/prisma";
+import { PLAN_ORDER, planFromPriceId } from "@/lib/plans";
 
 /**
  * Customer-facing brand shown at the top of Stripe Checkout.
@@ -63,7 +64,36 @@ export function hasBillableSubscription(
  * downgrade), with prorations. Used instead of Checkout whenever the
  * business already has a subscription Stripe is billing.
  */
-export async function changeSubscriptionPlan(business: Business, plan: Plan) {
+export type PlanChangeResult =
+  | { kind: "upgraded" }
+  | { kind: "downgrade_scheduled"; effectiveAt: Date }
+  | { kind: "unchanged" };
+
+/**
+ * Changes an existing subscription's plan.
+ *
+ * Upgrades and downgrades are handled deliberately differently:
+ *
+ * UPGRADE — invoiced and paid immediately. `always_invoice` bills the
+ * prorated difference right away instead of parking it on the next invoice,
+ * and `error_if_incomplete` makes Stripe reject the whole update if that
+ * payment can't be completed synchronously (declined card, or 3-D Secure
+ * required). Stripe then leaves the subscription on the OLD price, so the
+ * customer keeps only what they've paid for and no `customer.subscription
+ * .updated` event fires to grant the higher plan. Without these two options
+ * Stripe accepts the change unconditionally and bills later, which hands out
+ * the higher plan's limits before — and possibly without — payment.
+ *
+ * DOWNGRADE — scheduled for the end of the paid period via a Subscription
+ * Schedule. The customer keeps the plan they already paid for until the
+ * period ends; the schedule then swaps the price and Stripe emits
+ * `customer.subscription.updated`, which the webhook applies as usual. No
+ * immediate charge and no refund.
+ *
+ * In both cases our database is written only by the webhook — this function
+ * never touches `plan`/`status` itself.
+ */
+export async function changeSubscriptionPlan(business: Business, plan: Plan): Promise<PlanChangeResult> {
   const priceId = priceIdForPlan(plan);
   if (!priceId) {
     throw new Error(
@@ -78,19 +108,84 @@ export async function changeSubscriptionPlan(business: Business, plan: Plan) {
 
   const stripe = getStripeClient();
   const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId);
-  const itemId = stripeSubscription.items.data[0]?.id;
-  if (!itemId) {
+  const item = stripeSubscription.items.data[0];
+  if (!item?.id) {
     throw new Error("Couldn't find the subscription item to update.");
   }
 
-  await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
-    items: [{ id: itemId, price: priceId }],
-    proration_behavior: "create_prorations",
+  // Compare against Stripe's live price, not our stored plan: Stripe is the
+  // source of truth, and this also makes repeated clicks idempotent — once
+  // the change has landed, a second identical request is a no-op.
+  const currentPlan = planFromPriceId(item.price?.id) ?? subscription.plan;
+  if (currentPlan === plan) return { kind: "unchanged" };
+
+  const direction = PLAN_ORDER.indexOf(plan) - PLAN_ORDER.indexOf(currentPlan);
+
+  if (direction > 0) {
+    // --- UPGRADE ------------------------------------------------------
+    // Any pending scheduled downgrade must be released first, or the
+    // schedule would later revert the plan the customer just paid to raise.
+    if (stripeSubscription.schedule) {
+      const scheduleId =
+        typeof stripeSubscription.schedule === "string"
+          ? stripeSubscription.schedule
+          : stripeSubscription.schedule.id;
+      await stripe.subscriptionSchedules.release(scheduleId);
+    }
+
+    await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
+      items: [{ id: item.id, price: priceId }],
+      proration_behavior: "always_invoice",
+      payment_behavior: "error_if_incomplete",
+      metadata: { businessId: business.id, plan },
+    });
+
+    return { kind: "upgraded" };
+  }
+
+  // --- DOWNGRADE ------------------------------------------------------
+  const periodEnd = item.current_period_end;
+  if (!periodEnd) {
+    throw new Error("Couldn't determine the current billing period end.");
+  }
+
+  // Reuse an existing schedule when there is one; creating a second schedule
+  // for the same subscription is rejected by Stripe, so this is what makes
+  // repeated downgrade clicks safe.
+  let scheduleId: string;
+  if (stripeSubscription.schedule) {
+    scheduleId =
+      typeof stripeSubscription.schedule === "string"
+        ? stripeSubscription.schedule
+        : stripeSubscription.schedule.id;
+  } else {
+    const created = await stripe.subscriptionSchedules.create({
+      from_subscription: subscription.stripeSubscriptionId,
+    });
+    scheduleId = created.id;
+  }
+
+  const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+  const currentPhase = schedule.phases[0];
+
+  await stripe.subscriptionSchedules.update(scheduleId, {
+    end_behavior: "release",
+    phases: [
+      {
+        // Keep the plan they already paid for until the period ends.
+        items: [{ price: item.price.id, quantity: 1 }],
+        start_date: currentPhase.start_date,
+        end_date: periodEnd,
+      },
+      {
+        items: [{ price: priceId, quantity: 1 }],
+        metadata: { businessId: business.id, plan },
+      },
+    ],
     metadata: { businessId: business.id, plan },
   });
-  // The webhook (customer.subscription.updated) is still what actually
-  // writes the new plan/status to our database — this call only tells
-  // Stripe to change it.
+
+  return { kind: "downgrade_scheduled", effectiveAt: new Date(periodEnd * 1000) };
 }
 
 /**
