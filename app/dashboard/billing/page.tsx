@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
+import type { Plan } from "@prisma/client";
 import { Suspense } from "react";
 import { Check } from "lucide-react";
 import { requireBusiness } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import { PLAN_LIMITS, PLAN_ORDER, currentMonthKey, effectivePlan } from "@/lib/plans";
 import { isStripeConfigured } from "@/lib/auth/config";
-import { hasBillableSubscription } from "@/lib/stripe/checkout";
+import { getPendingPlanChange, hasBillableSubscription } from "@/lib/stripe/checkout";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,10 +15,35 @@ import { UsageBar } from "@/components/billing/usage-bar";
 import { UpgradeButton } from "@/components/billing/upgrade-button";
 import { ManageBillingButton } from "@/components/billing/manage-billing-button";
 import { CheckoutStatusToast } from "@/components/billing/checkout-status-toast";
+import { PendingPlanChangeNotice } from "@/components/billing/pending-plan-change-notice";
 import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Billing" };
+
+/**
+ * Reminder of a downgrade Stripe has already scheduled, read live from
+ * Stripe. Display-only: the customer's plan, limits and access all still
+ * come from the subscription row until the change actually lands via the
+ * webhook. Renders nothing when there's no pending change (including when
+ * Stripe can't be reached).
+ */
+async function PendingPlanChange({
+  subscription,
+}: {
+  subscription: { status: string; stripeSubscriptionId: string | null; plan: Plan };
+}) {
+  const pending = await getPendingPlanChange(subscription);
+  if (!pending) return null;
+
+  return (
+    <PendingPlanChangeNotice
+      fromPlan={pending.fromPlan}
+      toPlan={pending.toPlan}
+      effectiveAt={pending.effectiveAt}
+    />
+  );
+}
 
 export default async function BillingPage() {
   const { business } = await requireBusiness();
@@ -52,6 +78,11 @@ export default async function BillingPage() {
         <CheckoutStatusToast />
       </Suspense>
       <PageHeader title="Billing" description="Your plan, usage, and payment details." />
+
+      {/* Streams in separately so a Stripe round-trip never delays the page. */}
+      <Suspense fallback={null}>
+        <PendingPlanChange subscription={subscription} />
+      </Suspense>
 
       {!isStripeConfigured && (
         <ConfigNotice

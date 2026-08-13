@@ -189,6 +189,107 @@ export async function changeSubscriptionPlan(business: Business, plan: Plan): Pr
 }
 
 /**
+ * A plan change Stripe has already accepted but hasn't applied yet — i.e. a
+ * scheduled downgrade waiting for the paid period to run out.
+ */
+export interface PendingPlanChange {
+  /** The plan the customer is on right now, and keeps until `effectiveAt`. */
+  fromPlan: Plan;
+  /** The plan the schedule will switch them to. */
+  toPlan: Plan;
+  /** When the switch happens — the start of the schedule's next phase. */
+  effectiveAt: Date;
+}
+
+function phasePriceId(phase: { items?: Array<{ price?: unknown }> } | undefined): string | null {
+  const price = phase?.items?.[0]?.price;
+  if (typeof price === "string") return price;
+  if (price && typeof price === "object" && "id" in price) return String((price as { id: string }).id);
+  return null;
+}
+
+/**
+ * Reads any pending plan change straight from Stripe.
+ *
+ * Deliberately derived from live Stripe state rather than stored locally: the
+ * schedule can be created, changed or released from the Stripe dashboard or
+ * the billing portal too, so a cached copy would go stale silently and show
+ * customers a downgrade that is no longer happening (or hide one that is).
+ * Nothing about the customer's current plan, limits or access is derived from
+ * this — it is display-only.
+ *
+ * Returns null when there is no schedule, no future phase, or the future
+ * phase resolves to the plan they're already on. Any Stripe failure is
+ * swallowed and reported as "no pending change": this powers a notice on the
+ * billing page, and a Stripe outage must not take that page down.
+ */
+export async function getPendingPlanChange(
+  subscription: { status: string; stripeSubscriptionId: string | null; plan: Plan } | null
+): Promise<PendingPlanChange | null> {
+  if (!hasBillableSubscription(subscription) || !subscription) return null;
+
+  try {
+    const stripe = getStripeClient();
+    const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId!);
+    if (!stripeSubscription.schedule) return null;
+
+    const scheduleId =
+      typeof stripeSubscription.schedule === "string"
+        ? stripeSubscription.schedule
+        : stripeSubscription.schedule.id;
+
+    const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+    // A released/canceled/completed schedule no longer changes anything.
+    if (schedule.status !== "active" && schedule.status !== "not_started") return null;
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const nextPhase = schedule.phases.find((phase) => phase.start_date > nowSeconds);
+    if (!nextPhase) return null;
+
+    const toPlan = planFromPriceId(phasePriceId(nextPhase));
+    if (!toPlan) return null;
+
+    // Current plan comes from the live subscription item, same as everywhere
+    // else, so a lagging webhook can't make the notice contradict Stripe.
+    const fromPlan = planFromPriceId(stripeSubscription.items.data[0]?.price?.id) ?? subscription.plan;
+    if (fromPlan === toPlan) return null;
+
+    return { fromPlan, toPlan, effectiveAt: new Date(nextPhase.start_date * 1000) };
+  } catch (err) {
+    console.warn("[stripe/checkout] couldn't read pending plan change", err);
+    return null;
+  }
+}
+
+/**
+ * Cancels a scheduled plan change, keeping the customer on the plan they're
+ * on now ("Keep current plan").
+ *
+ * Releasing a Subscription Schedule detaches it and leaves the subscription
+ * exactly as the current phase has it — same price, same period, no charge,
+ * no proration. It does not touch our database: as with every other billing
+ * change, `plan`/`status` are written only by the webhook.
+ */
+export async function cancelScheduledPlanChange(business: Business): Promise<{ released: boolean }> {
+  const subscription = await prisma.subscription.findUnique({ where: { businessId: business.id } });
+  if (!hasBillableSubscription(subscription) || !subscription?.stripeSubscriptionId) {
+    throw new Error("No active subscription to change.");
+  }
+
+  const stripe = getStripeClient();
+  const stripeSubscription = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId);
+  if (!stripeSubscription.schedule) return { released: false };
+
+  const scheduleId =
+    typeof stripeSubscription.schedule === "string"
+      ? stripeSubscription.schedule
+      : stripeSubscription.schedule.id;
+
+  await stripe.subscriptionSchedules.release(scheduleId);
+  return { released: true };
+}
+
+/**
  * Creates a Stripe Checkout session for a brand-new subscription. The
  * business id travels as client_reference_id and in metadata — the webhook
  * is the only thing that ever updates subscription state, never the client
