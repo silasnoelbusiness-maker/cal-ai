@@ -133,3 +133,46 @@ describe("checkout recovers from a currency-locked Stripe customer", () => {
     expect(mockSessionsCreate).not.toHaveBeenCalled();
   });
 });
+
+describe("Checkout branding", () => {
+  it("shows the Converana brand name on Checkout", async () => {
+    mockPrisma.subscription.findUnique.mockResolvedValue(null);
+    mockSessionsCreate.mockResolvedValueOnce({ id: "cs_ok" });
+
+    await createCheckoutSession(BUSINESS, "STARTER", "https://converana.com");
+
+    expect(mockSessionsCreate.mock.calls[0][0].branding_settings).toEqual({
+      display_name: "Converana",
+    });
+  });
+
+  it("keeps the branding on the currency-mismatch retry", async () => {
+    mockPrisma.subscription.findUnique.mockResolvedValue({
+      stripeCustomerId: "cus_old_eur",
+      stripeSubscriptionId: null,
+      status: "CANCELED",
+    });
+    mockSessionsCreate.mockRejectedValueOnce(currencyError()).mockResolvedValueOnce({ id: "cs_new" });
+
+    await createCheckoutSession(BUSINESS, "STARTER", "https://converana.com");
+
+    expect(mockSessionsCreate.mock.calls[1][0].branding_settings).toEqual({
+      display_name: "Converana",
+    });
+  });
+
+  it("does not touch any other Checkout option", async () => {
+    mockPrisma.subscription.findUnique.mockResolvedValue(null);
+    mockSessionsCreate.mockResolvedValueOnce({ id: "cs_ok" });
+
+    await createCheckoutSession(BUSINESS, "STARTER", "https://converana.com");
+    const params = mockSessionsCreate.mock.calls[0][0];
+
+    expect(params.mode).toBe("subscription");
+    expect(params.allow_promotion_codes).toBe(true);
+    expect(params.client_reference_id).toBe("biz_1");
+    expect(params.line_items).toEqual([{ price: "price_usd_starter", quantity: 1 }]);
+    expect(params.success_url).toBe("https://converana.com/dashboard/billing?checkout=success");
+    expect(params.cancel_url).toBe("https://converana.com/dashboard/billing?checkout=cancelled");
+  });
+});

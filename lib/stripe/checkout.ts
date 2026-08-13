@@ -3,6 +3,17 @@ import type { Business, Plan } from "@prisma/client";
 import { getStripeClient } from "./client";
 import { prisma } from "@/lib/db/prisma";
 
+/**
+ * Customer-facing brand shown at the top of Stripe Checkout.
+ *
+ * Converana is the SaaS brand; Noël Company Ltd remains the legal entity on
+ * the Stripe account. `branding_settings.display_name` changes the Checkout
+ * heading only — Stripe still shows the registered business name in terms,
+ * receipts and invoices, so this does not alter or misrepresent the legal
+ * entity behind the transaction.
+ */
+const CHECKOUT_DISPLAY_NAME = "Converana";
+
 function priceIdForPlan(plan: Plan): string | null {
   if (plan === "STARTER") return process.env.STRIPE_PRICE_STARTER || null;
   if (plan === "GROWTH") return process.env.STRIPE_PRICE_GROWTH || null;
@@ -112,6 +123,12 @@ export async function createCheckoutSession(business: Business, plan: Plan, appU
     metadata: { businessId: business.id, plan },
     subscription_data: { metadata: { businessId: business.id, plan } },
     allow_promotion_codes: true,
+    // Show the customer-facing brand at the top of Checkout. Per Stripe this
+    // overrides ONLY the heading — the legal entity (Noël Company Ltd) still
+    // appears in terms, receipts and invoices, which is exactly what we want:
+    // customers recognise Converana, while the legal/account details on the
+    // Stripe account are untouched.
+    branding_settings: { display_name: CHECKOUT_DISPLAY_NAME },
     success_url: `${appUrl}/dashboard/billing?checkout=success`,
     cancel_url: `${appUrl}/dashboard/billing?checkout=cancelled`,
   };
