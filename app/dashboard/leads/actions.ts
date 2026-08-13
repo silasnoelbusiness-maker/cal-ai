@@ -181,6 +181,42 @@ export async function updateLeadDetailsAction(
 }
 
 /**
+ * Records or withdraws a lead's consent for one channel.
+ *
+ * Both the follow-up cron and the manual send path refuse to send without
+ * the matching flag, so this is the switch that lets a business bring an
+ * imported lead — which arrives with no consent on file — into outreach,
+ * one lead at a time and only deliberately. Business-scoped like every other
+ * lead action: the lead id is filtered by the session's business, so it can
+ * never flip a flag on someone else's lead.
+ */
+export async function setLeadConsentAction(
+  leadId: string,
+  channel: "sms" | "email",
+  granted: boolean
+) {
+  const { business } = await requireBusiness();
+
+  await prisma.lead.updateMany({
+    where: { id: leadId, businessId: business.id },
+    data: channel === "sms" ? { smsConsent: granted } : { emailConsent: granted },
+  });
+
+  await prisma.leadEvent.create({
+    data: {
+      leadId,
+      businessId: business.id,
+      type: "CONSENT_CHANGED",
+      description: granted
+        ? `${channel === "sms" ? "SMS" : "Email"} consent recorded by the business.`
+        : `${channel === "sms" ? "SMS" : "Email"} consent withdrawn.`,
+    },
+  });
+
+  revalidatePath(`/dashboard/leads/${leadId}`);
+}
+
+/**
  * Toggles a lead's opt-out flag (Section 68 SMS/email compliance). Opted-out
  * leads are excluded from all follow-up automation.
  */

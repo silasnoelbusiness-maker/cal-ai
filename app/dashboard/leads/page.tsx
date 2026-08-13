@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
-import { Users } from "lucide-react";
+import Link from "next/link";
+import { Plug, Users } from "lucide-react";
 import { requireBusiness } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import { buildLeadsWhere, buildLeadsOrderBy, LEADS_PAGE_SIZE, type LeadFilter } from "@/lib/leads/query";
 import { PageHeader } from "@/components/dashboard/page-header";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LeadsFilters } from "@/components/leads/leads-filters";
 import { LeadsSearch } from "@/components/leads/leads-search";
 import { LeadsTable } from "@/components/leads/leads-table";
 import { NewLeadDialog } from "@/components/leads/new-lead-dialog";
+import { ImportLeadsDialog } from "@/components/leads/import-leads-dialog";
 import { AddTestLeadButton } from "@/components/dashboard/add-test-lead-button";
 import { Pagination } from "@/components/ui/pagination";
 
@@ -65,15 +68,34 @@ export default async function LeadsPage({ searchParams }: PageProps<"/dashboard/
       <PageHeader
         title="Leads"
         description="Every lead captured across your sources, qualified and prioritized automatically."
-        actions={<NewLeadDialog />}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <ImportLeadsDialog />
+            <NewLeadDialog />
+          </div>
+        }
       />
 
       {totalAllLeads === 0 ? (
         <EmptyState
           icon={Users}
           title="No leads yet"
-          description="Connect your website form or create your first lead to see Converana in action."
-          action={<AddTestLeadButton />}
+          description="Import the leads you already have, add one by hand, or connect a source so new leads arrive automatically."
+          action={
+            <div className="flex flex-col items-center gap-3">
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <NewLeadDialog />
+                <ImportLeadsDialog />
+                <Button variant="outline" asChild>
+                  <Link href="/dashboard/settings/integrations">
+                    <Plug className="h-4 w-4" />
+                    Connect lead source
+                  </Link>
+                </Button>
+              </div>
+              <AddTestLeadButton />
+            </div>
+          }
         />
       ) : (
         <Card>

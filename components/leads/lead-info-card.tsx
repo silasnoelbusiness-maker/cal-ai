@@ -1,6 +1,6 @@
 import { Mail, Phone, MapPin, Wrench, Tag, DollarSign, MessageSquareText } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ConsentToggle } from "@/components/leads/consent-toggle";
 import { OptOutToggle } from "@/components/leads/opt-out-toggle";
 import { formatCurrency, formatDate, unknownOr } from "@/lib/utils";
 import type { Lead } from "@prisma/client";
@@ -49,12 +49,8 @@ export function LeadInfoCard({ lead }: { lead: Lead }) {
         {lead.message && <Row icon={MessageSquareText} label="Initial message" value={lead.message} />}
         <Row icon={Tag} label="Captured" value={formatDate(lead.createdAt)} />
         <div className="flex flex-wrap gap-1.5 pt-3">
-          <Badge variant={lead.smsConsent ? "success" : "outline"}>
-            SMS consent {lead.smsConsent ? "granted" : "not on file"}
-          </Badge>
-          <Badge variant={lead.emailConsent ? "success" : "outline"}>
-            Email consent {lead.emailConsent ? "granted" : "not on file"}
-          </Badge>
+          <ConsentToggle leadId={lead.id} channel="sms" granted={lead.smsConsent} />
+          <ConsentToggle leadId={lead.id} channel="email" granted={lead.emailConsent} />
           <OptOutToggle leadId={lead.id} optedOut={lead.optedOut} />
         </div>
       </CardContent>
