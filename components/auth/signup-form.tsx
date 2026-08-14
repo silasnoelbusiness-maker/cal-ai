@@ -1,7 +1,9 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { signUpAction, type AuthFormState } from "@/app/(auth)/actions";
+import { trackWhopRegistrationWhenReady } from "@/lib/analytics/whop";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +12,29 @@ const initialState: AuthFormState = {};
 
 export function SignupForm() {
   const [state, formAction, pending] = useActionState(signUpAction, initialState);
+  const router = useRouter();
+
+  // Reports the Whop conversion, then navigates. `state.registered` is set
+  // by the server only for a genuinely new account, and the tracker itself
+  // is idempotent per user id, so a refresh or a double-invoked effect
+  // cannot produce a second conversion.
+  useEffect(() => {
+    if (state.registered) trackWhopRegistrationWhenReady(state.registered);
+    // Navigation is not conditional on tracking succeeding — an ad blocker
+    // must never strand someone on the signup page.
+    if (state.redirectTo) router.push(state.redirectTo);
+  }, [state.registered, state.redirectTo, router]);
+
+  // The account exists and the session is live; the router push is already
+  // in flight. Showing the empty form again in the meantime would look like
+  // the submission failed.
+  if (state.redirectTo) {
+    return (
+      <p className="rounded-lg border border-border bg-muted-surface/50 px-4 py-3 text-center text-sm text-muted">
+        Account created — taking you to setup…
+      </p>
+    );
+  }
 
   if (state.success) {
     return (

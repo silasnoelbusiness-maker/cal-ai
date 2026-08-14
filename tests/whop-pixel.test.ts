@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -54,6 +54,23 @@ describe("the pixel only loads where it should", () => {
     // That page renders on OUR customers' websites — firing our advertising
     // pixel on their visitors would be their legal exposure, not ours.
     expect(read("app/embed/[businessId]/page.tsx")).not.toContain("WhopPixel");
+  });
+});
+
+describe("the conversion fires where the pixel actually exists", () => {
+  it("signup lives in the (auth) group, which mounts the pixel", () => {
+    // The whole design depends on this: the conversion is sent from
+    // /signup, so /signup must be under a layout that loads the pixel. If
+    // signup ever moves out of this group, `window.whop` is undefined there
+    // and every conversion is silently lost.
+    expect(existsSync("app/(auth)/signup/page.tsx")).toBe(true);
+    expect(read("app/(auth)/layout.tsx")).toContain("WhopPixel");
+  });
+
+  it("the signup form reports the conversion and the server gates it", () => {
+    expect(read("components/auth/signup-form.tsx")).toContain("trackWhopRegistrationWhenReady");
+    // `registered` is only ever set server-side, from Supabase's response.
+    expect(read("app/(auth)/actions.ts")).toContain("identities");
   });
 });
 

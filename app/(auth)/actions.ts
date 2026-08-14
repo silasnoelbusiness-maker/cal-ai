@@ -8,6 +8,15 @@ import { isSupabaseConfigured } from "@/lib/auth/config";
 export interface AuthFormState {
   error?: string;
   success?: string;
+  /**
+   * Set only when this submission created a genuinely new account. Drives
+   * the Whop `complete_registration` conversion, so it must never be set for
+   * a failed signup, a login, or an email that already had an account.
+   * Decided here on the server — the browser cannot talk us into it.
+   */
+  registered?: { userId: string; email: string };
+  /** Where the client should navigate once the conversion has been sent. */
+  redirectTo?: string;
 }
 
 const emailSchema = z.email("Enter a valid email address.");
@@ -45,14 +54,33 @@ export async function signUpAction(
 
   if (error) return { error: error.message };
 
-  if (data.session) {
-    redirect("/onboarding");
+  const confirmationMessage =
+    "Account created. Check your email to confirm your address, then log in to get started.";
+
+  // Supabase deliberately does NOT return an error when the email already
+  // has an account — that would let anyone enumerate registered users. It
+  // returns an obfuscated user with an empty `identities` array instead,
+  // which is the only reliable tell. Without this check, a returning
+  // customer re-submitting the signup form would be counted as a brand-new
+  // registration and bill the ad campaign for a conversion that never
+  // happened. The response is byte-identical to the real one, so this
+  // doesn't reintroduce enumeration.
+  const isExistingAccount = Boolean(data.user) && (data.user?.identities?.length ?? 0) === 0;
+  if (isExistingAccount) {
+    return { success: confirmationMessage };
   }
 
-  return {
-    success:
-      "Account created. Check your email to confirm your address, then log in to get started.",
-  };
+  const registered = data.user ? { userId: data.user.id, email } : undefined;
+
+  // Navigation moved to the client so the conversion fires before the page
+  // unloads. Keeping the server redirect here would drop it: the browser
+  // leaves /signup — the only place the pixel is loaded — before any
+  // client code has run.
+  if (data.session) {
+    return { registered, redirectTo: "/onboarding" };
+  }
+
+  return { success: confirmationMessage, registered };
 }
 
 export async function loginAction(

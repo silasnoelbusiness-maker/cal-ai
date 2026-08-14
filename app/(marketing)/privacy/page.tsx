@@ -65,6 +65,14 @@ export default function PrivacyPage() {
             Twilio (SMS delivery), each of which processes data solely to provide their respective
             service to Converana.
           </p>
+          <p>
+            We also use Whop for advertising measurement. Whop receives page views on our public
+            marketing and sign-up pages, and — when you create an account — your email address and
+            account identifier, so we can tell which advertising brought you to Converana. Whop is
+            not involved in billing, and receives no payment, plan or subscription information. It
+            does not receive anything from inside your dashboard, and it receives nothing at all
+            about the leads or customers you store in Converana.
+          </p>
         </section>
 
         <section>
