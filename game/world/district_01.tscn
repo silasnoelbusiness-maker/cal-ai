@@ -1,0 +1,49 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://world/district_01.gd" id="1_district"]
+[ext_resource type="Script" path="res://world/day_night_cycle.gd" id="2_daynight"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+sky_top_color = Color(0.243137, 0.396078, 0.647059, 1)
+sky_horizon_color = Color(0.639216, 0.694118, 0.752941, 1)
+sky_curve = 0.12
+ground_bottom_color = Color(0.164706, 0.176471, 0.196078, 1)
+ground_horizon_color = Color(0.494118, 0.505882, 0.529412, 1)
+sun_angle_max = 12.0
+
+[sub_resource type="Sky" id="Sky_district"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_district"]
+background_mode = 2
+sky = SubResource("Sky_district")
+ambient_light_source = 3
+ambient_light_energy = 0.5
+tonemap_mode = 2
+tonemap_white = 3.5
+ssao_enabled = true
+ssao_radius = 1.4
+ssao_intensity = 1.2
+fog_enabled = true
+fog_light_color = Color(0.588235, 0.639216, 0.701961, 1)
+fog_density = 0.0016
+
+[node name="District01" type="Node3D"]
+script = ExtResource("1_district")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_district")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.642788, -0.586824, 0.492404, 0, 0.642788, 0.766044, -0.766044, -0.492404, 0.413176, 0, 40, 0)
+light_energy = 1.0
+shadow_enabled = true
+shadow_bias = 0.04
+shadow_normal_bias = 1.5
+directional_shadow_mode = 2
+directional_shadow_max_distance = 180.0
+script = ExtResource("2_daynight")
+environment_path = NodePath("../WorldEnvironment")
+
+[node name="PlayerSpawn" type="Marker3D" parent="."]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -60, 0.3, -7.5)

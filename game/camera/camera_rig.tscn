@@ -1,0 +1,17 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://camera/top_down_camera.gd" id="1_camera"]
+
+[node name="CameraRig" type="Node3D"]
+script = ExtResource("1_camera")
+
+[node name="SpringArm3D" type="SpringArm3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.438371, -0.898794, 0, 0.898794, 0.438371, 0, 0, 0)
+collision_mask = 1
+spring_length = 22.0
+margin = 0.4
+
+[node name="Camera3D" type="Camera3D" parent="SpringArm3D"]
+fov = 62.0
+near = 0.1
+far = 400.0

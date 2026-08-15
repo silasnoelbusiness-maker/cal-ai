@@ -1,0 +1,9 @@
+# Godot 4 editor and import cache. Regenerated on first open / first import.
+.godot/
+
+# Exported builds
+build/
+export_presets.cfg
+
+# Editor scratch
+*.translation

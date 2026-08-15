@@ -1,0 +1,296 @@
+extends Node
+## Headless smoke test for the V0.1 prototype.
+##
+## Instances the real main scene and drives it with simulated input, so the
+## things that are easy to break silently — spawn placement, curb climbing,
+## building collision, camera framing, interaction focus — fail loudly instead.
+##
+##   godot --headless --path game res://tests/smoke_test.tscn
+##
+## Exits with code 0 when every check passes, 1 otherwise.
+
+const MAIN_SCENE := preload("res://main.tscn")
+
+var _main: Node3D
+var _player: Player
+var _camera_rig: TopDownCamera
+var _failures: Array[String] = []
+var _checks: int = 0
+var _notifications: Array[String] = []
+
+
+func _ready() -> void:
+	_main = MAIN_SCENE.instantiate()
+	add_child(_main)
+	GameManager.notification_posted.connect(
+		func(message: String, _tone: int) -> void: _notifications.append(message)
+	)
+	await _run()
+
+
+func _run() -> void:
+	_player = _main.get_node("Player")
+	_camera_rig = _main.get_node("CameraRig")
+	await _settle(30)
+
+	await _test_world_built()
+	await _test_spawn_and_gravity()
+	await _test_camera_framing()
+	await _test_walking_and_sprinting()
+	await _test_building_collision()
+	await _test_curb_step_up()
+	await _test_interaction()
+	await _test_pause()
+	await _test_day_night()
+	_test_clock_and_economy()
+
+	_report()
+
+
+# --- Checks --------------------------------------------------------------
+
+func _test_world_built() -> void:
+	var district: District01 = _main.get_node("District01")
+	var geometry := district.get_node("Geometry")
+	var buildings := district.get_node("Buildings")
+	var interactables := district.get_node("Interactables")
+
+	_check(geometry.get_child_count() > 100, "district geometry was generated")
+	_check(buildings.get_child_count() == 12, "12 buildings placed")
+	_check(interactables.get_child_count() >= 9, "interaction points placed")
+	_check(
+		get_tree().get_nodes_in_group("street_light").size() == 32, "32 street lights registered"
+	)
+	_check(GameManager.player == _player, "player registered with GameManager")
+
+
+func _test_spawn_and_gravity() -> void:
+	await _settle(40)
+	_check(_player.is_on_floor(), "player settles on the ground")
+	_check(
+		absf(_player.global_position.y - CityKit.CURB_HEIGHT) < 0.06,
+		"player spawns standing on the sidewalk (y=%.3f)" % _player.global_position.y
+	)
+
+
+func _test_camera_framing() -> void:
+	var camera: Camera3D = _camera_rig.camera
+	_check(camera.current, "camera rig is the active camera")
+
+	var offset := camera.global_position - _player.global_position
+	_check(offset.y > 10.0, "camera sits well above the player (%.1f)" % offset.y)
+
+	# "Behind" is the rig's local +Z, whatever the current orbit yaw is.
+	var behind := _camera_rig.global_transform.basis.z
+	var planar_offset := Vector3(offset.x, 0.0, offset.z)
+	_check(
+		planar_offset.normalized().dot(behind.normalized()) > 0.95,
+		"camera sits behind the player along the rig's yaw"
+	)
+	_check(planar_offset.length() > 8.0, "camera stands back far enough (%.1fm)" % planar_offset.length())
+
+	var pitch := rad_to_deg(atan2(offset.y, planar_offset.length()))
+	_check(pitch > 50.0 and pitch < 70.0, "camera looks down at %.0f degrees" % pitch)
+
+	# Every movement check below assumes forward is north, so pin the orbit.
+	_camera_rig.yaw_degrees = 0.0
+	await _settle(4)
+
+
+func _test_walking_and_sprinting() -> void:
+	await _teleport(Vector3(-60.0, 0.4, -7.5))
+	var start := _player.global_position
+
+	await _hold(["move_forward"], 40)
+	var walked := _player.global_position.distance_to(start)
+	_check(walked > 2.0, "player walks with W (%.1fm)" % walked)
+	# Camera yaw is 0, so forward is -Z.
+	_check(
+		_player.global_position.z < start.z - 1.0, "W moves away from the camera, not toward it"
+	)
+
+	await _teleport(Vector3(-60.0, 0.4, -7.5))
+	_player.stats.add_energy(PlayerStats.MAX_VALUE)
+	var energy_before := _player.stats.energy
+	start = _player.global_position
+	await _hold(["move_forward", "sprint"], 40)
+	var sprinted := _player.global_position.distance_to(start)
+	_check(sprinted > walked * 1.2, "sprinting is faster (%.1fm vs %.1fm)" % [sprinted, walked])
+	_check(_player.stats.energy < energy_before, "sprinting drains energy")
+
+	# Deceleration: releasing input brings the player to a stop.
+	await _settle(45)
+	_check(_player.get_planar_speed() < 0.15, "player decelerates to a stop")
+
+
+func _test_building_collision() -> void:
+	# Stand in the setback in front of Larkspur Apartments and walk into it.
+	await _teleport(Vector3(-60.0, 0.4, -11.0))
+	await _hold(["move_forward"], 70)
+	_check(
+		_player.global_position.z > -12.6,
+		"building wall blocks the player (z=%.2f)" % _player.global_position.z
+	)
+
+
+func _test_curb_step_up() -> void:
+	# Start on the carriageway and walk north onto the Main Street sidewalk.
+	await _teleport(Vector3(-64.0, 0.4, -3.0))
+	await _settle(25)
+	_check(_player.global_position.y < 0.05, "player stands on the road surface")
+
+	await _hold(["move_forward"], 70)
+	_check(
+		_player.global_position.z < -6.3,
+		"player crosses onto the sidewalk (z=%.2f)" % _player.global_position.z
+	)
+	_check(
+		_player.global_position.y > CityKit.CURB_HEIGHT - 0.04,
+		"player steps up the curb instead of being blocked (y=%.3f)" % _player.global_position.y
+	)
+
+
+func _test_interaction() -> void:
+	var controller := _player.interaction
+	await _teleport(Vector3(-53.0, 0.4, -5.4))
+	await _settle(25)
+
+	var focused := controller.get_focused()
+	_check(focused != null, "an interactable is focused near the notice board")
+	if focused == null:
+		return
+	_check(focused.name == "Notices", "the notice board wins focus (got %s)" % focused.name)
+	_check(
+		focused.get_prompt_text() == "E — Read notices",
+		"prompt text is '%s'" % focused.get_prompt_text()
+	)
+
+	_notifications.clear()
+	await _press_action("interact")
+	await _settle(4)
+	_check(_notifications.size() == 1, "interacting fires exactly one notification")
+
+	# Walking away must clear the focus so the prompt disappears.
+	await _teleport(Vector3(-53.0, 0.4, 20.0))
+	await _settle(25)
+	_check(controller.get_focused() == null, "focus clears when walking away")
+
+
+func _test_pause() -> void:
+	await _press_action("pause_menu")
+	await _settle(4)
+	_check(GameManager.is_paused(), "ESC pauses the game")
+
+	var clock_at_pause := TimeManager.total_minutes
+	await _settle(20)
+	_check(
+		is_equal_approx(TimeManager.total_minutes, clock_at_pause),
+		"the clock stops while paused"
+	)
+
+	await _press_action("pause_menu")
+	await _settle(10)
+	_check(not GameManager.is_paused(), "ESC resumes the game")
+	_check(TimeManager.total_minutes > clock_at_pause, "the clock restarts on resume")
+
+
+## Regression cover: the lights-on state must be driven by the clock, including
+## when the game starts at night, and the sun must actually move.
+func _test_day_night() -> void:
+	var sun: DayNightCycle = _main.get_node("District01/Sun")
+	var lamp: OmniLight3D = get_tree().get_nodes_in_group("street_light")[0]
+	var windows: StandardMaterial3D = _main.get_node("District01")._mat("windows")
+
+	TimeManager.set_total_minutes(23.0 * 60.0)
+	await _settle(4)
+	_check(lamp.visible, "street lights switch on at night")
+	_check(windows.emission_energy_multiplier > 0.5, "windows are lit at night")
+	var night_pitch := sun.rotation_degrees.x
+	var night_energy := sun.light_energy
+
+	TimeManager.set_total_minutes(12.0 * 60.0)
+	await _settle(4)
+	_check(not lamp.visible, "street lights switch off during the day")
+	_check(windows.emission_energy_multiplier < 0.05, "windows stop glowing by day")
+	_check(sun.light_energy > night_energy * 3.0, "the sun is brighter at noon")
+	_check(
+		absf(sun.rotation_degrees.x - night_pitch) > 20.0, "the sun moves across the sky"
+	)
+
+
+func _test_clock_and_economy() -> void:
+	var day_before := TimeManager.get_day_name()
+	var minutes_before := TimeManager.total_minutes
+	TimeManager.advance_hours(20)
+	_check(TimeManager.total_minutes > minutes_before + 1190.0, "time skips forward")
+	_check(TimeManager.get_day_name() != day_before, "the day rolls over")
+
+	_check(EconomyManager.cash == EconomyManager.STARTING_CASH, "player starts with $500")
+	_check(EconomyManager.spend(120, "Test"), "spending within balance succeeds")
+	_check(EconomyManager.cash == 380, "balance drops to $380")
+	_check(not EconomyManager.spend(9999, "Test"), "spending beyond balance is refused")
+	_check(EconomyManager.cash == 380, "refused spend leaves the balance alone")
+	EconomyManager.deposit(120, "Test wage")
+	_check(EconomyManager.cash == 500, "wages are credited")
+	# The refused spend must not appear in the ledger.
+	_check(EconomyManager.get_history().size() == 2, "only completed transactions are logged")
+
+
+# --- Harness -------------------------------------------------------------
+
+func _check(condition: bool, description: String) -> void:
+	_checks += 1
+	if condition:
+		print("  PASS  ", description)
+	else:
+		print("  FAIL  ", description)
+		_failures.append(description)
+
+
+func _settle(frames: int) -> void:
+	for i in frames:
+		await get_tree().physics_frame
+
+
+func _teleport(where: Vector3) -> void:
+	_release_all()
+	_player.velocity = Vector3.ZERO
+	_player.global_position = where
+	await _settle(12)
+
+
+func _hold(actions: Array, frames: int) -> void:
+	for action: String in actions:
+		Input.action_press(action)
+	await _settle(frames)
+	_release_all()
+
+
+func _release_all() -> void:
+	for action in ["move_forward", "move_back", "move_left", "move_right", "sprint"]:
+		Input.action_release(action)
+
+
+func _press_action(action: String) -> void:
+	var event := InputEventAction.new()
+	event.action = action
+	event.pressed = true
+	Input.parse_input_event(event)
+	await get_tree().process_frame
+	var release := InputEventAction.new()
+	release.action = action
+	release.pressed = false
+	Input.parse_input_event(release)
+	await get_tree().process_frame
+
+
+func _report() -> void:
+	print("")
+	if _failures.is_empty():
+		print("SMOKE TEST PASSED — %d checks" % _checks)
+		get_tree().quit(0)
+		return
+	print("SMOKE TEST FAILED — %d of %d checks failed:" % [_failures.size(), _checks])
+	for failure in _failures:
+		print("  - ", failure)
+	get_tree().quit(1)
