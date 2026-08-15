@@ -17,10 +17,10 @@ export function ProductPreview() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <MiniMetric label="New leads" value="24" trend="+18%" />
-        <MiniMetric label="Qualified" value="11" trend="+9%" />
-        <MiniMetric label="Appointments" value="7" trend="+22%" />
-        <MiniMetric label="Recovered revenue" value="$8,450" trend="+31%" emphasize />
+        <MiniMetric label="New leads" value="24" />
+        <MiniMetric label="Qualified" value="11" />
+        <MiniMetric label="Appointments" value="7" />
+        <MiniMetric label="Follow-ups" value="18" emphasize />
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-5">
@@ -81,15 +81,20 @@ export function ProductPreview() {
   );
 }
 
+/**
+ * A single counter in the preview's metric row.
+ *
+ * Counts only — no growth percentages. These numbers illustrate what the
+ * product tracks; a "+31%" beside them would read as a result Converana
+ * produced for a real customer, which is a claim we can't stand behind.
+ */
 function MiniMetric({
   label,
   value,
-  trend,
   emphasize,
 }: {
   label: string;
   value: string;
-  trend: string;
   emphasize?: boolean;
 }) {
   return (
@@ -98,7 +103,6 @@ function MiniMetric({
     >
       <p className="truncate text-[10px] font-medium uppercase tracking-wide text-muted">{label}</p>
       <p className="mt-0.5 text-base font-semibold text-foreground">{value}</p>
-      <p className="text-[10px] font-medium text-success">{trend}</p>
     </div>
   );
 }

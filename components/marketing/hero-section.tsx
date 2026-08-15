@@ -11,12 +11,19 @@ export function HeroSection() {
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-muted">
             Built for home service businesses
           </div>
-          <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-            Stop Losing Leads While You&apos;re Busy.
+          {/* text-balance only — same font sizes and spacing as before. The
+              longer headline would otherwise leave a one-word last line on a
+              narrow phone. */}
+          <h1 className="text-balance text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+            Stop Losing Money on Leads You Already Paid For.
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted">
             Converana automatically follows up with new and missed leads, qualifies them with AI,
             and helps turn more conversations into booked customers.
+          </p>
+          <p className="mt-3 max-w-xl leading-relaxed text-muted">
+            Already have a lead list? Import your CSV and start working those opportunities in
+            minutes.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Button size="lg" asChild>
