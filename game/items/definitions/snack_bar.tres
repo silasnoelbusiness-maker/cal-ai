@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"snack_bar"
+display_name = "Snack Bar"
+description = "Cheap, filling enough, tastes of cardboard."
+category = 0
+price = 10
+max_stack = 5
+icon_color = Color(0.788235, 0.560784, 0.301961, 1)
+consumable = true
+restores_hunger = 22.0
+restores_energy = 4.0
+restores_health = 0.0
+use_minutes = 3

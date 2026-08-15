@@ -55,13 +55,42 @@ extends Node3D
 var _target: Node3D = null
 var _speed_extra: float = 0.0
 var _follow_blend: float = 1.0
+## The exported framing, remembered so a temporary interior view can be undone.
+var _default_distance: float = 0.0
+var _default_pitch: float = 0.0
 
 
 func _ready() -> void:
+	_default_distance = distance
+	_default_pitch = pitch_degrees
 	_apply_pitch()
 	rotation_degrees.y = yaw_degrees
+	GameManager.player_teleported.connect(_on_player_teleported)
 	if _target != null:
 		global_position = _desired_pivot_position()
+
+
+## Temporarily reframes the camera — used by doorways into interiors, which are
+## far too small for the street framing.
+func apply_view(new_distance: float, new_pitch: float) -> void:
+	distance = clampf(new_distance, min_distance, max_distance)
+	pitch_degrees = new_pitch
+	_speed_extra = 0.0
+	if _spring_arm != null:
+		_spring_arm.spring_length = distance
+
+
+func reset_view() -> void:
+	apply_view(_default_distance, _default_pitch)
+
+
+## A teleport is a cut, not a move: re-seat the pivot instead of flying the
+## camera across the map.
+func _on_player_teleported(_destination: Transform3D) -> void:
+	if _target == null or not is_instance_valid(_target):
+		return
+	global_position = _desired_pivot_position()
+	_follow_blend = 1.0
 
 
 func set_target(new_target: Node3D, snap: bool = false) -> void:

@@ -1,0 +1,84 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://ui/shop_panel.gd" id="1_shop_panel"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_frame"]
+content_margin_left = 26.0
+content_margin_top = 20.0
+content_margin_right = 26.0
+content_margin_bottom = 20.0
+bg_color = Color(0.0588235, 0.0666667, 0.0862745, 0.94)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(1, 1, 1, 0.2)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[node name="ShopPanel" type="Control"]
+visible = false
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_shop_panel")
+
+[node name="Dim" type="ColorRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.0235294, 0.027451, 0.0392157, 0.65)
+
+[node name="Center" type="CenterContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Frame" type="PanelContainer" parent="Center"]
+custom_minimum_size = Vector2(560, 0)
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_frame")
+
+[node name="Body" type="VBoxContainer" parent="Center/Frame"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="ShopTitle" type="Label" parent="Center/Frame/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 26
+text = "SHOP"
+horizontal_alignment = 1
+
+[node name="ShopCash" type="Label" parent="Center/Frame/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.639216, 0.929412, 0.686275, 1)
+theme_override_font_sizes/font_size = 16
+text = "Your cash: $500"
+horizontal_alignment = 1
+
+[node name="StockRows" type="VBoxContainer" parent="Center/Frame/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ShopStatus" type="Label" parent="Center/Frame/Body"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+horizontal_alignment = 1
+
+[node name="ShopHint" type="Label" parent="Center/Frame/Body"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.694118, 0.729412, 0.784314, 1)
+theme_override_font_sizes/font_size = 14
+text = "ESC to leave the counter  ·  TAB to open your bag"
+horizontal_alignment = 1

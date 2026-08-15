@@ -42,6 +42,19 @@ const LAMP_GLOW := Color(1.0, 0.878, 0.678)
 ## Emission energy of the lit window bands at full night.
 const WINDOW_NIGHT_ENERGY := 0.8
 
+## What the convenience store sells. Data, not code: adding a line here is a new
+## product, and a second shop is a second list.
+const MARKET_STOCK: Array[ItemData] = [
+	preload("res://items/definitions/basic_meal.tres"),
+	preload("res://items/definitions/snack_bar.tres"),
+	preload("res://items/definitions/energy_drink.tres"),
+]
+const WAREHOUSE_JOB: JobData = preload("res://jobs/definitions/warehouse_worker.tres")
+
+## Framing used inside the apartment, which is far too small for street framing.
+const INTERIOR_CAMERA_DISTANCE := 11.0
+const INTERIOR_CAMERA_PITCH := 74.0
+
 var _palette: Dictionary = {}
 var _geometry: Node3D
 var _props: Node3D
@@ -64,6 +77,7 @@ func _ready() -> void:
 	_build_park()
 	_build_parking()
 	_build_street_lights()
+	_build_warehouse_yard()
 	_build_venue_doors()
 	_build_notice_board()
 
@@ -682,35 +696,87 @@ func _add_street_light(parent: Node3D, index: int, base: Vector3, toward: Vector
 	holder.add_child(light)
 
 
+## Dressing for the job location, so it reads as somewhere you go to work
+## rather than a blank wall with a prompt on it.
+func _build_warehouse_yard() -> void:
+	var yard := _make_container("WarehouseYard")
+
+	# Loading dock beside the gate, with steps up so it is not a dead end.
+	CityKit.add_slab(
+		yard, "Dock", CityKit.rect_from_bounds(-72.0, 11.0, -63.0, 15.0), 0.0, 1.0, _mat("plinth")
+	)
+	# Steps down off the east end of the dock, tallest nearest the platform, so
+	# the dock is not a ledge the player can climb onto but never leave.
+	for i in 3:
+		var step_x := -63.0 + float(i) * 0.7
+		CityKit.add_slab(
+			yard,
+			"DockStep%d" % i,
+			CityKit.rect_from_bounds(step_x, 11.6, step_x + 0.7, 14.4),
+			0.0,
+			1.0 - float(i + 1) * 0.25,
+			_mat("plinth")
+		)
+
+	# Roller shutters on the facade, either side of the gate.
+	for x in [-68.0, -50.0]:
+		CityKit.add_box(
+			yard,
+			"Shutter%.0f" % x,
+			Vector3(x, 1.75, 14.86),
+			Vector3(4.0, 3.5, 0.28),
+			_mat("metal"),
+			false
+		)
+
+	# Pallets and crates stacked in the corner of the yard. Kept east of the gate
+	# approach and clear of the Main Street sidewalk (which ends at z = 9), so
+	# they dress the yard without blocking the walk to work. Seeded so the
+	# layout is stable between runs.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("PierpointYard")
+	for i in 7:
+		var size := Vector3(
+			rng.randf_range(1.1, 1.9), rng.randf_range(0.9, 1.7), rng.randf_range(1.1, 1.9)
+		)
+		var spot := Vector3(
+			rng.randf_range(-53.0, -45.5), size.y * 0.5, rng.randf_range(10.5, 13.2)
+		)
+		var material := _mat("wood") if i % 3 != 0 else _mat("sand")
+		CityKit.add_box(yard, "Crate%d" % i, spot, size, material)
+
+
 # --- Interaction points --------------------------------------------------
 
-## Doors and markers for the venues that get their interiors and systems in
-## later phases. The prompts, positions and detection volumes are final; only
-## what happens after the prompt changes.
+## Doors and markers for the district's venues.
 ##
 ## Each entry: name, interaction point, outward facing (away from the wall),
-## prompt verb, message.
+## prompt verb, kind, message. `kind` selects which component the door gets:
+## "portal" into an interior, "shop", "job", or "message" for venues whose
+## systems arrive in a later phase.
 func _venue_table() -> Array:
 	return [
 		[
 			"ApartmentDoor", Vector3(-60.0, 1.2, -12.4), Vector3.BACK, "Enter Apartment",
-			"LARKSPUR APARTMENTS\nYour flat is upstairs — interiors arrive with the apartment system.",
+			"portal", "",
 		],
 		[
 			"MarketDoor", Vector3(-38.0, 1.2, -12.4), Vector3.BACK, "Shop",
-			"HARBOUR ROW MARKET\nOpens with the shop and inventory systems.",
+			"shop", "",
 		],
 		[
 			"DinerDoor", Vector3(20.5, 1.2, -26.4), Vector3.BACK, "Enter Diner",
-			"THE GALLEY DINER\nHot food goes on sale with the shop system.",
+			"message", "THE GALLEY DINER\nSit-down meals arrive with the restaurant system.",
 		],
 		[
-			"WarehouseGate", Vector3(-58.0, 1.2, 45.6), Vector3.BACK, "Work",
-			"PIERPOINT WAREHOUSE\nShifts open with the job system.",
+			# On the north face, so the gate is visible from Main Street rather
+			# than hidden round the back of the block.
+			"WarehouseGate", Vector3(-58.0, 1.2, 14.4), Vector3.FORWARD, "Start shift",
+			"job", "",
 		],
 		[
 			"PrecinctDoor", Vector3(24.5, 1.2, 38.6), Vector3.BACK, "Enter Precinct",
-			"PRECINCT HOUSE\nStaffed once the police and wanted systems are in.",
+			"message", "PRECINCT HOUSE\nStaffed once the police and wanted systems are in.",
 		],
 	]
 
@@ -721,15 +787,64 @@ func _build_venue_doors() -> void:
 		var point: Vector3 = entry[1]
 		var facing: Vector3 = entry[2]
 		var prompt: String = entry[3]
-		var message: String = entry[4]
+		var kind: String = entry[4]
+		var message: String = entry[5]
 
-		var door := MessagePoint.new()
+		var door: Interactable
+		match kind:
+			"portal":
+				door = _make_apartment_portal(point, facing)
+			"shop":
+				door = _make_market_shop()
+			"job":
+				door = _make_warehouse_station()
+			_:
+				var notice := MessagePoint.new()
+				notice.message = message
+				door = notice
+
 		door.name = node_name
 		door.prompt_action = prompt
-		door.message = message
 		CityKit.attach_interactable(_interactables, door, point, 2.6)
 
 		_add_door_panel(node_name, point, facing)
+
+
+## The front door of Larkspur Apartments, plus the marker the flat's own door
+## sends the player back to.
+func _make_apartment_portal(point: Vector3, facing: Vector3) -> Portal:
+	var street_marker := Marker3D.new()
+	street_marker.name = "ApartmentStreetExit"
+	street_marker.position = point + facing * 1.6 - Vector3(0.0, 0.8, 0.0)
+	street_marker.add_to_group(ApartmentInterior.EXIT_GROUP)
+	_interactables.add_child(street_marker)
+
+	var portal := Portal.new()
+	portal.destination_group = ApartmentInterior.ENTRY_GROUP
+	portal.prompt_subtitle = "Larkspur Apartments"
+	# Climbing the stairs costs a couple of minutes.
+	portal.travel_minutes = 2
+	portal.override_camera = true
+	portal.camera_distance = INTERIOR_CAMERA_DISTANCE
+	portal.camera_pitch = INTERIOR_CAMERA_PITCH
+	return portal
+
+
+func _make_market_shop() -> Shop:
+	var shop := Shop.new()
+	shop.shop_name = "Harbour Row Market"
+	shop.prompt_subtitle = "Harbour Row Market"
+	shop.stock = MARKET_STOCK
+	shop.opens_hour = 6
+	shop.closes_hour = 23
+	return shop
+
+
+func _make_warehouse_station() -> JobStation:
+	var station := JobStation.new()
+	station.job = WAREHOUSE_JOB
+	station.prompt_subtitle = "Pierpoint Warehouse"
+	return station
 
 
 ## A visible door slab on the facade, so the prompt has something to point at.
@@ -766,8 +881,9 @@ func _build_notice_board() -> void:
 	notice.focus_priority = 1
 	notice.message = (
 		"HARBOUR ROW — CONTROLS\n"
-		+ "WASD move  ·  SHIFT sprint  ·  E interact\n"
-		+ "Q / ARROWS or RIGHT-DRAG orbit  ·  WHEEL zoom  ·  ESC pause"
+		+ "WASD move  ·  SHIFT sprint  ·  E interact  ·  TAB bag\n"
+		+ "Q / ARROWS or RIGHT-DRAG orbit  ·  WHEEL zoom  ·  ESC pause\n"
+		+ "Sleep at home, work the warehouse gate, eat from the market."
 	)
 	CityKit.attach_interactable(
 		_interactables, notice, holder.position + Vector3(0.0, 1.1, 0.9), 2.2

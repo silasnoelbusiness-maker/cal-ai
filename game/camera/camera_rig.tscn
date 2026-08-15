@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://camera/top_down_camera.gd" id="1_camera"]
 
-[node name="CameraRig" type="Node3D"]
+[node name="CameraRig" type="Node3D" groups=["camera_rig"]]
 script = ExtResource("1_camera")
 
 [node name="SpringArm3D" type="SpringArm3D" parent="."]

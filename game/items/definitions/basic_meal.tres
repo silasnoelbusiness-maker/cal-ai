@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"basic_meal"
+display_name = "Basic Meal"
+description = "A hot tray of something. Does the job."
+category = 0
+price = 15
+max_stack = 5
+icon_color = Color(0.847059, 0.407843, 0.313726, 1)
+consumable = true
+restores_hunger = 35.0
+restores_energy = 8.0
+restores_health = 3.0
+use_minutes = 8

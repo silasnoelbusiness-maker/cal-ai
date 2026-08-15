@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="JobData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://jobs/job_data.gd" id="1_job_data"]
+
+[resource]
+script = ExtResource("1_job_data")
+id = &"warehouse_worker"
+title = "Warehouse Worker"
+employer = "Pierpoint Warehouse"
+description = "Loading and stacking. No experience needed, no questions asked."
+shift_hours = 4.0
+pay = 120
+shifts_per_day = 2
+min_energy = 20.0
+energy_cost = 26.0
+opens_hour = 6
+closes_hour = 22

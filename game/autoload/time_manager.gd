@@ -12,6 +12,11 @@ signal day_passed(day_index: int)
 signal phase_changed(phase: Phase)
 ## Emitted whenever time jumps forward in one step (sleeping, work shifts).
 signal time_skipped(minutes: int)
+## Emitted when the clock is set to an arbitrary value rather than advancing —
+## loading a save, or a test setting up a scenario. Anything that caches state
+## derived from the hour (shop opening, shift availability, needs drain
+## bookkeeping) must recompute here, because no hour "passed" to notice.
+signal clock_synced()
 
 enum Phase { MORNING, DAY, EVENING, NIGHT }
 
@@ -106,6 +111,7 @@ func set_total_minutes(value: float) -> void:
 	_last_hour = hour
 	_last_day = day_index
 	_set_phase(_phase_for_hour(hour))
+	clock_synced.emit()
 
 
 # --- Internals -----------------------------------------------------------

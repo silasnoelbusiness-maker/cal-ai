@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"energy_drink"
+display_name = "Energy Drink"
+description = "Keeps you upright through a double shift."
+category = 1
+price = 6
+max_stack = 5
+icon_color = Color(0.352941, 0.717647, 0.898039, 1)
+consumable = true
+restores_hunger = 5.0
+restores_energy = 32.0
+restores_health = 0.0
+use_minutes = 2

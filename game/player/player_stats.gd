@@ -34,10 +34,21 @@ var hunger: float = MAX_VALUE
 
 var _was_exhausted: bool = false
 var _is_dead: bool = false
+## Clock reading the drain has already been charged up to.
+var _drained_to_minutes: float = 0.0
 
 
 func _ready() -> void:
-	TimeManager.minute_passed.connect(_on_minute_passed)
+	_drained_to_minutes = TimeManager.total_minutes
+	# Both signals funnel into the same elapsed-time calculation. Sleeping and
+	# work shifts jump the clock by hours at once, so counting drain per signal
+	# would under-charge them by orders of magnitude; charging by elapsed
+	# minutes is exact and immune to the two signals overlapping.
+	TimeManager.minute_passed.connect(_on_clock_advanced)
+	TimeManager.time_skipped.connect(_on_time_skipped)
+	# A clock that was set rather than advanced must not be billed as elapsed
+	# time — resync the watermark instead of charging for the jump.
+	TimeManager.clock_synced.connect(_resync_drain_clock)
 	# Push initial values so any UI built after us starts in sync.
 	health_changed.emit(health, MAX_VALUE)
 	energy_changed.emit(energy, MAX_VALUE)
@@ -95,13 +106,36 @@ func restore_values(new_health: float, new_energy: float, new_hunger: float) -> 
 	hunger = clampf(new_hunger, 0.0, MAX_VALUE)
 	_is_dead = health <= 0.0
 	_was_exhausted = energy <= 0.0
+	_drained_to_minutes = TimeManager.total_minutes
 	health_changed.emit(health, MAX_VALUE)
 	energy_changed.emit(energy, MAX_VALUE)
 	hunger_changed.emit(hunger, MAX_VALUE)
 
 
-func _on_minute_passed(_hour: int, _minute: int) -> void:
-	add_hunger(-hunger_per_minute)
-	add_energy(-energy_per_minute)
+func _on_clock_advanced(_hour: int, _minute: int) -> void:
+	_charge_drain()
+
+
+func _on_time_skipped(_minutes: int) -> void:
+	_charge_drain()
+
+
+func _resync_drain_clock() -> void:
+	_drained_to_minutes = TimeManager.total_minutes
+
+
+## Charges needs for however much in-game time has passed since the last
+## charge. Safe to call as often as you like — a second call with no elapsed
+## time does nothing.
+func _charge_drain() -> void:
+	var now := TimeManager.total_minutes
+	var elapsed := now - _drained_to_minutes
+	if elapsed <= 0.0:
+		_drained_to_minutes = now
+		return
+	_drained_to_minutes = now
+
+	add_hunger(-hunger_per_minute * elapsed)
+	add_energy(-energy_per_minute * elapsed)
 	if hunger <= 0.0:
-		add_health(-starving_health_per_minute)
+		add_health(-starving_health_per_minute * elapsed)

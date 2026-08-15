@@ -1,6 +1,8 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://ui/hud.gd" id="1_hud"]
+[ext_resource type="PackedScene" path="res://ui/inventory_panel.tscn" id="2_inventory_panel"]
+[ext_resource type="PackedScene" path="res://ui/shop_panel.tscn" id="3_shop_panel"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
 content_margin_left = 16.0
@@ -251,6 +253,17 @@ theme_override_font_sizes/font_size = 20
 text = "TOAST"
 horizontal_alignment = 1
 
+[node name="ScreenFade" type="ColorRect" parent="Root"]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0)
+layout_mode = 1
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 1)
+
 [node name="PauseOverlay" type="Control" parent="Root"]
 unique_name_in_owner = true
 visible = false
@@ -283,3 +296,9 @@ text = "PAUSED
 ESC to resume"
 horizontal_alignment = 1
 vertical_alignment = 1
+
+[node name="InventoryPanel" parent="." instance=ExtResource("2_inventory_panel")]
+unique_name_in_owner = true
+
+[node name="ShopPanel" parent="." instance=ExtResource("3_shop_panel")]
+unique_name_in_owner = true

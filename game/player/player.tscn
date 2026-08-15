@@ -1,8 +1,9 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://player/player.gd" id="1_player"]
 [ext_resource type="Script" path="res://player/player_stats.gd" id="2_stats"]
 [ext_resource type="Script" path="res://interaction/interaction_controller.gd" id="3_interaction"]
+[ext_resource type="Script" path="res://inventory/inventory.gd" id="4_inventory"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.45
@@ -51,6 +52,10 @@ mesh = SubResource("BoxMesh_accent")
 
 [node name="Stats" type="Node" parent="."]
 script = ExtResource("2_stats")
+
+[node name="Inventory" type="Node" parent="."]
+script = ExtResource("4_inventory")
+slot_count = 8
 
 [node name="InteractionController" type="Area3D" parent="."]
 script = ExtResource("3_interaction")

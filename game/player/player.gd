@@ -29,6 +29,7 @@ enum MoveState { IDLE, WALK, RUN }
 @export var min_energy_to_sprint: float = 2.0
 
 @onready var stats: PlayerStats = $Stats
+@onready var inventory: Inventory = $Inventory
 @onready var interaction: InteractionController = $InteractionController
 @onready var _body_pivot: Node3D = $BodyPivot
 
@@ -47,6 +48,10 @@ func _exit_tree() -> void:
 
 func get_stats() -> PlayerStats:
 	return stats
+
+
+func get_inventory() -> Inventory:
+	return inventory
 
 
 func get_move_state() -> MoveState:

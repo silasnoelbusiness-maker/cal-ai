@@ -4,10 +4,16 @@ An original 3D open-world life & crime simulator, viewed from an elevated
 top-down camera. This directory holds a self-contained **Godot 4.3** project; it
 is unrelated to the Next.js app in the repository root.
 
-**V0.1 milestone 1 is complete:** spawn into a small city district, walk and
-sprint with smooth acceleration, collide correctly with the world, orbit and
-zoom an elevated top-down camera, and see contextual interaction prompts. The
-clock, money, needs and a minimal HUD are wired up behind it.
+**V0.1 phases A–C are complete.** The first full life/economy loop is
+playable end to end: wake up in your flat, sleep off the night, walk to the
+warehouse for a paid shift, buy food at the convenience store, eat it, and head
+home — with the clock, money, needs, inventory and day/night cycle all moving
+underneath.
+
+    sleep at home  ->  4h shift, +$120  ->  buy a meal, -$15  ->  eat  ->  home
+
+Sleeping restores energy but hunger keeps draining across the night, work costs
+hours and energy, and food costs money — so the loop has to keep turning.
 
 ## Running
 
@@ -21,10 +27,11 @@ scene is `res://main.tscn`.
 | `W` `A` `S` `D` | Move (relative to the camera) |
 | `Shift` | Sprint (drains energy) |
 | `E` | Interact with the highlighted object |
+| `Tab` / `I` | Open and close the inventory |
 | `Q` / `←` / `→` | Orbit the camera |
 | Right-mouse drag | Orbit the camera |
 | Mouse wheel | Zoom in / out |
-| `Esc` | Pause / resume |
+| `Esc` | Close an open screen, else pause / resume |
 | `F` | Reserved for enter/exit vehicle (Phase D) |
 
 ## The district
@@ -46,19 +53,42 @@ does not depend on.
 autoload/     game_manager, time_manager, economy_manager  (singletons)
 camera/       top_down_camera.gd + camera_rig.tscn
 interaction/  interactable.gd, interaction_controller.gd, behaviours/
+inventory/    inventory.gd, inventory_slot.gd
+items/        item_data.gd + definitions/*.tres
+jobs/         job_data.gd, job_station.gd + definitions/*.tres
+shops/        shop.gd
 player/       player.tscn, player.gd, player_stats.gd
-ui/           hud.tscn, hud.gd
-world/        district_01.tscn/.gd, city_kit.gd, day_night_cycle.gd
+ui/           hud, inventory_panel, shop_panel
+world/        district_01, city_kit, day_night_cycle, portal, interiors/
 tests/        smoke_test, screenshot
 main.tscn     entry scene
 ```
+
+## How the loop is put together
+
+* **Items** are `ItemData` resources (`items/definitions/*.tres`), so the shop's
+  stock list and the inventory both take resource references — no product is
+  named in code.
+* **Shops** take a stock list and opening hours. A second shop is a second list.
+* **Jobs** are `JobData` resources describing hours, pay, requirements and a
+  per-day shift cap; a `JobStation` is the place you work one from.
+* **Interiors** live off to one side of the world. A `Portal` teleports the
+  player between a street door and an interior marker, found by group so
+  neither side needs to know where the other sits in the tree, and carries the
+  camera framing that interior needs.
+* **Needs** are charged by *elapsed in-game minutes*, not per signal, so an
+  eight-hour sleep and a four-hour shift cost exactly what they should.
 
 ## Tests
 
 A headless smoke test drives the real main scene with simulated input and
 checks spawn placement, gravity, camera framing, walking, sprinting, braking,
 building collision, curb climbing, interaction focus, pausing, the day/night
-cycle and the economy ledger:
+cycle, the economy ledger, and then plays the whole life loop — enter the flat,
+sleep, leave, walk to work, complete a shift, walk to the shop, buy a meal
+through the real shop screen, eat it and go home — plus the rules that keep it
+honest (closed shops, shift caps, too tired to work, a full bag never taking
+your money):
 
 ```sh
 godot --headless --path game res://tests/smoke_test.tscn
@@ -71,17 +101,18 @@ the district:
 
 ```sh
 xvfb-run -a godot --rendering-driver opengl3 --path game \
-    res://tests/screenshot.tscn ++ shot.png 22.5
+    res://tests/screenshot.tscn ++ out=shot.png hour=22.5 scenario=apartment
 ```
 
-Args after `++`: output path, hour of day, then optional camera distance / yaw /
-pitch for overview shots. It runs under the Compatibility renderer, so lighting
-is close to but not identical to the Forward+ game.
+Args after `++` are `key=value` pairs, all optional: `out`, `hour`, `scenario`
+(`street`, `apartment`, `shop`, `inventory`, `warehouse`) and camera `distance`
+/ `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
+rather than faking their results. It runs under the Compatibility renderer, so
+lighting is close to but not identical to the Forward+ game.
 
 ## What is next
 
-Phase B onward: the apartment interior and sleeping, the convenience store and
-inventory, the warehouse job, then vehicles, pedestrians, and the crime,
-witness, wanted and police systems. The venue doors already in the district
-(apartment, market, diner, warehouse, precinct) are real interaction points
-holding those places; only what happens behind the prompt is still to come.
+Phase D onward: vehicles and enter/exit, then pedestrians and the crime,
+witness, wanted and police systems, then save/load and a full pause menu. The
+diner and precinct doors are real interaction points holding those places; only
+what happens behind the prompt is still to come.

@@ -43,6 +43,8 @@ func _run() -> void:
 	await _test_pause()
 	await _test_day_night()
 	_test_clock_and_economy()
+	await _test_life_loop()
+	await _test_shop_and_job_rules()
 
 	_report()
 
@@ -234,6 +236,231 @@ func _test_clock_and_economy() -> void:
 	_check(EconomyManager.cash == 500, "wages are credited")
 	# The refused spend must not appear in the ledger.
 	_check(EconomyManager.get_history().size() == 2, "only completed transactions are logged")
+
+
+## The whole Phase B/C loop in one pass, in the order a player would live it:
+## home -> sleep -> work -> shop -> eat -> home.
+func _test_life_loop() -> void:
+	var apartment: Node3D = _main.get_node("Interiors/Apartment")
+	var stats := _player.stats
+	var inventory := _player.inventory
+
+	# A believable starting state: late, tired, and half hungry.
+	TimeManager.set_total_minutes(22.0 * 60.0 + 30.0)
+	stats.restore_values(100.0, 30.0, 50.0)
+	EconomyManager.restore(EconomyManager.STARTING_CASH)
+	inventory.clear()
+	_camera_rig.reset_view()
+
+	# --- Outside the front door ---
+	await _teleport(Vector3(-60.0, 0.5, -11.6))
+	await _settle(25)
+	var front_door := _player.interaction.get_focused()
+	_check(front_door is Portal, "the apartment door is a working portal")
+	_check(
+		front_door != null and front_door.get_prompt_text() == "E — Enter Apartment",
+		"apartment prompt reads '%s'" % (front_door.get_prompt_text() if front_door else "<none>")
+	)
+
+	# --- Enter the flat ---
+	await _press_action("interact")
+	await _settle(25)
+	var inside := _player.global_position.distance_to(apartment.global_position) < 12.0
+	_check(inside, "entering the door puts the player inside the apartment")
+	_check(
+		_camera_rig.distance < 16.0, "the camera tightens for the interior (%.0f)" % _camera_rig.distance
+	)
+	_check(_player.is_on_floor(), "the player lands on the apartment floor")
+
+	# --- Sleep ---
+	var bed: Bed = apartment.get_node("SleepPoint")
+	await _teleport(bed.global_position - Vector3(0.0, 0.5, 0.0))
+	await _settle(25)
+	_check(_player.interaction.get_focused() == bed, "the bed takes interaction focus")
+
+	var hunger_before_sleep := stats.hunger
+	await _press_action("interact")
+	await _settle(6)
+	_check(TimeManager.hour == 7, "sleeping wakes the player at 07:00 (got %02d:00)" % TimeManager.hour)
+	_check(stats.energy > 95.0, "sleeping restores energy (%.0f)" % stats.energy)
+	_check(
+		stats.hunger < hunger_before_sleep - 10.0,
+		"hunger drains across the night (%.0f -> %.0f)" % [hunger_before_sleep, stats.hunger]
+	)
+
+	# --- Back out to the street ---
+	var flat_door: Portal = apartment.get_node("FrontDoor")
+	await _teleport(flat_door.global_position - Vector3(0.0, 0.5, 0.0))
+	await _settle(25)
+	_check(_player.interaction.get_focused() == flat_door, "the flat's own door offers a way out")
+	await _press_action("interact")
+	await _settle(25)
+	_check(
+		_player.global_position.distance_to(Vector3(-60.0, 0.0, -10.8)) < 4.0,
+		"leaving puts the player back on the street outside Larkspur"
+	)
+	_check(
+		_camera_rig.distance > 16.0, "the camera returns to street framing (%.0f)" % _camera_rig.distance
+	)
+
+	# --- Walk to work, then a full shift ---
+	await _teleport(Vector3(-58.0, 0.5, 13.4))
+	await _settle(25)
+	var station := _player.interaction.get_focused()
+	_check(station is JobStation, "the warehouse gate offers a shift")
+
+	var cash_before := EconomyManager.cash
+	var clock_before := TimeManager.total_minutes
+	var energy_before_shift := stats.energy
+	await _press_action("interact")
+	await _settle(6)
+	_check(EconomyManager.cash == cash_before + 120, "a shift pays $120 (got $%d)" % (EconomyManager.cash - cash_before))
+	# The clock also ticks in real time while the test awaits frames, so allow
+	# a couple of minutes of slack around the four-hour skip.
+	var shift_minutes := TimeManager.total_minutes - clock_before
+	_check(
+		shift_minutes >= 240.0 and shift_minutes < 243.0,
+		"a shift takes four hours (%.1f minutes)" % shift_minutes
+	)
+	_check(stats.energy < energy_before_shift - 20.0, "a shift is tiring (%.0f)" % stats.energy)
+
+	# --- Walk to the shop, on foot, the whole way ---
+	await _teleport(Vector3(-60.0, 0.5, -10.8))
+	await _settle(20)
+	# ~22m east along the frontage, from Larkspur's door to the market's.
+	await _hold(["move_right"], 300)
+	await _settle(30)
+	var counter := _player.interaction.get_focused()
+	_check(
+		counter is Shop,
+		"walking east along the frontage reaches the market counter (x=%.1f)" % _player.global_position.x
+	)
+
+	# --- Buy a meal through the real shop screen ---
+	await _press_action("interact")
+	await _settle(6)
+	var shop_panel: Control = _main.get_node("HUD/ShopPanel")
+	_check(shop_panel.is_open(), "interacting opens the shop screen")
+	_check(GameManager.menu_open, "an open screen freezes the world")
+
+	var buy_button := _find_first_button(shop_panel.get_node("%StockRows"))
+	_check(buy_button != null, "the shop lists buyable stock")
+	var cash_before_buy := EconomyManager.cash
+	if buy_button != null:
+		buy_button.pressed.emit()
+		await _settle(4)
+	_check(EconomyManager.cash == cash_before_buy - 15, "buying a Basic Meal costs $15")
+	_check(inventory.count_of(&"basic_meal") == 1, "the meal lands in the inventory")
+
+	GameManager.close_menus()
+	await _settle(6)
+	_check(not GameManager.menu_open, "closing the screen unfreezes the world")
+
+	# --- Eat it ---
+	await _press_action("inventory")
+	await _settle(4)
+	var bag: Control = _main.get_node("HUD/InventoryPanel")
+	_check(bag.is_open(), "TAB opens the inventory")
+	GameManager.close_menus()
+	await _settle(4)
+
+	var hunger_before_meal := stats.hunger
+	_check(inventory.use_slot(0, _player), "the meal can be eaten")
+	_check(
+		stats.hunger > hunger_before_meal + 30.0,
+		"eating restores hunger (%.0f -> %.0f)" % [hunger_before_meal, stats.hunger]
+	)
+	_check(inventory.count_of(&"basic_meal") == 0, "eating consumes the meal")
+
+	# --- Home again ---
+	await _teleport(Vector3(-60.0, 0.5, -11.6))
+	await _settle(25)
+	await _press_action("interact")
+	await _settle(25)
+	_check(
+		_player.global_position.distance_to(apartment.global_position) < 12.0,
+		"the player can get back home again"
+	)
+
+	# Leave the world outside, ready for the rules checks.
+	await _teleport(flat_door.global_position - Vector3(0.0, 0.5, 0.0))
+	await _settle(20)
+	await _press_action("interact")
+	await _settle(20)
+
+
+## The rules that stop the loop being a money printer.
+func _test_shop_and_job_rules() -> void:
+	var district: Node3D = _main.get_node("District01")
+	var shop: Shop = district.get_node("Interactables/MarketDoor")
+	var station: JobStation = district.get_node("Interactables/WarehouseGate")
+	var stats := _player.stats
+
+	TimeManager.set_total_minutes(3.0 * 60.0)
+	await _settle(4)
+	_check(not shop.is_open(), "the market is shut at 03:00")
+	_check(not shop.available, "a shut shop cannot be interacted with")
+	_check(
+		shop.buy(shop.stock[0], _player) == Shop.Result.CLOSED,
+		"buying from a shut shop is refused"
+	)
+	_check(
+		station.get_refusal(_player) == JobStation.Refusal.CLOSED,
+		"the warehouse turns the player away at 03:00"
+	)
+
+	TimeManager.set_total_minutes(9.0 * 60.0)
+	await _settle(4)
+	_check(shop.is_open(), "the market is open at 09:00")
+
+	stats.restore_values(100.0, 5.0, 100.0)
+	_check(
+		station.get_refusal(_player) == JobStation.Refusal.TOO_TIRED,
+		"an exhausted player cannot start a shift"
+	)
+
+	stats.restore_values(100.0, 100.0, 100.0)
+	_check(station.get_refusal(_player) == JobStation.Refusal.NONE, "a rested player can work")
+
+	# The shift cap is what stops the player grinding an infinite payday.
+	var shifts := station.get_shifts_left()
+	for i in shifts:
+		station.interact(_player)
+		stats.add_energy(100.0)
+	_check(
+		station.get_refusal(_player) == JobStation.Refusal.NO_SHIFTS_LEFT,
+		"the warehouse runs out of shifts for the day"
+	)
+
+	# An overfull bag must never take the player's money.
+	var inventory := _player.inventory
+	inventory.clear()
+	var filler: ItemData = shop.stock[0]
+	inventory.add(filler, inventory.get_slots().size() * filler.max_stack)
+	_check(not inventory.can_add(filler, 1), "the bag can be filled up")
+	var cash_before := EconomyManager.cash
+	_check(
+		shop.buy(filler, _player) == Shop.Result.INVENTORY_FULL,
+		"buying with a full bag is refused"
+	)
+	_check(EconomyManager.cash == cash_before, "a refused purchase costs nothing")
+
+	inventory.clear()
+	EconomyManager.restore(4)
+	_check(
+		shop.buy(shop.stock[0], _player) == Shop.Result.NOT_ENOUGH_CASH,
+		"buying without the cash is refused"
+	)
+
+
+func _find_first_button(node: Node) -> Button:
+	if node is Button:
+		return node as Button
+	for child in node.get_children():
+		var found := _find_first_button(child)
+		if found != null:
+			return found
+	return null
 
 
 # --- Harness -------------------------------------------------------------
