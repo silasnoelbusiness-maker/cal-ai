@@ -12,6 +12,8 @@ signal crime_reported(record: Dictionary)
 ## Emitted when a crime that was recorded unseen is later witnessed. Phase E
 ## will call `mark_witnessed()`; nothing does yet.
 signal crime_witnessed(record: Dictionary)
+## Emitted once a witnessed crime has actually been called in.
+signal crime_reported_to_police(record: Dictionary)
 
 enum CrimeType { VEHICLE_THEFT, SHOPLIFTING, ASSAULT, ROBBERY, BURGLARY, TRESPASSING }
 
@@ -24,6 +26,18 @@ const SEVERITY: Dictionary = {
 	CrimeType.ASSAULT: 3,
 	CrimeType.BURGLARY: 3,
 	CrimeType.ROBBERY: 4,
+}
+
+## Wanted stars a *reported* crime is worth. Separate from severity so the two
+## can be tuned independently — a crime can be serious to log and cheap to be
+## chased for, or the reverse.
+const WANTED_VALUE: Dictionary = {
+	CrimeType.VEHICLE_THEFT: 1,
+	CrimeType.SHOPLIFTING: 1,
+	CrimeType.TRESPASSING: 1,
+	CrimeType.ASSAULT: 2,
+	CrimeType.BURGLARY: 2,
+	CrimeType.ROBBERY: 3,
 }
 
 ## Records kept in memory, so a long session stays flat.
@@ -54,6 +68,11 @@ func report_crime(
 		"perpetrator": perpetrator,
 		"target": target,
 		"witnessed": witnessed,
+		# Filled in by WitnessSystem. A crime nobody saw stays unreported
+		# forever, which is what makes an unseen theft free.
+		"reporting_witness": null,
+		"reported": false,
+		"wanted_value": int(WANTED_VALUE.get(type, 1)),
 	}
 	_next_id += 1
 
@@ -62,16 +81,29 @@ func report_crime(
 		_history.remove_at(0)
 
 	crime_reported.emit(record)
+	# Deliberately not "CRIME REPORTED": at this point the crime has happened,
+	# but nobody has necessarily seen it.
 	GameManager.notify(_describe(record), GameManager.Tone.BAD)
 	return record
 
 
-## Phase E entry point: a witness spotting a crime after the fact.
-func mark_witnessed(record: Dictionary) -> void:
+## Called by WitnessSystem when somebody has actually seen a crime. Seeing is
+## not the same as reporting: a civilian stares first, and only then calls it in.
+func mark_witnessed(record: Dictionary, witness: Node = null) -> void:
 	if record.is_empty() or record.get("witnessed", false):
 		return
 	record["witnessed"] = true
+	record["reporting_witness"] = witness
 	crime_witnessed.emit(record)
+
+
+## The crime has been called in. This is the point the wanted system reacts to.
+func mark_reported(record: Dictionary) -> void:
+	if record.is_empty() or record.get("reported", false):
+		return
+	record["reported"] = true
+	crime_reported_to_police.emit(record)
+	GameManager.notify("CRIME REPORTED\n%s" % record.get("type_name", "CRIME"), GameManager.Tone.BAD)
 
 
 func get_history() -> Array[Dictionary]:

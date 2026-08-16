@@ -34,6 +34,10 @@ const TONE_COLORS: Array[Color] = [
 @onready var _speed_label: Label = %SpeedLabel
 @onready var _vehicle_name: Label = %VehicleName
 @onready var _vehicle_health_bar: ProgressBar = %VehicleHealthBar
+@onready var _wanted_label: Label = %WantedLabel
+@onready var _escape_label: Label = %EscapeLabel
+@onready var _busted_overlay: Control = %BustedOverlay
+@onready var _busted_text: Label = %BustedText
 
 var _player: Node3D = null
 var _stats: PlayerStats = null
@@ -59,6 +63,13 @@ func _ready() -> void:
 	GameManager.menus_close_requested.connect(close_screens)
 	GameManager.player_teleported.connect(_on_player_teleported)
 
+	WantedManager.level_changed.connect(_on_wanted_level_changed)
+	WantedManager.escaping_started.connect(_on_escaping_started)
+	WantedManager.escaping_cancelled.connect(_on_escaping_cancelled)
+	WantedManager.wanted_cleared.connect(_on_wanted_cleared)
+	WantedManager.bust_started.connect(_on_bust_started)
+	WantedManager.bust_finished.connect(_on_bust_finished)
+
 	_inventory_panel.opened.connect(_on_screen_visibility_changed)
 	_inventory_panel.closed.connect(_on_screen_visibility_changed)
 	_shop_panel.opened.connect(_on_screen_visibility_changed)
@@ -68,6 +79,9 @@ func _ready() -> void:
 	_toast_panel.modulate.a = 0.0
 	_pause_overlay.visible = false
 	_speed_panel.visible = false
+	_wanted_label.visible = false
+	_escape_label.visible = false
+	_busted_overlay.visible = false
 	set_process(false)
 
 	_refresh_clock()
@@ -140,7 +154,7 @@ func _on_vehicle_changed(vehicle: Node3D) -> void:
 
 	_vehicle = vehicle as Vehicle
 	_speed_panel.visible = _vehicle != null
-	set_process(_vehicle != null)
+	_update_process_need()
 
 	if _vehicle == null:
 		return
@@ -152,6 +166,10 @@ func _on_vehicle_changed(vehicle: Node3D) -> void:
 
 func _process(_delta: float) -> void:
 	_refresh_speed()
+	if _escape_label.visible:
+		_escape_label.text = "ESCAPING...  %.0f" % ceilf(
+			WantedManager.get_escape_seconds_left()
+		)
 
 
 func _refresh_speed() -> void:
@@ -163,6 +181,52 @@ func _refresh_speed() -> void:
 func _on_vehicle_health_changed(value: float, max_value: float) -> void:
 	_vehicle_health_bar.max_value = max_value
 	_vehicle_health_bar.value = value
+
+
+# --- Wanted level --------------------------------------------------------
+
+## Stars only appear when there is heat, per the brief. The escape countdown
+## sits under them so both read as one block.
+func _on_wanted_level_changed(level: int) -> void:
+	_wanted_label.visible = level > 0
+	if level > 0:
+		_wanted_label.text = (
+			"★".repeat(level) + "☆".repeat(WantedManager.MAX_LEVEL - level)
+		)
+	else:
+		_escape_label.visible = false
+	_update_process_need()
+
+
+func _on_escaping_started(_seconds: float) -> void:
+	_escape_label.visible = true
+	_update_process_need()
+
+
+func _on_escaping_cancelled() -> void:
+	_escape_label.visible = false
+	_update_process_need()
+
+
+func _on_wanted_cleared() -> void:
+	_wanted_label.visible = false
+	_escape_label.visible = false
+	_update_process_need()
+
+
+func _on_bust_started() -> void:
+	_busted_text.text = "BUSTED"
+	_busted_overlay.visible = true
+
+
+func _on_bust_finished(fine_paid: int) -> void:
+	_busted_overlay.visible = false
+	_show_toast("BUSTED\n-$%d fine" % fine_paid, GameManager.Tone.BAD)
+
+
+## The HUD only needs a per-frame tick while something on it is live.
+func _update_process_need() -> void:
+	set_process(_vehicle != null or _escape_label.visible)
 
 
 # --- Screens -------------------------------------------------------------

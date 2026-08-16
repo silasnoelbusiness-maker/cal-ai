@@ -55,6 +55,13 @@ const WAREHOUSE_JOB: JobData = preload("res://jobs/definitions/warehouse_worker.
 const INTERIOR_CAMERA_DISTANCE := 11.0
 const INTERIOR_CAMERA_PITCH := 74.0
 
+## Distance from a road centre line to the pedestrian route on each side. Kept
+## clear of the kerbside street lights, which would otherwise stand in the
+## middle of the walking line and jam the crowd against them.
+const PAVEMENT_OFFSET := 8.4
+## Street lights sit close to the kerb so their arms overhang the carriageway.
+const STREET_LIGHT_KERB_GAP := 0.8
+
 ## Kerbs live on their own physics layer (6). Pedestrians collide with it and
 ## step up; vehicles do not, so a car can mount a kerb instead of being stopped
 ## dead by a 12cm lip. The visual cost is that a car on the pavement sits a few
@@ -62,12 +69,20 @@ const INTERIOR_CAMERA_PITCH := 74.0
 const CURB_LAYER := 1 << 5
 
 const SEDAN_SCENE: PackedScene = preload("res://vehicles/cars/sedan.tscn")
+const POLICE_CAR_SCENE: PackedScene = preload("res://vehicles/cars/police_car.tscn")
+const PEDESTRIAN_SCENE: PackedScene = preload("res://npc/pedestrian.tscn")
+const POLICE_OFFICER_SCENE: PackedScene = preload("res://npc/police_officer.tscn")
+const NAV_GRAPH_SCRIPT: Script = preload("res://npc/nav_graph.gd")
+
+## How many civilians walk the district.
+const PEDESTRIAN_COUNT := 16
 
 var _palette: Dictionary = {}
 var _geometry: Node3D
 var _props: Node3D
 var _interactables: Node3D
 var _sidewalk_index: int = 0
+var _nav: NavGraph = null
 
 
 func _ready() -> void:
@@ -88,7 +103,10 @@ func _ready() -> void:
 	_build_warehouse_yard()
 	_build_venue_doors()
 	_build_notice_board()
+	_build_nav_graph()
 	_build_vehicles()
+	_build_pedestrians()
+	_build_police()
 
 	var sun := get_node_or_null("Sun") as DayNightCycle
 	if sun != null:
@@ -662,19 +680,21 @@ func _build_street_lights() -> void:
 	for x in [-72.0, -48.0, -24.0, -12.0, 12.0, 24.0, 48.0, 72.0]:
 		for road_z in [MAIN_ST_Z, NORTH_AVE_Z]:
 			_add_street_light(
-				container, index, Vector3(x, 0.0, road_z - ROAD_HALF - 1.5), Vector3.BACK
+				container, index, Vector3(x, 0.0, road_z - ROAD_HALF - STREET_LIGHT_KERB_GAP), Vector3.BACK
 			)
 			index += 1
 			_add_street_light(
-				container, index, Vector3(x, 0.0, road_z + ROAD_HALF + 1.5), Vector3.FORWARD
+				container, index, Vector3(x, 0.0, road_z + ROAD_HALF + STREET_LIGHT_KERB_GAP), Vector3.FORWARD
 			)
 			index += 1
 	for z in [-74.0, -30.0, -12.0, 12.0, 30.0, 74.0]:
 		_add_street_light(
-			container, index, Vector3(-ROAD_HALF - 1.5, 0.0, z), Vector3.RIGHT
+			container, index, Vector3(-ROAD_HALF - STREET_LIGHT_KERB_GAP, 0.0, z), Vector3.RIGHT
 		)
 		index += 1
-		_add_street_light(container, index, Vector3(ROAD_HALF + 1.5, 0.0, z), Vector3.LEFT)
+		_add_street_light(
+			container, index, Vector3(ROAD_HALF + STREET_LIGHT_KERB_GAP, 0.0, z), Vector3.LEFT
+		)
 		index += 1
 
 
@@ -876,6 +896,100 @@ func _add_door_panel(node_name: String, interaction_point: Vector3, facing: Vect
 	CityKit.add_box(
 		_geometry, "DoorPanel_%s" % node_name, panel_center, size, _mat("door"), false
 	)
+
+
+# --- Navigation ----------------------------------------------------------
+
+## The pavement and road networks, sampled from the same street centre lines the
+## district is drawn from. Pavement lines run the full width including the
+## junctions, because the crossings there are painted crosswalks — so a
+## pedestrian route over a carriageway is always a legal crossing.
+func _build_nav_graph() -> void:
+	var nav: NavGraph = NAV_GRAPH_SCRIPT.new()
+	nav.name = "NavGraph"
+	add_child(nav)
+
+	var reach := EXTENT - 3.0
+	var walk_offset := PAVEMENT_OFFSET
+	var walk_lines := [
+		[Vector2(-reach, MAIN_ST_Z - walk_offset), Vector2(reach, MAIN_ST_Z - walk_offset)],
+		[Vector2(-reach, MAIN_ST_Z + walk_offset), Vector2(reach, MAIN_ST_Z + walk_offset)],
+		[Vector2(-reach, NORTH_AVE_Z - walk_offset), Vector2(reach, NORTH_AVE_Z - walk_offset)],
+		[Vector2(-reach, NORTH_AVE_Z + walk_offset), Vector2(reach, NORTH_AVE_Z + walk_offset)],
+		[Vector2(CENTER_BLVD_X - walk_offset, -reach), Vector2(CENTER_BLVD_X - walk_offset, reach)],
+		[Vector2(CENTER_BLVD_X + walk_offset, -reach), Vector2(CENTER_BLVD_X + walk_offset, reach)],
+	]
+	# Road routing uses centre lines. Lane discipline is not worth the
+	# complexity while the only AI drivers are police in a hurry.
+	var road_lines := [
+		[Vector2(-reach, MAIN_ST_Z), Vector2(reach, MAIN_ST_Z)],
+		[Vector2(-reach, NORTH_AVE_Z), Vector2(reach, NORTH_AVE_Z)],
+		[Vector2(CENTER_BLVD_X, -reach), Vector2(CENTER_BLVD_X, reach)],
+	]
+	nav.build(walk_lines, road_lines)
+	_nav = nav
+
+
+# --- People --------------------------------------------------------------
+
+func _build_pedestrians() -> void:
+	var container := _make_container("Pedestrians")
+	# Seeded so a run is reproducible and a failing test can be re-run.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("HarbourRowCrowd")
+
+	var palette := [
+		Color(0.549, 0.396, 0.353), Color(0.400, 0.451, 0.510),
+		Color(0.427, 0.475, 0.400), Color(0.596, 0.545, 0.427),
+		Color(0.478, 0.404, 0.494), Color(0.353, 0.478, 0.494),
+	]
+
+	for i in PEDESTRIAN_COUNT:
+		var walker: Pedestrian = PEDESTRIAN_SCENE.instantiate()
+		walker.name = "Pedestrian%d" % i
+		walker.body_color = palette[i % palette.size()]
+		walker.walk_speed = rng.randf_range(2.0, 2.9)
+		var spot := _nav.random_point(NavGraph.Layer.WALK, rng)
+		walker.position = spot + Vector3.UP * 0.4
+		container.add_child(walker)
+
+
+## Officers on foot at the three places a player is most likely to be seen, and
+## two patrol cars at the precinct. Cars do the chasing once the player is in a
+## vehicle; an officer on foot can never catch a car.
+func _build_police() -> void:
+	var container := _make_container("Police")
+
+	var posts := [
+		["PrecinctOfficer", Vector3(20.0, 0.4, 9.5)],
+		["MainStreetOfficer", Vector3(-16.0, 0.4, 7.5)],
+		["ParkOfficer", Vector3(-25.5, 0.4, 37.5)],
+	]
+	for post in posts:
+		var officer: PoliceOfficer = POLICE_OFFICER_SCENE.instantiate()
+		officer.name = post[0]
+		officer.position = post[1]
+		officer.post_position = post[1]
+		container.add_child(officer)
+
+	var car_spots := [
+		["PatrolCarA", Vector3(14.0, 0.0, 3.0), -90.0],
+		["PatrolCarB", Vector3(24.0, 0.0, 3.0), -90.0],
+	]
+	for spot in car_spots:
+		var car: Vehicle = POLICE_CAR_SCENE.instantiate()
+		car.name = spot[0]
+		car.position = spot[1]
+		car.rotation_degrees.y = spot[2]
+		container.add_child(car)
+
+	# Where an arrested player is released. Outside the precinct door, on the
+	# open ground the door already faces.
+	var release := Marker3D.new()
+	release.name = "PrecinctRelease"
+	release.position = Vector3(24.5, 0.4, 41.5)
+	release.add_to_group(&"bust_release_point")
+	container.add_child(release)
 
 
 # --- Parked vehicles -----------------------------------------------------

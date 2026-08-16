@@ -123,6 +123,30 @@ theme_override_font_sizes/font_size = 34
 text = "$500"
 horizontal_alignment = 2
 
+[node name="WantedLabel" type="Label" parent="Root/TopRight"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.968627, 0.803922, 0.321569, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.7)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 30
+text = "★☆☆☆☆"
+horizontal_alignment = 2
+
+[node name="EscapeLabel" type="Label" parent="Root/TopRight"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.996078, 0.980392, 0.792157, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.7)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 17
+text = "ESCAPING..."
+horizontal_alignment = 2
+
 [node name="BottomLeft" type="VBoxContainer" parent="Root"]
 layout_mode = 1
 anchor_top = 1.0
@@ -324,6 +348,42 @@ theme_override_colors/font_color = Color(0.694118, 0.729412, 0.784314, 1)
 theme_override_font_sizes/font_size = 12
 text = "F exit  ·  SPACE handbrake"
 horizontal_alignment = 2
+
+[node name="BustedOverlay" type="Control" parent="Root"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="BustedDim" type="ColorRect" parent="Root/BustedOverlay"]
+layout_mode = 1
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.0784314, 0.0117647, 0.0117647, 0.72)
+
+[node name="BustedText" type="Label" parent="Root/BustedOverlay"]
+unique_name_in_owner = true
+layout_mode = 1
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.964706, 0.717647, 0.678431, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 3
+theme_override_font_sizes/font_size = 88
+text = "BUSTED"
+horizontal_alignment = 1
+vertical_alignment = 1
 
 [node name="PauseOverlay" type="Control" parent="Root"]
 unique_name_in_owner = true

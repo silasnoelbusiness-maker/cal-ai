@@ -38,6 +38,15 @@ var menu_open: bool = false:
 		menu_open = value
 		_apply_pause()
 
+## True while a scripted beat owns the screen — the arrest, for now. Freezes the
+## world like a pause, but Esc cannot dismiss it and no overlay competes with it.
+var cutscene_active: bool = false:
+	set(value):
+		if cutscene_active == value:
+			return
+		cutscene_active = value
+		_apply_pause()
+
 ## The currently controlled player. Registered by the player itself so that
 ## nothing has to hard-code a scene path to it.
 var player: Node3D = null
@@ -51,6 +60,9 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause_menu"):
+		if cutscene_active:
+			get_viewport().set_input_as_handled()
+			return
 		# Esc backs out of an open screen first, and only then pauses.
 		if menu_open:
 			close_menus()
@@ -70,7 +82,7 @@ func is_paused() -> bool:
 func _apply_pause() -> void:
 	if not is_inside_tree():
 		return
-	get_tree().paused = state == State.PAUSED or menu_open
+	get_tree().paused = state == State.PAUSED or menu_open or cutscene_active
 
 
 ## Asks whatever UI is listening to open a screen. `context` is the thing the

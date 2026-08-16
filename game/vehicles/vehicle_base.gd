@@ -47,6 +47,11 @@ const EXIT_OFFSETS: Array[Vector3] = [
 ## Stable id for the save file. Empty means this vehicle is not persisted.
 @export var save_id: StringName = &""
 
+## Set by an AI driver (police) instead of a human at the keyboard. An
+## AI-controlled car takes its inputs from set_ai_input() and cannot be entered
+## by the player.
+var ai_controlled: bool = false
+
 @onready var _body_root: Node3D = $Body
 @onready var _collision: CollisionShape3D = $Collision
 @onready var _seat: Marker3D = $Seat
@@ -62,6 +67,11 @@ var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 
 var _front_wheels: Array[Node3D] = []
 ## Theft is reported once per vehicle, not once per time the player gets in.
 var _theft_reported: bool = false
+## Where this car was parked at load, so a stolen one can be put back.
+var _spawn_transform: Transform3D
+var _ai_throttle: float = 0.0
+var _ai_steer: float = 0.0
+var _ai_handbrake: bool = false
 
 
 func _ready() -> void:
@@ -71,6 +81,7 @@ func _ready() -> void:
 		return
 
 	health = data.max_health
+	_spawn_transform = global_transform
 	add_to_group(&"vehicle")
 	if save_id != &"":
 		add_to_group(&"saveable")
@@ -119,7 +130,23 @@ func get_display_name() -> String:
 
 
 func can_be_entered_by(_who: Node3D) -> bool:
-	return _driver == null and not is_disabled()
+	return _driver == null and not is_disabled() and not ai_controlled
+
+
+## Feeds the same three inputs the player supplies. Keeping AI on this path
+## rather than a parallel physics routine means police cars handle exactly like
+## the player's car.
+func set_ai_input(throttle: float, steer: float, handbrake: bool) -> void:
+	_ai_throttle = clampf(throttle, -1.0, 1.0)
+	_ai_steer = clampf(steer, -1.0, 1.0)
+	_ai_handbrake = handbrake
+
+
+## Puts the car back where it started, upright and stopped. Used when a stolen
+## car is recovered after an arrest.
+func return_to_spawn() -> void:
+	halt()
+	global_transform = _spawn_transform
 
 
 ## Takes the driver's seat. Returns false if the car is occupied or wrecked.
@@ -210,13 +237,15 @@ func _physics_process(delta: float) -> void:
 	var steer := 0.0
 	var handbrake := false
 
-	if _driver != null and not is_disabled():
-		throttle = Input.get_axis("move_back", "move_forward")
-		steer = Input.get_axis("move_right", "move_left")
-		handbrake = Input.is_action_pressed("handbrake")
-	elif _driver != null:
-		# Wrecked but occupied: the car coasts to a stop, it does not lock up.
-		handbrake = false
+	if not is_disabled():
+		if ai_controlled:
+			throttle = _ai_throttle
+			steer = _ai_steer
+			handbrake = _ai_handbrake
+		elif _driver != null:
+			throttle = Input.get_axis("move_back", "move_forward")
+			steer = Input.get_axis("move_right", "move_left")
+			handbrake = Input.is_action_pressed("handbrake")
 
 	_update_speed(throttle, handbrake, delta)
 	_update_steering(steer, handbrake, delta)

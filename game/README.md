@@ -4,10 +4,10 @@ An original 3D open-world life & crime simulator, viewed from an elevated
 top-down camera. This directory holds a self-contained **Godot 4.3** project; it
 is unrelated to the Next.js app in the repository root.
 
-**V0.1 phases A–D are complete.** The full life/economy loop is playable end to
+**V0.1 phases A–E are complete.** The full life/economy loop is playable end to
 end — wake up in your flat, sleep off the night, walk to the warehouse for a
 paid shift, buy food at the convenience store, eat it, head home — and the city
-now has cars in it.
+now has cars, a crowd, and police in it.
 
     sleep at home  ->  4h shift, +$120  ->  buy a meal, -$15  ->  eat  ->  home
 
@@ -15,8 +15,18 @@ Sleeping restores energy but hunger keeps draining across the night, work costs
 hours and energy, and food costs money — so the loop has to keep turning.
 
 Eight cars are parked around the district. One is yours; the other seven are
-not, and taking one files a vehicle theft. Nothing chases you for it yet — the
-crime ledger is in place so Phase E can hang witnesses and police off it.
+not, and taking one files a vehicle theft. Whether that costs you anything
+depends on who was looking:
+
+    steal unseen        ->  nothing happens
+    civilian sees it    ->  they stare, then call it in  ->  ★☆☆☆☆
+    an officer sees it  ->  reported on the spot         ->  ★☆☆☆☆
+
+Once you are wanted, police respond to where the crime was reported and chase
+you on foot and in marked patrol cars. Break line of sight and an escape
+countdown starts while they search your last known position; stay hidden and
+the heat clears. Get caught and you are fined and released outside the
+precinct.
 
 ## Running
 
@@ -51,8 +61,13 @@ Development keys, to be removed before release:
 
 | Input | Action |
 | --- | --- |
-| `F5` / `F9` | Quick save / quick load (until the Phase F pause menu) |
+| `F5` / `F12` | Quick save / quick load (until the Phase F pause menu) |
 | `F8` | Unstick the current vehicle |
+| `F6` / `F7` | Set wanted level 1 / 2 |
+| `F9` | Clear the wanted level |
+
+`F9` was quick-load in Phase D; it is now clear-wanted, and quick-load moved to
+`F12`.
 
 ## The district
 
@@ -79,6 +94,7 @@ jobs/         job_data.gd, job_station.gd + definitions/*.tres
 shops/        shop.gd
 player/       player.tscn, player.gd, player_stats.gd
 ui/           hud, inventory_panel, shop_panel
+npc/          nav_graph, npc_walker, pedestrian, police_officer, police_driver
 vehicles/     vehicle_base, vehicle_data, vehicle_door + cars/*.tres
 world/        district_01, city_kit, day_night_cycle, portal, interiors/
 tests/        smoke_test, screenshot
@@ -111,6 +127,17 @@ main.tscn     entry scene
 * **Saving** is a group: any node that joins `saveable`, exposes a `save_id` and
   implements `save_state()` / `load_state()` is persisted. Adding a system to
   the save is two methods on that system and no change to `SaveManager`.
+* **Navigation** is two `AStar3D` graphs — pavements and road centre lines —
+  sampled from the same street lines the district draws itself from. Baking a
+  navmesh from procedurally built geometry at runtime would be slower, harder
+  to verify headlessly, and more machinery than a grid of streets needs.
+* **The crime loop is four separate systems.** `CrimeManager` records what
+  happened; `WitnessSystem` decides whether anyone saw it; `WantedManager` owns
+  the heat, the escape countdown and the arrest; the police AI owns individual
+  officers and cars. None of them reach into another's job.
+* **Police are never told where the player is.** They navigate to
+  `WantedManager.last_known_position`, which only changes when a unit actually
+  *sees* the player. That single rule is what makes hiding work.
 
 ## Tests
 
@@ -124,7 +151,11 @@ honest (closed shops, shift caps, too tired to work, a full bag never taking
 your money). Finally it drives: entering and exiting, throttle, braking,
 reverse, the handbrake, steering falling off with speed, crashing into a
 building, stealing an NPC car, the camera widening with speed, and a save/load
-round trip:
+round trip. Finally it plays the crime loop: a theft nobody sees costs nothing,
+a civilian witness reports it after a delay, an officer reports it instantly,
+breaking line of sight starts the escape countdown, being spotted again cancels
+it, and getting caught fines the player and releases them — including at
+night, and including a player too poor to pay the fine:
 
 ```sh
 godot --headless --path game res://tests/smoke_test.tscn
@@ -142,14 +173,14 @@ xvfb-run -a godot --rendering-driver opengl3 --path game \
 
 Args after `++` are `key=value` pairs, all optional: `out`, `hour`, `scenario`
 (`street`, `apartment`, `shop`, `inventory`, `warehouse`, `car`, `driving`,
-`theft`) and camera `distance`
+`theft`, `crowd`, `unseen_theft`, `witness`, `wanted`, `pursuit`, `escaping`,
+`cleared`, `busted`) and camera `distance`
 / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
 rather than faking their results. It runs under the Compatibility renderer, so
 lighting is close to but not identical to the Forward+ game.
 
 ## What is next
 
-Phase E: pedestrians, then the witness and wanted systems on top of the crime
-ledger, then police. Phase F: a real pause menu over the existing save system.
-The diner and precinct doors are real interaction points holding those places;
-only what happens behind the prompt is still to come.
+Phase F: a real pause menu with settings over the existing save system, and
+polish. The diner and precinct doors are real interaction points holding those
+places; only what happens behind the prompt is still to come.

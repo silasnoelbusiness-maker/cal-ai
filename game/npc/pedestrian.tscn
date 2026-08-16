@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://npc/pedestrian.gd" id="1_pedestrian"]
+
+[node name="Pedestrian" type="CharacterBody3D"]
+floor_max_angle = 0.872665
+floor_snap_length = 0.4
+script = ExtResource("1_pedestrian")
+
+[node name="BodyPivot" type="Node3D" parent="."]

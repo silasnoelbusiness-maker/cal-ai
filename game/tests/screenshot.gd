@@ -8,7 +8,9 @@ extends Node
 ## Args after `++` are key=value pairs, all optional:
 ##   out       output PNG path
 ##   hour      hour of the in-game day, e.g. 22.5
-##   scenario  street (default), apartment, shop, inventory, warehouse
+##   scenario  street (default), apartment, shop, inventory, warehouse, car,
+##             driving, theft, crowd, unseen_theft, witness, wanted, pursuit,
+##             escaping, cleared, busted, night_chase
 ##   distance  camera distance override, for overview shots
 ##   yaw       camera yaw override
 ##   pitch     camera pitch override
@@ -114,6 +116,13 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 			# zoom to settle, short enough to still be short of the junction.
 			await _wait(130)
 
+		"crowd":
+			player.global_position = Vector3(-8.4, 0.5, 20.0)
+
+		"unseen_theft", "witness", "wanted", "pursuit", "escaping", "cleared", \
+		"busted", "night_chase":
+			await _crime_scenario(main, scenario)
+
 		"theft":
 			var car := _find_vehicle(false)
 			car.global_position = Vector3(-30.0, 0.0, 3.0)
@@ -127,6 +136,85 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 			car.get_node("Door").interact(player)
 
 	await _wait(20)
+
+
+## Drives the real crime loop for the screenshots, so nothing on screen is
+## staged: the theft, the witness, the wanted level and the arrest are all
+## produced by the same systems the player triggers.
+func _crime_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var car := _find_vehicle(false)
+	var spot := Vector3(-40.0, 0.0, 3.0)
+
+	# Clear the street so the scenario controls exactly who is watching.
+	for npc in get_tree().get_nodes_in_group(&"pedestrian") + get_tree().get_nodes_in_group(&"police"):
+		if npc is Node3D:
+			npc.global_position = Vector3(400.0, 0.0, 400.0)
+		npc.process_mode = Node.PROCESS_MODE_DISABLED
+	await _wait(4)
+
+	car.global_position = spot
+	car.rotation_degrees.y = -90.0
+	car.halt()
+	player.global_position = car.global_transform * Vector3(-2.1, 0.5, 0.4)
+	await _wait(8)
+
+	if scenario != "unseen_theft":
+		# One civilian, stood on the pavement, looking straight at the car.
+		var civilian: Node3D = get_tree().get_nodes_in_group(&"pedestrian")[0]
+		civilian.process_mode = Node.PROCESS_MODE_INHERIT
+		civilian.global_position = spot + Vector3(7.0, 0.4, 5.4)
+		civilian.get_node("BodyPivot").rotation.y = atan2(-7.0, -5.4)
+		await _wait(6)
+
+	car.get_node("Door").interact(player)
+	await _wait(10)
+	if scenario in ["unseen_theft", "witness"]:
+		return
+
+	# Let the witness call it in.
+	await _wait(int((WitnessSystem.report_delay + 0.6) * 60.0))
+	if scenario == "wanted":
+		return
+
+	var officers: Array = get_tree().get_nodes_in_group(&"police").filter(
+		func(u: Node) -> bool: return u is PoliceOfficer
+	)
+	var cars: Array = get_tree().get_nodes_in_group(&"police_car")
+
+	if scenario == "escaping" or scenario == "cleared":
+		# Nobody within sight: the countdown runs on its own.
+		WantedManager.escape_seconds_by_level = [0.0, 4.0, 6.0, 8.0, 10.0, 12.0]
+		for unit in officers + cars:
+			unit.process_mode = Node.PROCESS_MODE_INHERIT
+			unit.global_position = player.global_position + Vector3(58.0, 0.0, 0.0)
+		await _wait(int((WantedManager.sight_grace_seconds + 0.6) * 60.0))
+		if scenario == "escaping":
+			return
+		await _wait(int(4.5 * 60.0))
+		return
+
+	# Pursuit and arrest: wake a patrol car and an officer near the player.
+	for i in cars.size():
+		var unit: Node3D = cars[i]
+		unit.process_mode = Node.PROCESS_MODE_INHERIT
+		# Behind the player, in the same lane, pointing the way they went.
+		unit.global_position = player.global_position + Vector3(-9.0 - float(i) * 7.0, 0.0, 0.0)
+		unit.rotation_degrees.y = -90.0
+		unit.halt()
+	var officer: Node3D = officers[0]
+	officer.process_mode = Node.PROCESS_MODE_INHERIT
+
+	if scenario == "busted":
+		officer.global_position = player.global_position + Vector3(1.8, 0.0, 0.0)
+		await _wait(40)
+		return
+
+	officer.global_position = player.global_position + Vector3(13.0, 0.0, 4.0)
+	# Throttle stays down: a player at speed cannot be arrested, so the capture
+	# lands mid-chase rather than on the arrest that follows it.
+	Input.action_press("move_forward")
+	await _wait(50)
 
 
 ## First vehicle matching the requested ownership.
