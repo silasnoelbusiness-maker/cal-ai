@@ -315,9 +315,13 @@ func _crime_scenario(main: Node, scenario: String, quiet_streets: bool = true) -
 
 	if kind != "unseen_theft":
 		# One civilian, stood on the pavement, looking straight at the car.
-		var civilian: Node3D = get_tree().get_nodes_in_group(&"pedestrian")[0]
+		var civilian: Pedestrian = get_tree().get_nodes_in_group(&"pedestrian")[0]
 		civilian.process_mode = Node.PROCESS_MODE_INHERIT
 		civilian.global_position = spot + Vector3(7.0, 0.4, 5.4)
+		# Stood still and looking at the car. On a live street they would
+		# otherwise stroll off between being placed and the theft happening,
+		# and the shot would come back with no wanted level on it at all.
+		civilian.wait_for(60.0)
 		civilian.get_node("BodyPivot").rotation.y = atan2(-7.0, -5.4)
 		await _wait(6)
 
