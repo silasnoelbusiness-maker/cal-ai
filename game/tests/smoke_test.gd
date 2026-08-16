@@ -10,6 +10,7 @@ extends Node
 ## Exits with code 0 when every check passes, 1 otherwise.
 
 const MAIN_SCENE := preload("res://main.tscn")
+const TEST_TRAFFIC_SCENE := preload("res://vehicles/cars/sedan.tscn")
 
 var _main: Node3D
 var _player: Player
@@ -32,6 +33,10 @@ func _run() -> void:
 	_player = _main.get_node("Player")
 	_camera_rig = _main.get_node("CameraRig")
 	await _settle(30)
+	# Everything written before Phase F assumes an empty road — a car parked on
+	# the spot a test teleports the player to is a test failure with nothing
+	# wrong behind it. Traffic is switched back on for its own section.
+	await _stop_traffic()
 
 	await _test_world_built()
 	await _test_spawn_and_gravity()
@@ -48,6 +53,21 @@ func _run() -> void:
 	# Before anything isolates the scene: these two need the city as it ships.
 	await _test_crowd_spawned()
 	await _test_navigation()
+	await _test_park_navigation()
+	# Phase F traffic, on a freshly filled city.
+	await _start_traffic()
+	await _test_road_network()
+	await _test_traffic_lights()
+	await _test_traffic_population()
+	await _test_traffic_flow()
+	await _test_police_and_traffic()
+	# From here on the tests need to know exactly what is on the street.
+	await _stop_traffic()
+	await _test_car_following()
+	await _test_traffic_stops_at_red()
+	await _test_traffic_stuck_recovery()
+	await _test_pedestrian_dodges_traffic()
+	await _test_pedestrian_knockdown()
 	await _test_vehicles_spawned()
 	await _test_enter_and_exit()
 	await _test_driving()
@@ -471,6 +491,610 @@ func _test_shop_and_job_rules() -> void:
 	)
 
 
+# --- Phase F: traffic, signals and pedestrian safety ---------------------
+
+## TEST F1: the park is reachable. Before Phase F the park was a hole in the
+## walking graph — a route into it ended at the nearest pavement.
+func _test_park_navigation() -> void:
+	var nav := get_tree().get_first_node_in_group(&"nav_graph") as NavGraph
+	_check(nav != null, "the walking graph exists")
+	if nav == null:
+		return
+
+	var gate := Vector3(District01.PARK_PATH_X, 0.0, District01.MAIN_ST_Z + 8.4)
+	var far_end := Vector3(District01.PARK_PATH_X, 0.0, 55.0)
+	var route := nav.find_path(NavGraph.Layer.WALK, gate, far_end)
+	_check(route.size() >= 2, "there is a walking route from the street into the park")
+	if route.size() >= 2:
+		_check(
+			route[route.size() - 1].distance_to(far_end) < 6.0,
+			"and it reaches the far end of the park (%.1fm short)"
+			% route[route.size() - 1].distance_to(far_end)
+		)
+
+	# The fountain sits on the crossing of the two paths; nothing may route
+	# through it.
+	var fountain := Vector3(District01.PARK_PATH_X, 0.0, District01.PARK_PATH_Z)
+	var in_the_fountain := 0
+	for point in route:
+		if Vector2(point.x - fountain.x, point.z - fountain.z).length() < 3.6:
+			in_the_fountain += 1
+	_check(in_the_fountain == 0, "no waypoint stands in the fountain (%d)" % in_the_fountain)
+
+	var east := nav.find_path(
+		NavGraph.Layer.WALK,
+		Vector3(District01.CENTER_BLVD_X - 8.4, 0.0, District01.PARK_PATH_Z),
+		Vector3(-34.0, 0.0, District01.PARK_PATH_Z)
+	)
+	_check(east.size() >= 2, "the east gate joins the park to the boulevard")
+
+	# And a civilian can actually walk it, not just route it.
+	var walker := get_tree().get_nodes_in_group(&"pedestrian")[0] as Pedestrian
+	walker.global_position = Vector3(District01.PARK_PATH_X, 0.4, 12.0)
+	await _settle(6)
+	var into_park := Vector3(District01.PARK_PATH_X, 0.0, 30.0)
+	var before := walker.global_position.distance_to(into_park)
+	_check(walker.walk_to(into_park), "a pedestrian accepts a destination inside the park")
+	await _settle(300)
+	var after := walker.global_position.distance_to(into_park)
+	_check(after < before - 6.0, "and gets there (%.1fm -> %.1fm)" % [before, after])
+
+
+## TEST F2: the lane graph is directed, turns at junctions and varies routes.
+func _test_road_network() -> void:
+	var network := _road_network()
+	_check(network != null and network.is_ready(), "the district built a road network")
+	if network == null or not network.is_ready():
+		return
+	_check(
+		network.node_count() > 60,
+		"lane nodes cover the district (%d)" % network.node_count()
+	)
+
+	# Nothing may link onto a lane running the other way; that is what keeps
+	# traffic off the oncoming carriageway.
+	var doubling_back := 0
+	var off_road := 0
+	for i in network.node_count():
+		if not _is_on_a_lane(network.node_position(i)):
+			off_road += 1
+		for j in network.successors(i):
+			if network.node_direction(i).dot(network.node_direction(j)) < -0.2:
+				doubling_back += 1
+	_check(doubling_back == 0, "no lane link doubles back (%d found)" % doubling_back)
+	_check(off_road == 0, "every lane node sits on a carriageway (%d off)" % off_road)
+
+	# Approaching the Main Street junction from the west, eastbound.
+	var approach := network.nearest_node(
+		Vector3(-11.0, 0.0, District01.LANE_OFFSET), Vector3(1.0, 0.0, 0.0)
+	)
+	var straight := 0
+	var turns := 0
+	for j in network.successors(approach):
+		if network.node_direction(j).dot(network.node_direction(approach)) > 0.9:
+			straight += 1
+		else:
+			turns += 1
+	_check(straight > 0, "a car may carry straight on through the junction")
+	_check(turns > 0, "or turn off it (%d turnings)" % turns)
+
+	# Route variation: the same starting node must not always lead to the same
+	# place, or every car circles the same block.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260816
+	var endpoints := {}
+	for run in 30:
+		var at := approach
+		for step in 14:
+			var next := network.random_successor(at, rng)
+			if next < 0:
+				break
+			at = next
+		endpoints[at] = true
+	_check(endpoints.size() > 2, "routes diverge between cars (%d endings)" % endpoints.size())
+
+
+## TEST F3: the signals cycle, and conflicting directions are never both green.
+func _test_traffic_lights() -> void:
+	var lights := get_tree().get_nodes_in_group(&"traffic_light")
+	_check(lights.size() == 2, "both junctions are signalled (%d)" % lights.size())
+	if lights.is_empty():
+		return
+	var light := lights[0] as TrafficLight
+
+	_check(
+		light.green_seconds >= 12.0 and light.green_seconds <= 20.0,
+		"green runs 12-20 seconds (%.0f)" % light.green_seconds
+	)
+	_check(
+		light.yellow_seconds >= 2.0 and light.yellow_seconds <= 4.0,
+		"yellow runs 2-4 seconds (%.0f)" % light.yellow_seconds
+	)
+	_check(
+		light.stop_line_distance > District01.ROAD_HALF,
+		"the stop line sits outside the junction box (%.1fm)" % light.stop_line_distance
+	)
+
+	# Exhaustive rather than sampled: check the invariant in every phase there
+	# is, which no amount of waiting could do better.
+	var conflicts := 0
+	var greens := 0
+	for phase in [
+		TrafficLight.Phase.NS_GREEN,
+		TrafficLight.Phase.NS_YELLOW,
+		TrafficLight.Phase.EW_GREEN,
+		TrafficLight.Phase.EW_YELLOW,
+	]:
+		light.phase = phase
+		if light.is_green_for(true) and light.is_green_for(false):
+			conflicts += 1
+		if light.is_green_for(true) or light.is_green_for(false):
+			greens += 1
+		# Yellow has to mean stop, or cars would sail through the change.
+		if light.colour_for(true) == TrafficLight.Colour.YELLOW:
+			_check(light.should_stop_for(true), "yellow counts as stop")
+	_check(conflicts == 0, "north-south and east-west are never both green")
+	_check(greens == 2, "exactly one axis is moving at a time (%d of 4 phases)" % greens)
+
+	var line := light.stop_line_for(Vector3(1.0, 0.0, 0.0))
+	_check(
+		line.x < light.global_position.x - District01.ROAD_HALF,
+		"eastbound traffic stops short of the junction (x=%.1f)" % line.x
+	)
+
+	# Now watch it actually run, on compressed timings so the test does not have
+	# to sit through a real 36-second cycle.
+	var green_was := light.green_seconds
+	var yellow_was := light.yellow_seconds
+	light.green_seconds = 0.35
+	light.yellow_seconds = 0.2
+	light.restart_cycle()
+	var seen := {}
+	for frame in 150:
+		seen[light.phase] = true
+		if light.is_green_for(true) and light.is_green_for(false):
+			conflicts += 1
+		await _settle(1)
+	_check(seen.size() == 4, "the signal runs through all four phases (%d)" % seen.size())
+	_check(conflicts == 0, "and never shows conflicting greens while running")
+
+	light.green_seconds = green_was
+	light.yellow_seconds = yellow_was
+	light.restart_cycle()
+
+
+## TEST F4: the manager keeps a believable, valid population on the roads.
+func _test_traffic_population() -> void:
+	var manager := _traffic_manager()
+	_check(manager != null, "the district has a traffic manager")
+	if manager == null:
+		return
+
+	_check(
+		TrafficManager.CAR_SCENES.size() >= 3,
+		"there are at least three civilian body styles (%d)" % TrafficManager.CAR_SCENES.size()
+	)
+
+	var cars := get_tree().get_nodes_in_group(&"traffic")
+	_check(
+		cars.size() >= 8 and cars.size() <= 15,
+		"8-15 civilian cars are on the roads (%d)" % cars.size()
+	)
+
+	var styles := {}
+	var wrong_controller := 0
+	var hijackable := 0
+	var off_road := 0
+	var driverless := 0
+	for node in cars:
+		var car := node as Vehicle
+		styles[car.data.id] = true
+		if car.controller != Vehicle.Controller.TRAFFIC_AI:
+			wrong_controller += 1
+		if car.can_be_entered_by(_player):
+			hijackable += 1
+		if not _is_on_a_lane(car.global_position):
+			off_road += 1
+		if car.get_node_or_null("Driver") == null:
+			driverless += 1
+	_check(wrong_controller == 0, "every traffic car is flagged TRAFFIC_AI (%d not)" % wrong_controller)
+	_check(driverless == 0, "and has a driver (%d without)" % driverless)
+	_check(hijackable == 0, "none can be taken by walking up to it (%d could)" % hijackable)
+	_check(off_road == 0, "every car spawned on a carriageway (%d did not)" % off_road)
+
+	var overlapping := 0
+	for i in cars.size():
+		for j in range(i + 1, cars.size()):
+			if (cars[i] as Node3D).global_position.distance_to(
+				(cars[j] as Node3D).global_position
+			) < 3.0:
+				overlapping += 1
+	_check(overlapping == 0, "no car spawned inside another (%d pairs)" % overlapping)
+
+	# Spawn validity, asked of the manager directly: an ordinary spawn must
+	# never be close enough to the player to appear on screen.
+	var too_close := 0
+	var invalid := 0
+	var in_a_junction := 0
+	for attempt in 30:
+		var node := manager.find_spawn_node(false)
+		if node < 0:
+			continue
+		var spot := _road_network().node_position(node)
+		if spot.distance_to(_player.global_position) < manager.min_spawn_distance_from_player:
+			too_close += 1
+		if not _is_on_a_lane(spot):
+			invalid += 1
+		for light in get_tree().get_nodes_in_group(&"traffic_light"):
+			if (light as Node3D).global_position.distance_to(spot) < manager.junction_clearance:
+				in_a_junction += 1
+	_check(too_close == 0, "spawn points are never near the player (%d were)" % too_close)
+	_check(invalid == 0, "and are always on a road (%d were not)" % invalid)
+	_check(in_a_junction == 0, "and never inside a junction (%d were)" % in_a_junction)
+
+	# Density is data, and night is quieter than day.
+	var day_target := manager.get_target_population()
+	var minutes_was := TimeManager.total_minutes
+	TimeManager.set_total_minutes(2.0 * 60.0)
+	var night_target := manager.get_target_population()
+	TimeManager.set_total_minutes(minutes_was)
+	_check(
+		night_target < day_target,
+		"the streets are quieter at night (%d vs %d)" % [night_target, day_target]
+	)
+	_check(
+		TrafficManager.POPULATION[TrafficManager.Density.LOW]
+		< TrafficManager.POPULATION[TrafficManager.Density.HIGH],
+		"density settings actually differ"
+	)
+
+
+## TEST F5: traffic moves, keeps to the carriageway and to a sane speed.
+func _test_traffic_flow() -> void:
+	var cars := get_tree().get_nodes_in_group(&"traffic")
+	var started_at := {}
+	for node in cars:
+		started_at[node] = (node as Node3D).global_position
+
+	# Sampled across a window rather than at an instant: at any one moment a
+	# good half of the traffic can legitimately be sat at a red light, so a
+	# snapshot says nothing about whether the city is moving.
+	var fastest := 0.0
+	var speeding := 0
+	var off_road := 0
+	var wrecked := 0
+	var airborne := 0
+	for tick in 14:
+		await _settle(40)
+		for node in cars:
+			var car := node as Vehicle
+			fastest = maxf(fastest, car.get_speed_kmh())
+			if car.get_speed_kmh() > 55.0:
+				speeding += 1
+			if not _is_on_a_lane(car.global_position, 2.5):
+				off_road += 1
+			if car.is_disabled():
+				wrecked += 1
+			if car.global_position.y > 1.5 or car.global_position.y < -1.0:
+				airborne += 1
+
+	var travelled := 0
+	for node in cars:
+		if started_at[node].distance_to((node as Node3D).global_position) > 10.0:
+			travelled += 1
+	_check(
+		travelled >= cars.size() / 2,
+		"most of the traffic gets somewhere over ten seconds (%d of %d)"
+		% [travelled, cars.size()]
+	)
+	_check(off_road == 0, "and none of it leaves the carriageway (%d samples)" % off_road)
+	_check(speeding == 0, "nobody exceeds the 30-50 km/h band (fastest %.0f)" % fastest)
+	_check(wrecked == 0, "nothing wrecked itself just driving around (%d samples)" % wrecked)
+	_check(airborne == 0, "and nothing left the ground (%d samples)" % airborne)
+
+
+## TEST F6: police and traffic share the roads without sharing a controller, and
+## a pursuing unit aims where the suspect is going.
+func _test_police_and_traffic() -> void:
+	var units := _police_cars()
+	_check(units.size() >= 1, "there are patrol cars")
+	if units.is_empty():
+		return
+	var unit := units[0] as Vehicle
+	var driver := unit.get_node_or_null("Driver") as PoliceDriver
+	_check(driver != null, "a patrol car has a police driver")
+	if driver == null:
+		return
+	_check(
+		unit.controller == Vehicle.Controller.POLICE_AI,
+		"a patrol car is flagged POLICE_AI"
+	)
+	_check(
+		not driver.is_siren_active(),
+		"a parked unit has its lights and siren off"
+	)
+
+	await _teleport(Vector3(0.0, 0.5, 70.0))
+	_player.velocity = Vector3.ZERO
+	var still := driver.predict_intercept(_player)
+	_check(
+		still.distance_to(_player.global_position) < 1.0,
+		"a stationary suspect is aimed at directly (%.1fm)"
+		% still.distance_to(_player.global_position)
+	)
+
+	_player.velocity = Vector3(9.0, 0.0, 0.0)
+	var lead := driver.predict_intercept(_player)
+	_check(
+		lead.x > _player.global_position.x + 3.0,
+		"a moving one is led (%.1fm ahead)" % (lead.x - _player.global_position.x)
+	)
+
+	_player.velocity = Vector3(400.0, 0.0, 0.0)
+	_check(
+		driver.predict_intercept(_player).distance_to(_player.global_position)
+		<= driver.max_lead_distance + 0.01,
+		"and the lead is capped so it never aims through a building"
+	)
+	_player.velocity = Vector3.ZERO
+
+	# Fast enough to close on traffic, slow enough that the player can escape.
+	var patrol: VehicleData = unit.data
+	var civilian: VehicleData = _player_car().data
+	_check(
+		patrol.max_speed > TrafficDriver.new().cruise_speed * 1.2,
+		"a patrol car outruns civilian traffic (%.0f m/s)" % patrol.max_speed
+	)
+	_check(
+		patrol.max_speed < civilian.max_speed * 1.2,
+		"but not by enough to make escape impossible (%.0f vs %.0f)"
+		% [patrol.max_speed, civilian.max_speed]
+	)
+
+
+## TEST F7: a car keeps its distance from whatever is in front of it — another
+## car, or somebody standing in the road.
+func _test_car_following() -> void:
+	var lane_z := District01.MAIN_ST_Z + District01.LANE_OFFSET
+	var front := await _spawn_test_traffic(Vector3(-40.0, 0.0, lane_z), -90.0)
+	# Parked in the lane: the follower has to deal with it.
+	(front.get_node("Driver") as TrafficDriver).set_physics_process(false)
+	front.set_ai_input(0.0, 0.0, true)
+
+	var rear := await _spawn_test_traffic(Vector3(-56.0, 0.0, lane_z), -90.0)
+	await _settle(300)
+
+	var gap := rear.global_position.distance_to(front.global_position)
+	_check(gap > 3.2, "a following car stops behind the one in front (%.1fm)" % gap)
+	_check(
+		rear.get_planar_speed() < 2.0,
+		"rather than shunting it (%.1f m/s)" % rear.get_planar_speed()
+	)
+	_check(front.health >= front.data.max_health, "and does not damage it")
+	await _despawn([front, rear])
+
+	# Now a person in the road instead of a car.
+	var walker := get_tree().get_nodes_in_group(&"pedestrian")[1] as Pedestrian
+	var home := walker.global_position
+	# Standing their ground: the point of the check is the driver's reaction,
+	# not the pedestrian's, so they neither dodge nor wander off mid-test.
+	walker.danger_check_interval = 9999.0
+	walker.global_position = Vector3(-40.0, 0.4, lane_z)
+	walker.wait_for(60.0)
+	await _settle(6)
+
+	var approaching := await _spawn_test_traffic(Vector3(-62.0, 0.0, lane_z), -90.0)
+	await _settle(240)
+	var clearance := approaching.global_position.distance_to(walker.global_position)
+	_check(
+		clearance > 2.5,
+		"a car keeps its distance from somebody in its lane rather than driving over them (%.1fm)"
+		% clearance
+	)
+	_check(
+		approaching.global_position.x > -56.0,
+		"and it did set off towards them (x=%.1f)" % approaching.global_position.x
+	)
+	_check(not walker.is_down(), "and the pedestrian is still on their feet")
+
+	await _despawn([approaching])
+	walker.danger_check_interval = 0.25
+	walker.global_position = home
+	walker.wait_for(0.5)
+	await _settle(6)
+
+
+## TEST F8: red means stop, green means go.
+func _test_traffic_stops_at_red() -> void:
+	var light: TrafficLight = null
+	for node in get_tree().get_nodes_in_group(&"traffic_light"):
+		if absf((node as Node3D).global_position.z - District01.MAIN_ST_Z) < 1.0:
+			light = node
+			break
+	_check(light != null, "the Main Street junction has a signal")
+	if light == null:
+		return
+
+	var green_was := light.green_seconds
+	var phase_was := light.start_phase
+	# A very long north-south green is a very long east-west red.
+	light.green_seconds = 600.0
+	light.start_phase = TrafficLight.Phase.NS_GREEN
+	light.restart_cycle()
+	_check(
+		light.should_stop_for(true),
+		"the east-west approach is showing red for this test"
+	)
+
+	var lane_z := District01.MAIN_ST_Z + District01.LANE_OFFSET
+	var car := await _spawn_test_traffic(Vector3(-34.0, 0.0, lane_z), -90.0)
+	await _settle(330)
+
+	var stop_line := light.global_position.x - light.stop_line_distance
+	_check(
+		car.global_position.x < stop_line + 2.0,
+		"a car stops at the red rather than crossing the line (x=%.1f, line %.1f)"
+		% [car.global_position.x, stop_line]
+	)
+	_check(
+		car.global_position.x > -30.0,
+		"and it did approach the junction rather than never setting off (x=%.1f)"
+		% car.global_position.x
+	)
+	_check(
+		car.get_planar_speed() < 1.0,
+		"and waits there (%.1f m/s)" % car.get_planar_speed()
+	)
+
+	var waited_at := car.global_position.x
+	light.start_phase = TrafficLight.Phase.EW_GREEN
+	light.restart_cycle()
+	await _settle(180)
+	_check(
+		car.global_position.x > waited_at + 5.0,
+		"and moves off when it turns green (%.1f -> %.1f)" % [waited_at, car.global_position.x]
+	)
+
+	await _despawn([car])
+	light.green_seconds = green_was
+	light.start_phase = phase_was
+	light.restart_cycle()
+
+
+## TEST F9: a car that cannot make progress tries another way out before it
+## gives up, and gives up rather than sitting there forever.
+func _test_traffic_stuck_recovery() -> void:
+	var lane_z := District01.MAIN_ST_Z + District01.LANE_OFFSET
+	var car := await _spawn_test_traffic(Vector3(-46.0, 0.0, lane_z), -90.0)
+	var driver := car.get_node("Driver") as TrafficDriver
+
+	_check(driver.stuck_timeout >= 2.0, "the shipped stuck timeout is conservative (%.1fs)" % driver.stuck_timeout)
+	# Compressed so the ladder runs in a second rather than fifteen.
+	driver.stuck_timeout = 0.4
+	driver.max_recoveries = 2
+
+	var recycles := [0]
+	driver.recycle_requested.connect(func() -> void: recycles[0] += 1)
+
+	# Wedged, simulated the only way that is deterministic: the car is told to
+	# drive and does not move. Every real cause — kerb, railing, another car
+	# across the nose — looks exactly like this to the driver.
+	var first_target := driver.get_target_position()
+	car.set_physics_process(false)
+	car.halt()
+	await _settle(45)
+	var retargeted := driver.get_target_position() != first_target
+	_check(retargeted, "a wedged car tries a different way out first")
+	_check(recycles[0] == 0, "and does not give up on the first attempt")
+
+	await _settle(150)
+	_check(recycles[0] >= 1, "but asks to be recycled once the attempts run out")
+
+	car.set_physics_process(true)
+	await _despawn([car])
+
+
+## TEST F10 (Issue A): a car no longer passes through a pedestrian.
+func _test_pedestrian_knockdown() -> void:
+	var walker := get_tree().get_nodes_in_group(&"pedestrian")[2] as Pedestrian
+	var home := walker.global_position
+	# Not dodging and not wandering off: this test is about what happens when
+	# somebody does not get out of the way.
+	walker.danger_check_interval = 9999.0
+	walker.global_position = Vector3(-40.0, 0.4, 74.0)
+	walker.wait_for(60.0)
+	await _settle(8)
+
+	CrimeManager.clear_history()
+	_notifications.clear()
+
+	var car := _player_car()
+	car.hit_and_run_grace = 1.0
+	car.hit_and_run_distance = 12.0
+	await _park_for_test(car, Vector3(-62.0, 0.0, 74.0), -90.0)
+	await _drive(car)
+	await _hold(["move_forward"], 200)
+
+	_check(walker.is_down(), "the car knocks the pedestrian down instead of passing through")
+	_check(
+		walker.health < walker.max_health,
+		"the impact costs them health (%.0f)" % walker.health
+	)
+	_check(walker.collision_layer == 0, "and takes them out of the way while they are down")
+	_check(
+		car.get_planar_speed() > 1.0,
+		"a body does not stop the car dead (%.1f m/s)" % car.get_planar_speed()
+	)
+
+	var assaults := CrimeManager.get_incidents_of(CrimeManager.CrimeType.VEHICULAR_ASSAULT)
+	_check(assaults.size() == 1, "running somebody over is filed (%d records)" % assaults.size())
+	_check(
+		assaults.size() == 1 and assaults[0].get("incident_only", false),
+		"as an incident, not as a crime report"
+	)
+	_check(WantedManager.level == 0, "so Phase F raises no wanted level for it")
+
+	# Drive on: leaving the scene is what makes it a hit and run.
+	await _hold(["move_forward"], 120)
+	await _settle(150)
+	_check(
+		CrimeManager.get_incidents_of(CrimeManager.CrimeType.HIT_AND_RUN).size() == 1,
+		"driving away turns it into a hit and run"
+	)
+
+	await _leave_vehicle()
+	await _settle(280)
+	_check(not walker.is_down(), "the pedestrian gets back up")
+	_check(
+		walker.state == Pedestrian.State.FLEEING,
+		"and gets out of the road (state %d)" % walker.state
+	)
+	_check(walker.collision_layer == 1 << 4, "and is solid again")
+
+	car.hit_and_run_grace = 6.0
+	car.hit_and_run_distance = 25.0
+	car.repair()
+	car.return_to_spawn()
+	walker.danger_check_interval = 0.25
+	walker.global_position = home
+	walker.wait_for(0.5)
+	CrimeManager.clear_history()
+	await _settle(8)
+
+
+## TEST F11: a pedestrian gets out of the way of a car bearing down on them.
+func _test_pedestrian_dodges_traffic() -> void:
+	var walker := get_tree().get_nodes_in_group(&"pedestrian")[3] as Pedestrian
+	var home := walker.global_position
+	# Slightly off the car's centre line, so which way they jump is decided
+	# rather than a coin toss.
+	walker.global_position = Vector3(-40.0, 0.4, 74.8)
+	walker.wait_for(60.0)
+	await _settle(8)
+	var started_at := walker.global_position
+
+	var car := await _spawn_test_traffic(Vector3(-68.0, 0.0, 74.0), -90.0)
+	# There is no lane out here; drive it by hand at a realistic traffic speed.
+	(car.get_node("Driver") as TrafficDriver).set_physics_process(false)
+	car.set_ai_input(1.0, 0.0, false)
+	await _settle(150)
+
+	_check(
+		walker.state == Pedestrian.State.DODGING or walker.state == Pedestrian.State.FLEEING,
+		"a pedestrian reacts to a car bearing down on them (state %d)" % walker.state
+	)
+	_check(
+		absf(walker.global_position.z - started_at.z) > 1.0,
+		"and moves sideways out of its path (%.1fm)"
+		% absf(walker.global_position.z - started_at.z)
+	)
+	_check(not walker.is_down(), "so it misses them")
+
+	await _despawn([car])
+	walker.global_position = home
+	await _settle(6)
+
+
 # --- Phase D: vehicles ---------------------------------------------------
 
 func _test_vehicles_spawned() -> void:
@@ -737,11 +1361,28 @@ func _test_camera_speed_zoom() -> void:
 		"but not excessively (%.1f from %.1f)" % [fast_view, parked_view]
 	)
 
+	# Phase F: the pivot also leads the car, so the road ahead is on screen.
+	var lead := _camera_rig.get_look_ahead_distance()
+	_check(lead > 2.0, "and it looks ahead of the car at speed (%.1fm)" % lead)
+	_check(
+		lead <= _camera_rig.look_ahead_distance + 0.01,
+		"never further than the configured lead (%.1fm)" % lead
+	)
+	var ahead_of_car := (
+		_camera_rig.global_position - car.global_position
+	).normalized().dot(car.get_facing())
+	_check(ahead_of_car > 0.5, "and leads in front of it, not behind (%.2f)" % ahead_of_car)
+
 	await _stop_vehicle(car)
 	await _settle(120)
 	_check(
 		_camera_rig.get_effective_distance() < parked_view + 1.0,
 		"slowing down brings it back in (%.1f)" % _camera_rig.get_effective_distance()
+	)
+	_check(
+		_camera_rig.get_look_ahead_distance() < 1.0,
+		"and the look-ahead eases back onto the car (%.1fm)"
+		% _camera_rig.get_look_ahead_distance()
 	)
 	await _leave_vehicle()
 
@@ -1168,12 +1809,85 @@ func _said(fragment: String) -> bool:
 
 # --- Vehicle helpers -----------------------------------------------------
 
-## Civilian vehicles only. Police cars are in the same group but are not part
-## of the parked-car layout.
+## Rough test for "is this on a carriageway" — within a road's half width of one
+## of the three street centre lines.
+## `margin` allows for the kerb a car legitimately clips while swinging round a
+## junction; pass 0 when checking somewhere a car was deliberately placed.
+func _is_on_a_lane(where: Vector3, margin: float = 0.0) -> bool:
+	if absf(where.x) > District01.EXTENT or absf(where.z) > District01.EXTENT:
+		return false
+	var reach := District01.ROAD_HALF + margin
+	if absf(where.x - District01.CENTER_BLVD_X) <= reach:
+		return true
+	if absf(where.z - District01.MAIN_ST_Z) <= reach:
+		return true
+	return absf(where.z - District01.NORTH_AVE_Z) <= reach
+
+
+## A civilian car driven by the traffic AI, placed by hand. Used by the tests
+## that need one specific car in one specific place, which the manager — whose
+## whole job is choosing those things itself — cannot give them.
+func _spawn_test_traffic(at: Vector3, yaw_degrees: float) -> Vehicle:
+	var car: Vehicle = TEST_TRAFFIC_SCENE.instantiate()
+	car.controller = Vehicle.Controller.TRAFFIC_AI
+	car.owner_type = Vehicle.OwnerType.NPC
+	car.owner_id = &"traffic"
+	car.position = at
+	car.rotation = Vector3(0.0, deg_to_rad(yaw_degrees), 0.0)
+	_main.add_child(car)
+
+	var driver := TrafficDriver.new()
+	driver.name = "Driver"
+	car.add_child(driver)
+	await _settle(4)
+	return car
+
+
+func _despawn(nodes: Array) -> void:
+	for node in nodes:
+		if is_instance_valid(node):
+			node.queue_free()
+	await _settle(4)
+
+
+## The parked-car layout only. Police cars and moving civilian traffic are in
+## the same group but are not part of it.
 func _vehicles() -> Array:
 	return get_tree().get_nodes_in_group(&"vehicle").filter(
-		func(car: Node) -> bool: return not car.is_in_group(&"police")
+		func(car: Node) -> bool:
+			return not car.is_in_group(&"police") and not car.is_in_group(&"traffic")
 	)
+
+
+func _traffic_manager() -> TrafficManager:
+	return get_tree().get_first_node_in_group(&"traffic_manager") as TrafficManager
+
+
+func _road_network() -> RoadNetwork:
+	return get_tree().get_first_node_in_group(&"road_network") as RoadNetwork
+
+
+## Clears the roads for the tests that need to know exactly what is on them.
+## Traffic is tested on its own, before this is called.
+func _stop_traffic() -> void:
+	var manager := _traffic_manager()
+	if manager == null:
+		return
+	manager.set_active(false)
+	manager.clear()
+	await _settle(4)
+
+
+## Refills the roads. `prime` ignores the keep-away-from-the-player rule, which
+## is what the district does at load and what a test wants: a full city now,
+## not one that arrives over the next half minute.
+func _start_traffic() -> void:
+	var manager := _traffic_manager()
+	if manager == null:
+		return
+	manager.set_active(true)
+	manager.prime()
+	await _settle(30)
 
 
 func _police_cars() -> Array:

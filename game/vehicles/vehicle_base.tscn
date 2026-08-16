@@ -29,6 +29,13 @@ spot_angle_attenuation = 0.6
 [node name="Seat" type="Marker3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.42, 0.95, -0.25)
 
+[node name="ImpactZone" type="Area3D" parent="."]
+collision_layer = 0
+collision_mask = 16
+monitorable = false
+
+[node name="Volume" type="CollisionShape3D" parent="ImpactZone"]
+
 [node name="Door" type="Area3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, 0)
 script = ExtResource("2_door")

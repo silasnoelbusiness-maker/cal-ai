@@ -42,6 +42,23 @@ extends Node3D
 @export var speed_zoom_amount: float = 8.0
 @export var speed_zoom_sharpness: float = 1.8
 
+@export_group("Look Ahead")
+## Shifts the pivot along the target's direction of travel at speed, so a car
+## doing 60 shows the road it is about to reach rather than the one it has just
+## left. Independent of the speed zoom — that changes how much you see, this
+## changes what you are looking at — but they share a reference speed so the two
+## come on together.
+@export var look_ahead_enabled: bool = true
+## Metres the pivot leads by at `speed_zoom_reference`. Deliberately modest: too
+## much and the car sits at the bottom edge of the screen.
+@export var look_ahead_distance: float = 7.0
+## Below this speed there is no lead at all, so walking and parking are framed
+## on the target exactly as before.
+@export var look_ahead_min_speed: float = 3.0
+## Eased more slowly than the zoom, because a lurching aim point is far more
+## noticeable than a lurching distance.
+@export var look_ahead_sharpness: float = 1.4
+
 @export_group("Orbit")
 ## -90 looks east along Main Street from the starting apartment, which frames
 ## the street rather than the wall the player spawns against.
@@ -57,6 +74,7 @@ extends Node3D
 
 var _target: Node3D = null
 var _speed_extra: float = 0.0
+var _look_ahead: Vector3 = Vector3.ZERO
 var _follow_blend: float = 1.0
 ## The exported framing, remembered so a temporary interior view can be undone.
 var _default_distance: float = 0.0
@@ -101,6 +119,7 @@ func reset_orientation() -> void:
 func _on_player_teleported(_destination: Transform3D) -> void:
 	if _target == null or not is_instance_valid(_target):
 		return
+	_look_ahead = Vector3.ZERO
 	global_position = _desired_pivot_position()
 	_follow_blend = 1.0
 
@@ -111,6 +130,7 @@ func set_target(new_target: Node3D, snap: bool = false) -> void:
 	_target = new_target
 	if _target == null:
 		return
+	_look_ahead = Vector3.ZERO
 	if snap:
 		global_position = _desired_pivot_position()
 		_follow_blend = 1.0
@@ -148,7 +168,14 @@ func _unhandled_input(event: InputEvent) -> void:
 func _process(delta: float) -> void:
 	_update_orbit(delta)
 	_update_speed_zoom(delta)
+	_update_look_ahead(delta)
 	_update_follow(delta)
+
+
+## How far the pivot is currently leading the target by. Zero when standing
+## still, and what a test reads to check the lead comes on and goes away again.
+func get_look_ahead_distance() -> float:
+	return _look_ahead.length()
 
 
 func _update_orbit(delta: float) -> void:
@@ -180,8 +207,31 @@ func _update_follow(delta: float) -> void:
 	)
 
 
+## The lead comes from the target's own `get_facing()` — the player's body pivot
+## turns while the player node itself never rotates, so reading the node's basis
+## would aim the camera at a fixed compass point.
+func _update_look_ahead(delta: float) -> void:
+	var wanted := Vector3.ZERO
+	if (
+		look_ahead_enabled
+		and _target != null
+		and _target.has_method("get_planar_speed")
+		and _target.has_method("get_facing")
+	):
+		var speed: float = _target.call("get_planar_speed")
+		if speed > look_ahead_min_speed:
+			var reach := (speed - look_ahead_min_speed) / maxf(
+				speed_zoom_reference - look_ahead_min_speed, 0.01
+			)
+			var forward: Vector3 = _target.call("get_facing")
+			forward.y = 0.0
+			if forward.length_squared() > 0.01:
+				wanted = forward.normalized() * clampf(reach, 0.0, 1.0) * look_ahead_distance
+	_look_ahead = _look_ahead.lerp(wanted, _smoothing(look_ahead_sharpness, delta))
+
+
 func _desired_pivot_position() -> Vector3:
-	return _target.global_position + Vector3.UP * height_offset
+	return _target.global_position + Vector3.UP * height_offset + _look_ahead
 
 
 ## Frame-rate independent exponential smoothing factor.

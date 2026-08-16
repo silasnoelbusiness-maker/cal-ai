@@ -10,7 +10,10 @@ extends Node
 ##   hour      hour of the in-game day, e.g. 22.5
 ##   scenario  street (default), apartment, shop, inventory, warehouse, car,
 ##             driving, theft, crowd, unseen_theft, witness, wanted, pursuit,
-##             escaping, cleared, busted, night_chase
+##             escaping, cleared, busted, night_chase, traffic, vehicle_types,
+##             red_light, green_light, crossing, pedestrian_reacts,
+##             driving_traffic, traffic_crash, pursuit_traffic, police_lights,
+##             escaping_traffic, night_traffic
 ##   distance  camera distance override, for overview shots
 ##   yaw       camera yaw override
 ##   pitch     camera pitch override
@@ -123,6 +126,145 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"busted", "night_chase":
 			await _crime_scenario(main, scenario)
 
+		"traffic":
+			# Stood on the corner of the Main Street junction, looking down the
+			# street the traffic manager has already filled.
+			player.global_position = Vector3(-11.5, 0.5, 8.4)
+			await _wait(300)
+
+		"vehicle_types":
+			# One of each body style, nose to tail in the southbound lane of the
+			# quiet end of the boulevard, with the traffic cleared away so the
+			# three shapes are the only thing in frame.
+			var manager := _traffic_manager()
+			manager.set_active(false)
+			manager.clear()
+			await _wait(6)
+			var styles := [
+				["res://vehicles/cars/sedan.tscn", 58.0, Color(0.514, 0.208, 0.196)],
+				["res://vehicles/cars/hatchback.tscn", 66.0, Color(0.259, 0.310, 0.376)],
+				["res://vehicles/cars/van.tscn", 74.5, Color(0.702, 0.706, 0.722)],
+			]
+			for entry in styles:
+				var car: Vehicle = load(entry[0]).instantiate()
+				car.position = Vector3(
+					District01.CENTER_BLVD_X - District01.LANE_OFFSET, 0.0, float(entry[1])
+				)
+				# Southbound: forward is +Z, which is a half turn from the default.
+				car.rotation_degrees.y = 180.0
+				var tinted: VehicleData = car.data.duplicate()
+				tinted.body_color = entry[2]
+				car.data = tinted
+				add_child(car)
+			# Stood in the lane beside them, so the camera frames the three
+			# shapes rather than the pavement it would centre on.
+			player.global_position = Vector3(
+				District01.CENTER_BLVD_X - District01.LANE_OFFSET - 3.2, 0.5, 66.0
+			)
+
+		"red_light", "green_light":
+			var light := _main_street_signal()
+			light.green_seconds = 600.0
+			light.start_phase = (
+				TrafficLight.Phase.NS_GREEN if scenario == "red_light"
+				else TrafficLight.Phase.EW_GREEN
+			)
+			light.restart_cycle()
+			# A queue approaching the junction from the west, in the eastbound
+			# lane. On red they stack up at the line; on green they stream past.
+			var lane_z := District01.MAIN_ST_Z + District01.LANE_OFFSET
+			var tints := [
+				Color(0.514, 0.208, 0.196),
+				Color(0.259, 0.310, 0.376),
+				Color(0.647, 0.549, 0.361),
+			]
+			for i in 3:
+				_add_traffic_car(
+					load("res://vehicles/cars/sedan.tscn"),
+					Vector3(-26.0 - float(i) * 7.5, 0.0, lane_z),
+					-90.0,
+					tints[i]
+				)
+			player.global_position = Vector3(-13.0, 0.5, 8.4)
+			await _wait(260)
+
+		"crossing":
+			# A civilian walking the painted crossing on the west arm of the
+			# junction, driven by the real navigation graph.
+			var walker: Pedestrian = get_tree().get_nodes_in_group(&"pedestrian")[0]
+			walker.global_position = Vector3(-7.6, 0.4, 8.4)
+			await _wait(6)
+			walker.walk_to(Vector3(-7.6, 0.0, -8.4))
+			player.global_position = Vector3(-15.0, 0.5, 8.4)
+			await _wait(200)
+
+		"pedestrian_reacts":
+			# Somebody stood in the eastbound lane of Main Street with a car
+			# coming, on a road cleared of everything else so the reaction is
+			# the only thing happening in frame.
+			var manager := _traffic_manager()
+			manager.set_active(false)
+			manager.clear()
+			var lane_z := District01.MAIN_ST_Z + District01.LANE_OFFSET
+			var walker: Pedestrian = get_tree().get_nodes_in_group(&"pedestrian")[0]
+			# Just north of the lane centre, so they jump towards the middle of
+			# the road rather than straight onto the pavement — the reaction is
+			# what the shot is of, and on the pavement it no longer reads as one.
+			walker.global_position = Vector3(-40.0, 0.4, lane_z - 0.9)
+			walker.wait_for(60.0)
+			player.global_position = Vector3(-44.0, 0.5, District01.PAVEMENT_OFFSET)
+			await _wait(8)
+			var car := _add_traffic_car(
+				load("res://vehicles/cars/sedan.tscn"),
+				Vector3(-64.0, 0.0, lane_z),
+				-90.0,
+				Color(0.514, 0.208, 0.196)
+			)
+			# Driven by hand rather than by the lane follower, so the car is
+			# where the shot needs it rather than wherever its route took it.
+			(car.get_node("Driver") as TrafficDriver).set_physics_process(false)
+			car.set_ai_input(1.0, 0.0, false)
+			# Caught part way through the jump, with the car still bearing down:
+			# any later and the shot is of an empty road and a safe pedestrian.
+			await _wait(100)
+
+		"driving_traffic":
+			var car := _find_vehicle(true)
+			car.global_position = Vector3(-52.0, 0.0, District01.MAIN_ST_Z + District01.LANE_OFFSET)
+			car.rotation_degrees.y = -90.0
+			car.halt()
+			await _wait(10)
+			car.enter(player)
+			Input.action_press("move_forward")
+			await _wait(150)
+
+		"traffic_crash":
+			var lane_z := District01.MAIN_ST_Z + District01.LANE_OFFSET
+			# One car stopped across the lane, another arriving at speed. The
+			# collision is the game's, not a staged pose.
+			var blocker := _add_traffic_car(
+				load("res://vehicles/cars/van.tscn"),
+				Vector3(-30.0, 0.0, lane_z),
+				-25.0,
+				Color(0.702, 0.706, 0.722)
+			)
+			(blocker.get_node("Driver") as TrafficDriver).set_physics_process(false)
+			blocker.set_ai_input(0.0, 0.0, true)
+			var runner := _add_traffic_car(
+				load("res://vehicles/cars/sedan.tscn"),
+				Vector3(-52.0, 0.0, lane_z),
+				-90.0,
+				Color(0.514, 0.208, 0.196)
+			)
+			# Sensors off: this shot is of the impact, not of the car avoiding it.
+			(runner.get_node("Driver") as TrafficDriver).set_physics_process(false)
+			runner.set_ai_input(1.0, 0.0, false)
+			player.global_position = Vector3(-34.0, 0.5, 9.4)
+			await _wait(112)
+
+		"pursuit_traffic", "police_lights", "escaping_traffic", "night_traffic":
+			await _crime_scenario(main, scenario, false)
+
 		"theft":
 			var car := _find_vehicle(false)
 			car.global_position = Vector3(-30.0, 0.0, 3.0)
@@ -141,17 +283,29 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 ## Drives the real crime loop for the screenshots, so nothing on screen is
 ## staged: the theft, the witness, the wanted level and the arrest are all
 ## produced by the same systems the player triggers.
-func _crime_scenario(main: Node, scenario: String) -> void:
+## `quiet_streets` empties the pavements first, which the Phase E shots want so
+## that exactly one witness is in play. The Phase F variants pass false: the
+## whole point of those is that the city carries on around the chase.
+func _crime_scenario(main: Node, scenario: String, quiet_streets: bool = true) -> void:
 	var player: Node3D = GameManager.player
 	var car := _find_vehicle(false)
-	var spot := Vector3(-40.0, 0.0, 3.0)
+	var spot := Vector3(-40.0, 0.0, District01.MAIN_ST_Z + District01.LANE_OFFSET)
 
-	# Clear the street so the scenario controls exactly who is watching.
-	for npc in get_tree().get_nodes_in_group(&"pedestrian") + get_tree().get_nodes_in_group(&"police"):
-		if npc is Node3D:
-			npc.global_position = Vector3(400.0, 0.0, 400.0)
-		npc.process_mode = Node.PROCESS_MODE_DISABLED
-	await _wait(4)
+	# The Phase F variants are the Phase E ones played out on a living street.
+	var kind: String = {
+		"pursuit_traffic": "pursuit",
+		"police_lights": "pursuit",
+		"night_traffic": "pursuit",
+		"escaping_traffic": "escaping",
+	}.get(scenario, scenario)
+
+	if quiet_streets:
+		# Clear the street so the scenario controls exactly who is watching.
+		for npc in get_tree().get_nodes_in_group(&"pedestrian") + get_tree().get_nodes_in_group(&"police"):
+			if npc is Node3D:
+				npc.global_position = Vector3(400.0, 0.0, 400.0)
+			npc.process_mode = Node.PROCESS_MODE_DISABLED
+		await _wait(4)
 
 	car.global_position = spot
 	car.rotation_degrees.y = -90.0
@@ -159,7 +313,7 @@ func _crime_scenario(main: Node, scenario: String) -> void:
 	player.global_position = car.global_transform * Vector3(-2.1, 0.5, 0.4)
 	await _wait(8)
 
-	if scenario != "unseen_theft":
+	if kind != "unseen_theft":
 		# One civilian, stood on the pavement, looking straight at the car.
 		var civilian: Node3D = get_tree().get_nodes_in_group(&"pedestrian")[0]
 		civilian.process_mode = Node.PROCESS_MODE_INHERIT
@@ -169,12 +323,12 @@ func _crime_scenario(main: Node, scenario: String) -> void:
 
 	car.get_node("Door").interact(player)
 	await _wait(10)
-	if scenario in ["unseen_theft", "witness"]:
+	if kind in ["unseen_theft", "witness"]:
 		return
 
 	# Let the witness call it in.
 	await _wait(int((WitnessSystem.report_delay + 0.6) * 60.0))
-	if scenario == "wanted":
+	if kind == "wanted":
 		return
 
 	var officers: Array = get_tree().get_nodes_in_group(&"police").filter(
@@ -182,14 +336,26 @@ func _crime_scenario(main: Node, scenario: String) -> void:
 	)
 	var cars: Array = get_tree().get_nodes_in_group(&"police_car")
 
-	if scenario == "escaping" or scenario == "cleared":
+	if kind == "escaping" or kind == "cleared":
 		# Nobody within sight: the countdown runs on its own.
 		WantedManager.escape_seconds_by_level = [0.0, 4.0, 6.0, 8.0, 10.0, 12.0]
 		for unit in officers + cars:
 			unit.process_mode = Node.PROCESS_MODE_INHERIT
 			unit.global_position = player.global_position + Vector3(58.0, 0.0, 0.0)
+		if not quiet_streets:
+			# Traffic and the crowd carry on; the police are the one thing that
+			# has to be out of the picture, or a unit driving back into sight
+			# cancels the very countdown the shot is of.
+			for unit in officers + cars:
+				unit.process_mode = Node.PROCESS_MODE_DISABLED
 		await _wait(int((WantedManager.sight_grace_seconds + 0.6) * 60.0))
-		if scenario == "escaping":
+		if kind == "escaping":
+			if not quiet_streets:
+				# On the move, so the street around the countdown is alive too.
+				Input.action_press("move_forward")
+				await _wait(45)
+				Input.action_release("move_forward")
+				await _wait(20)
 			return
 		await _wait(int(4.5 * 60.0))
 		return
@@ -199,30 +365,68 @@ func _crime_scenario(main: Node, scenario: String) -> void:
 		var unit: Node3D = cars[i]
 		unit.process_mode = Node.PROCESS_MODE_INHERIT
 		# Behind the player, in the same lane, pointing the way they went.
-		unit.global_position = player.global_position + Vector3(-9.0 - float(i) * 7.0, 0.0, 0.0)
+		unit.global_position = player.global_position + Vector3(-7.5 - float(i) * 6.5, 0.0, 0.0)
 		unit.rotation_degrees.y = -90.0
 		unit.halt()
 	var officer: Node3D = officers[0]
 	officer.process_mode = Node.PROCESS_MODE_INHERIT
 
-	if scenario == "busted":
+	if kind == "busted":
 		officer.global_position = player.global_position + Vector3(1.8, 0.0, 0.0)
 		await _wait(40)
 		return
 
-	officer.global_position = player.global_position + Vector3(13.0, 0.0, 4.0)
-	# Throttle stays down: a player at speed cannot be arrested, so the capture
-	# lands mid-chase rather than on the arrest that follows it.
+	# Far enough ahead not to make the arrest: a player at speed cannot be
+	# arrested anyway, but on a live street the countdown to one is a race the
+	# capture keeps losing.
+	officer.global_position = player.global_position + Vector3(
+		13.0 if quiet_streets else 34.0, 0.0, 4.0
+	)
+	# Throttle stays down, so the capture lands mid-chase rather than on the
+	# arrest that follows it.
 	Input.action_press("move_forward")
 	await _wait(50)
 
 
-## First vehicle matching the requested ownership.
+## First *parked* vehicle matching the requested ownership. Moving traffic and
+## patrol cars share the group and must not be picked.
 func _find_vehicle(player_owned: bool) -> Vehicle:
 	for car in get_tree().get_nodes_in_group(&"vehicle"):
+		if car.is_in_group(&"traffic") or car.is_in_group(&"police"):
+			continue
 		if car.is_player_owned() == player_owned:
 			return car
 	return null
+
+
+func _traffic_manager() -> TrafficManager:
+	return get_tree().get_first_node_in_group(&"traffic_manager") as TrafficManager
+
+
+func _main_street_signal() -> TrafficLight:
+	for node in get_tree().get_nodes_in_group(&"traffic_light"):
+		if absf((node as Node3D).global_position.z - District01.MAIN_ST_Z) < 1.0:
+			return node
+	return null
+
+
+## A civilian car under AI control, placed by hand. Used where a screenshot
+## needs a specific car in a specific place.
+func _add_traffic_car(scene: PackedScene, at: Vector3, yaw_degrees: float, tint: Color) -> Vehicle:
+	var car: Vehicle = scene.instantiate()
+	car.controller = Vehicle.Controller.TRAFFIC_AI
+	car.owner_type = Vehicle.OwnerType.NPC
+	car.owner_id = &"traffic"
+	car.position = at
+	car.rotation_degrees.y = yaw_degrees
+	var tinted: VehicleData = car.data.duplicate()
+	tinted.body_color = tint
+	car.data = tinted
+	add_child(car)
+	var driver := TrafficDriver.new()
+	driver.name = "Driver"
+	car.add_child(driver)
+	return car
 
 
 ## Waits on physics frames, not render frames. Physics runs at a fixed 60Hz

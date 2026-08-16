@@ -4,10 +4,12 @@ An original 3D open-world life & crime simulator, viewed from an elevated
 top-down camera. This directory holds a self-contained **Godot 4.3** project; it
 is unrelated to the Next.js app in the repository root.
 
-**V0.1 phases A–E are complete.** The full life/economy loop is playable end to
+**V0.1 phases A–F are complete.** The full life/economy loop is playable end to
 end — wake up in your flat, sleep off the night, walk to the warehouse for a
 paid shift, buy food at the convenience store, eat it, head home — and the city
-now has cars, a crowd, and police in it.
+around it now moves: civilian traffic on both streets, signals at the two
+junctions, a crowd that gets out of the way of cars, and police who chase you
+through all of it.
 
     sleep at home  ->  4h shift, +$120  ->  buy a meal, -$15  ->  eat  ->  home
 
@@ -27,6 +29,14 @@ you on foot and in marked patrol cars. Break line of sight and an escape
 countdown starts while they search your last known position; stay hidden and
 the heat clears. Get caught and you are fined and released outside the
 precinct.
+
+The streets are no longer empty while that happens. Eleven or so civilian cars
+— sedans, hatchbacks and vans — drive the lane network at about 40 km/h,
+queue behind each other, stop at the two sets of lights and pick a different
+way at each junction. Pedestrians watch for cars and jump clear; one that does
+not make it is knocked down, gets up shaken and hurries off. Driving away
+after hitting somebody is recorded as a hit-and-run — as an incident on your
+record, not yet as something the police come for.
 
 ## Running
 
@@ -61,7 +71,9 @@ Development keys, to be removed before release:
 
 | Input | Action |
 | --- | --- |
-| `F5` / `F12` | Quick save / quick load (until the Phase F pause menu) |
+| `F1` | Show / hide the traffic overlay |
+| `F2` | Cycle traffic density (low / medium / high) |
+| `F5` / `F12` | Quick save / quick load (until the pause menu lands) |
 | `F8` | Unstick the current vehicle |
 | `F6` / `F7` | Set wanted level 1 / 2 |
 | `F9` | Clear the wanted level |
@@ -95,6 +107,8 @@ shops/        shop.gd
 player/       player.tscn, player.gd, player_stats.gd
 ui/           hud, inventory_panel, shop_panel
 npc/          nav_graph, npc_walker, pedestrian, police_officer, police_driver
+traffic/      road_network, traffic_light, traffic_driver, traffic_manager,
+              traffic_debug
 vehicles/     vehicle_base, vehicle_data, vehicle_door + cars/*.tres
 world/        district_01, city_kit, day_night_cycle, portal, interiors/
 tests/        smoke_test, screenshot
@@ -138,6 +152,33 @@ main.tscn     entry scene
 * **Police are never told where the player is.** They navigate to
   `WantedManager.last_known_position`, which only changes when a unit actually
   *sees* the player. That single rule is what makes hiding work.
+* **Traffic runs on its own graph, not the pedestrian one.** `RoadNetwork` is a
+  *directed* lane graph built from one polyline per lane. Turns at junctions are
+  never authored: a node links to any node ahead of it, within reach, that is
+  not a U-turn, which at a crossroads produces straight-on plus a left and a
+  right for free. A new road is a new strand and nothing else.
+* **Routes are chosen a junction at a time**, at random from the successors,
+  rather than solved end to end. Pedestrians want the shortest path; traffic
+  wants a plausible one, and cars that all solved the same route would all drive
+  the same loop.
+* **One node owns each whole junction.** A `TrafficLight` has a single phase and
+  the two axes read it opposite ways, so conflicting greens are impossible by
+  construction rather than by careful configuration.
+* **Vehicles do not collide with people.** A crowd that physically blocked
+  traffic would jam the roads solid, so pedestrians sit on a layer cars ignore
+  and contact is resolved by an area poll instead: over walking pace it is a
+  knockdown, under it a shove. That is what stops cars passing through people
+  without stopping the city dead.
+* **Every stuck car eventually gets recycled.** The graduated recovery — try
+  another turning, back off and re-join the lane, give up — cannot break a
+  deadlock, because in a deadlock every car is correctly waiting for the one in
+  front and none of them believes it is stuck. So there is a second, blunter
+  watchdog on top: no real movement for several seconds and the car is taken out
+  of circulation, wherever it is and whatever it thinks it is waiting for.
+* **Recycling, not spawning.** Cars that reach the edge of the district or give
+  up are moved to a fresh lane node well away from the player rather than freed
+  and re-instanced, so a much bigger city later still costs a fixed pool of
+  vehicles.
 
 ## Tests
 
@@ -155,7 +196,20 @@ round trip. Finally it plays the crime loop: a theft nobody sees costs nothing,
 a civilian witness reports it after a delay, an officer reports it instantly,
 breaking line of sight starts the escape countdown, being spotted again cancels
 it, and getting caught fines the player and releases them — including at
-night, and including a player too poor to pay the fine:
+night, and including a player too poor to pay the fine.
+
+Phase F adds the living city: that the park is reachable and nothing routes
+through the fountain, that the lane graph never links onto an oncoming lane and
+does offer both a straight on and a turning at each junction, that routes
+diverge, that the signals cycle and never show conflicting greens, that the
+spawned population is the right size and every car of it is on a carriageway,
+under AI control and impossible to hijack, that traffic keeps moving inside its
+speed band without leaving the road, that a car queues behind the one in front
+and slows for somebody standing in the lane, that red means stop and green means
+go, that a wedged car tries another way out and is recycled when that fails,
+that a pedestrian jumps clear of an approaching car, and that one who does not
+is knocked down, logged as an incident rather than a crime, gets back up and
+runs:
 
 ```sh
 godot --headless --path game res://tests/smoke_test.tscn
@@ -174,13 +228,17 @@ xvfb-run -a godot --rendering-driver opengl3 --path game \
 Args after `++` are `key=value` pairs, all optional: `out`, `hour`, `scenario`
 (`street`, `apartment`, `shop`, `inventory`, `warehouse`, `car`, `driving`,
 `theft`, `crowd`, `unseen_theft`, `witness`, `wanted`, `pursuit`, `escaping`,
-`cleared`, `busted`) and camera `distance`
-/ `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
+`cleared`, `busted`, `night_chase`, `traffic`, `vehicle_types`, `red_light`,
+`green_light`, `crossing`, `pedestrian_reacts`, `driving_traffic`,
+`traffic_crash`, `pursuit_traffic`, `police_lights`, `escaping_traffic`,
+`night_traffic`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
 rather than faking their results. It runs under the Compatibility renderer, so
 lighting is close to but not identical to the Forward+ game.
 
 ## What is next
 
-Phase F: a real pause menu with settings over the existing save system, and
-polish. The diner and precinct doors are real interaction points holding those
-places; only what happens behind the prompt is still to come.
+Nothing is started. The obvious candidates are a real pause menu with settings
+over the existing save system, and turning the hit-and-run incident into
+something the police actually respond to. The diner and precinct doors are real
+interaction points holding those places; only what happens behind the prompt is
+still to come.

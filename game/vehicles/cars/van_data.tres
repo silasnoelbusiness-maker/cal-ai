@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="VehicleData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://vehicles/vehicle_data.gd" id="1_vehicle_data"]
+
+[resource]
+script = ExtResource("1_vehicle_data")
+id = &"van"
+display_name = "Halyard Panel Van"
+description = "Somebody's livelihood. Heavy, slow to stop, sees over the traffic."
+max_speed = 19.0
+max_reverse_speed = 7.0
+acceleration = 8.5
+brake_deceleration = 17.0
+engine_braking = 4.6
+handbrake_deceleration = 13.0
+steer_rate_low = 2.0
+steer_rate_high = 0.8
+steer_response = 5.5
+handbrake_steer_bonus = 1.2
+min_speed_to_steer = 0.6
+full_steer_speed = 3.2
+max_health = 150.0
+damage_speed_threshold = 8.0
+damage_per_impact_speed = 2.2
+impact_speed_retention = 0.2
+body_length = 5.1
+body_width = 2.05
+body_height = 0.78
+cabin_height = 1.05
+ground_clearance = 0.28
+wheel_radius = 0.38
+wheel_width = 0.28
+body_color = Color(0.831373, 0.839216, 0.847059, 1)
+trim_color = Color(0.207843, 0.215686, 0.239216, 1)
+glass_color = Color(0.121569, 0.184314, 0.215686, 1)

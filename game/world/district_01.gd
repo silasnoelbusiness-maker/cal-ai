@@ -55,6 +55,30 @@ const WAREHOUSE_JOB: JobData = preload("res://jobs/definitions/warehouse_worker.
 const INTERIOR_CAMERA_DISTANCE := 11.0
 const INTERIOR_CAMERA_PITCH := 74.0
 
+## Distance from a road centre line to each traffic lane. Two moving lanes plus
+## a kerbside parking bay have to share a 12m carriageway, so this is as far out
+## as a lane can sit and still leave a van clear of the parked cars.
+const LANE_OFFSET := 2.5
+## Distance from a road centre line to the kerbside parking line. Close enough
+## to the 6m kerb that a parked car is obviously parked, far enough out that
+## through traffic passes it without touching.
+const PARKING_OFFSET := 4.9
+## Distance from a junction centre to the painted stop bar on each approach —
+## just beyond the crosswalk. The signals take their stop line from the same
+## constant, so the paint and the rule can never drift apart.
+const STOP_LINE_OFFSET := ROAD_HALF + 3.0
+
+# The park's paths, which pedestrians and police need to be able to route along.
+const PARK_BOUNDS := Rect2(-38.0, 15.0, 25.0, 45.0)
+const PARK_PATH_X := -25.5
+const PARK_PATH_Z := 37.5
+## The fountain sits exactly where the two paths cross, so the walkable route
+## goes round it rather than through it. The ring clears the 3.2m basin by more
+## than a pedestrian's width even along the diagonal shortcuts the graph's
+## connect radius creates.
+const FOUNTAIN_RING := 5.2
+const FOUNTAIN_PLAZA_HALF := 6.5
+
 ## Distance from a road centre line to the pedestrian route on each side. Kept
 ## clear of the kerbside street lights, which would otherwise stand in the
 ## middle of the walking line and jam the crowd against them.
@@ -69,6 +93,9 @@ const STREET_LIGHT_KERB_GAP := 0.8
 const CURB_LAYER := 1 << 5
 
 const SEDAN_SCENE: PackedScene = preload("res://vehicles/cars/sedan.tscn")
+const ROAD_NETWORK_SCRIPT: Script = preload("res://traffic/road_network.gd")
+const TRAFFIC_LIGHT_SCRIPT: Script = preload("res://traffic/traffic_light.gd")
+const TRAFFIC_MANAGER_SCRIPT: Script = preload("res://traffic/traffic_manager.gd")
 const POLICE_CAR_SCENE: PackedScene = preload("res://vehicles/cars/police_car.tscn")
 const PEDESTRIAN_SCENE: PackedScene = preload("res://npc/pedestrian.tscn")
 const POLICE_OFFICER_SCENE: PackedScene = preload("res://npc/police_officer.tscn")
@@ -104,6 +131,7 @@ func _ready() -> void:
 	_build_venue_doors()
 	_build_notice_board()
 	_build_nav_graph()
+	_build_traffic()
 	_build_vehicles()
 	_build_pedestrians()
 	_build_police()
@@ -247,6 +275,48 @@ func _build_road_markings() -> void:
 			_add_crosswalk(Vector2(junction_x, junction_z + ROAD_HALF + 1.6), true)
 			_add_crosswalk(Vector2(junction_x - ROAD_HALF - 1.6, junction_z), false)
 			_add_crosswalk(Vector2(junction_x + ROAD_HALF + 1.6, junction_z), false)
+			_add_stop_lines(junction_x, junction_z)
+
+
+## A painted bar across each approach, on that approach's own half of the
+## carriageway and just outside the crosswalk, so where the traffic waiting at a
+## red is waiting is legible from above.
+func _add_stop_lines(junction_x: float, junction_z: float) -> void:
+	var tag := "%d_%d" % [int(junction_x), int(junction_z)]
+	var bar := 0.45
+
+	# Eastbound waits west of the junction in the southern lane; westbound waits
+	# east of it in the northern one.
+	_add_marking(
+		"StopEast%s" % tag,
+		CityKit.rect_from_bounds(
+			junction_x - STOP_LINE_OFFSET - bar, junction_z,
+			junction_x - STOP_LINE_OFFSET, junction_z + ROAD_HALF
+		)
+	)
+	_add_marking(
+		"StopWest%s" % tag,
+		CityKit.rect_from_bounds(
+			junction_x + STOP_LINE_OFFSET, junction_z - ROAD_HALF,
+			junction_x + STOP_LINE_OFFSET + bar, junction_z
+		)
+	)
+	# Northbound waits south of the junction in the eastern lane; southbound
+	# waits north of it in the western one.
+	_add_marking(
+		"StopNorth%s" % tag,
+		CityKit.rect_from_bounds(
+			junction_x, junction_z + STOP_LINE_OFFSET,
+			junction_x + ROAD_HALF, junction_z + STOP_LINE_OFFSET + bar
+		)
+	)
+	_add_marking(
+		"StopSouth%s" % tag,
+		CityKit.rect_from_bounds(
+			junction_x - ROAD_HALF, junction_z - STOP_LINE_OFFSET - bar,
+			junction_x, junction_z - STOP_LINE_OFFSET
+		)
+	)
 
 
 func _add_marking(node_name: String, rect: Rect2) -> void:
@@ -508,6 +578,24 @@ func _build_park() -> void:
 	var park := CityKit.rect_from_bounds(-38.0, 15.0, -13.0, 60.0)
 	CityKit.add_slab(
 		container, "Lawn", park, GRASS_BASE, GRASS_THICKNESS, _mat("grass"), false, false
+	)
+
+	# A paved square under the fountain, so walking round the basin is walking on
+	# the path rather than across the grass.
+	CityKit.add_slab(
+		container,
+		"FountainPlaza",
+		CityKit.rect_from_bounds(
+			PARK_PATH_X - FOUNTAIN_PLAZA_HALF,
+			PARK_PATH_Z - FOUNTAIN_PLAZA_HALF,
+			PARK_PATH_X + FOUNTAIN_PLAZA_HALF,
+			PARK_PATH_Z + FOUNTAIN_PLAZA_HALF
+		),
+		PARK_PATH_BASE,
+		GRASS_THICKNESS,
+		_mat("sidewalk"),
+		false,
+		false
 	)
 
 	# A crossing pair of paths.
@@ -919,6 +1007,36 @@ func _build_nav_graph() -> void:
 		[Vector2(CENTER_BLVD_X - walk_offset, -reach), Vector2(CENTER_BLVD_X - walk_offset, reach)],
 		[Vector2(CENTER_BLVD_X + walk_offset, -reach), Vector2(CENTER_BLVD_X + walk_offset, reach)],
 	]
+	# The park's own paths, plus the two entrances that join them to the street
+	# network. Without these the park is a hole in the graph: an officer sent to
+	# the fountain routed to the nearest pavement node and stopped there, and a
+	# pedestrian could never choose anywhere inside the park to walk to.
+	var ring_north := PARK_PATH_Z - FOUNTAIN_RING
+	var ring_south := PARK_PATH_Z + FOUNTAIN_RING
+	var ring_west := PARK_PATH_X - FOUNTAIN_RING
+	var ring_east := PARK_PATH_X + FOUNTAIN_RING
+	walk_lines.append_array([
+		# The two paths, each stopping at the fountain plaza...
+		[Vector2(PARK_PATH_X, PARK_BOUNDS.position.y), Vector2(PARK_PATH_X, ring_north)],
+		[Vector2(PARK_PATH_X, ring_south), Vector2(PARK_PATH_X, PARK_BOUNDS.end.y)],
+		[Vector2(PARK_BOUNDS.position.x, PARK_PATH_Z), Vector2(ring_west, PARK_PATH_Z)],
+		[Vector2(ring_east, PARK_PATH_Z), Vector2(PARK_BOUNDS.end.x, PARK_PATH_Z)],
+		# ...and a square round the basin joining the four stubs back up.
+		[Vector2(ring_west, ring_north), Vector2(ring_east, ring_north)],
+		[Vector2(ring_west, ring_south), Vector2(ring_east, ring_south)],
+		[Vector2(ring_west, ring_north), Vector2(ring_west, ring_south)],
+		[Vector2(ring_east, ring_north), Vector2(ring_east, ring_south)],
+		# North gate, onto Main Street's south pavement.
+		[
+			Vector2(PARK_PATH_X, PARK_BOUNDS.position.y),
+			Vector2(PARK_PATH_X, MAIN_ST_Z + walk_offset),
+		],
+		# East gate, onto Center Boulevard's west pavement.
+		[
+			Vector2(PARK_BOUNDS.end.x, PARK_PATH_Z),
+			Vector2(CENTER_BLVD_X - walk_offset, PARK_PATH_Z),
+		],
+	])
 	# Road routing uses centre lines. Lane discipline is not worth the
 	# complexity while the only AI drivers are police in a hurry.
 	var road_lines := [
@@ -928,6 +1046,64 @@ func _build_nav_graph() -> void:
 	]
 	nav.build(walk_lines, road_lines)
 	_nav = nav
+
+
+# --- Traffic -------------------------------------------------------------
+
+## The lane network, the signals and the population manager.
+##
+## Lanes are described once, as directed strands down the middle of each one,
+## and everything else — which way a car may turn at a junction, where it is
+## legal to spawn, which route it takes — falls out of that. Right-hand traffic:
+## a driver's own lane is the one to the right of the centre line.
+func _build_traffic() -> void:
+	var container := _make_container("Traffic")
+	var reach := EXTENT - 3.0
+
+	var network: RoadNetwork = ROAD_NETWORK_SCRIPT.new()
+	network.name = "RoadNetwork"
+	container.add_child(network)
+	network.build([
+		# Main Street.
+		[Vector2(-reach, MAIN_ST_Z + LANE_OFFSET), Vector2(reach, MAIN_ST_Z + LANE_OFFSET)],
+		[Vector2(reach, MAIN_ST_Z - LANE_OFFSET), Vector2(-reach, MAIN_ST_Z - LANE_OFFSET)],
+		# North Avenue.
+		[Vector2(-reach, NORTH_AVE_Z + LANE_OFFSET), Vector2(reach, NORTH_AVE_Z + LANE_OFFSET)],
+		[Vector2(reach, NORTH_AVE_Z - LANE_OFFSET), Vector2(-reach, NORTH_AVE_Z - LANE_OFFSET)],
+		# Center Boulevard. Northbound is -Z, so it runs from the south edge up.
+		[
+			Vector2(CENTER_BLVD_X + LANE_OFFSET, reach),
+			Vector2(CENTER_BLVD_X + LANE_OFFSET, -reach),
+		],
+		[
+			Vector2(CENTER_BLVD_X - LANE_OFFSET, -reach),
+			Vector2(CENTER_BLVD_X - LANE_OFFSET, reach),
+		],
+	])
+
+	# One signal per junction. The two are deliberately out of phase so the
+	# district never turns green all at once, and so a car let through one
+	# junction usually meets a red at the next — which is what makes the street
+	# look busy rather than synchronised.
+	var junctions := [
+		["MainStreetSignal", Vector3(CENTER_BLVD_X, 0.0, MAIN_ST_Z), TrafficLight.Phase.EW_GREEN, 0.0],
+		["NorthAvenueSignal", Vector3(CENTER_BLVD_X, 0.0, NORTH_AVE_Z), TrafficLight.Phase.NS_GREEN, 5.0],
+	]
+	for entry in junctions:
+		var light: TrafficLight = TRAFFIC_LIGHT_SCRIPT.new()
+		light.name = entry[0]
+		light.position = entry[1]
+		light.start_phase = entry[2]
+		light.start_offset_seconds = entry[3]
+		light.stop_line_distance = STOP_LINE_OFFSET
+		container.add_child(light)
+
+	var manager: TrafficManager = TRAFFIC_MANAGER_SCRIPT.new()
+	manager.name = "TrafficManager"
+	container.add_child(manager)
+	# Filled before the first frame, so the player never watches the streets
+	# populate themselves.
+	manager.prime()
 
 
 # --- People --------------------------------------------------------------
@@ -963,7 +1139,9 @@ func _build_police() -> void:
 	var posts := [
 		["PrecinctOfficer", Vector3(20.0, 0.4, 9.5)],
 		["MainStreetOfficer", Vector3(-16.0, 0.4, 7.5)],
-		["ParkOfficer", Vector3(-25.5, 0.4, 37.5)],
+		# On the park path south of the fountain — the old post was the fountain's
+		# own position, which stood the officer inside the basin.
+		["ParkOfficer", Vector3(PARK_PATH_X, 0.4, PARK_PATH_Z + 8.0)],
 	]
 	for post in posts:
 		var officer: PoliceOfficer = POLICE_OFFICER_SCENE.instantiate()
@@ -1003,25 +1181,25 @@ func _build_police() -> void:
 func _vehicle_table() -> Array:
 	return [
 		[
-			"PlayerSedan", &"vehicle_player_sedan", Vector2(-56.0, -4.0), 90.0,
+			"PlayerSedan", &"vehicle_player_sedan", Vector2(-56.0, -PARKING_OFFSET), 90.0,
 			Vehicle.OwnerType.PLAYER, &"player", Color(0.243, 0.376, 0.494),
 		],
 		# Main Street kerbside bays, between the flat and the market.
 		[
-			"NpcSedanMarket", &"vehicle_npc_market", Vector2(-43.0, -4.0), 90.0,
+			"NpcSedanMarket", &"vehicle_npc_market", Vector2(-43.0, -PARKING_OFFSET), 90.0,
 			Vehicle.OwnerType.NPC, &"npc_market", Color(0.639, 0.612, 0.529),
 		],
 		[
-			"NpcSedanMain", &"vehicle_npc_main", Vector2(-32.0, -4.0), 90.0,
+			"NpcSedanMain", &"vehicle_npc_main", Vector2(-32.0, -PARKING_OFFSET), 90.0,
 			Vehicle.OwnerType.NPC, &"npc_main", Color(0.400, 0.451, 0.376),
 		],
 		[
-			"NpcSedanBlvd", &"vehicle_npc_blvd", Vector2(-21.0, -4.0), 90.0,
+			"NpcSedanBlvd", &"vehicle_npc_blvd", Vector2(-21.0, -PARKING_OFFSET), 90.0,
 			Vehicle.OwnerType.NPC, &"npc_blvd", Color(0.541, 0.259, 0.243),
 		],
 		# South kerb of Main Street, across from the warehouse gate.
 		[
-			"NpcSedanWarehouse", &"vehicle_npc_warehouse", Vector2(-60.0, 4.0), -90.0,
+			"NpcSedanWarehouse", &"vehicle_npc_warehouse", Vector2(-60.0, PARKING_OFFSET), -90.0,
 			Vehicle.OwnerType.NPC, &"npc_warehouse", Color(0.298, 0.310, 0.345),
 		],
 		# Civic hall car park, north of North Avenue.
@@ -1035,7 +1213,7 @@ func _vehicle_table() -> Array:
 		],
 		# North Avenue kerbside.
 		[
-			"NpcSedanNorth", &"vehicle_npc_north", Vector2(30.0, -46.0), -90.0,
+			"NpcSedanNorth", &"vehicle_npc_north", Vector2(30.0, NORTH_AVE_Z + PARKING_OFFSET), -90.0,
 			Vehicle.OwnerType.NPC, &"npc_north", Color(0.475, 0.404, 0.478),
 		],
 	]

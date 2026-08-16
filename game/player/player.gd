@@ -118,6 +118,14 @@ func get_planar_speed() -> float:
 	return Vector2(velocity.x, velocity.z).length()
 
 
+## Which way the figure is turned. The node itself never rotates — only the body
+## pivot does — so anything that needs the player's heading has to ask for it
+## rather than read the transform. The camera's look-ahead does.
+func get_facing() -> Vector3:
+	var yaw := _body_pivot.rotation.y
+	return Vector3(sin(yaw), 0.0, cos(yaw))
+
+
 func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= _gravity * delta

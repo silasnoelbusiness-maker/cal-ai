@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://world/district_01.tscn" id="2_district"]
@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" path="res://camera/camera_rig.tscn" id="4_camera"]
 [ext_resource type="PackedScene" path="res://ui/hud.tscn" id="5_hud"]
 [ext_resource type="PackedScene" path="res://world/interiors/apartment.tscn" id="6_apartment"]
+[ext_resource type="Script" path="res://traffic/traffic_debug.gd" id="7_traffic_debug"]
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1_main")
@@ -24,3 +25,6 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -60, 0.3, -7.5)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -60, 1.7, -7.5)
 
 [node name="HUD" parent="." instance=ExtResource("5_hud")]
+
+[node name="TrafficDebug" type="CanvasLayer" parent="."]
+script = ExtResource("7_traffic_debug")

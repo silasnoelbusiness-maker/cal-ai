@@ -15,7 +15,18 @@ signal crime_witnessed(record: Dictionary)
 ## Emitted once a witnessed crime has actually been called in.
 signal crime_reported_to_police(record: Dictionary)
 
-enum CrimeType { VEHICLE_THEFT, SHOPLIFTING, ASSAULT, ROBBERY, BURGLARY, TRESPASSING }
+signal incident_logged(record: Dictionary)
+
+enum CrimeType {
+	VEHICLE_THEFT,
+	SHOPLIFTING,
+	ASSAULT,
+	ROBBERY,
+	BURGLARY,
+	TRESPASSING,
+	VEHICULAR_ASSAULT,
+	HIT_AND_RUN,
+}
 
 ## How serious each crime is, 1 (petty) to 5 (severe). The wanted system will
 ## read these rather than re-deciding severity per crime site.
@@ -26,6 +37,8 @@ const SEVERITY: Dictionary = {
 	CrimeType.ASSAULT: 3,
 	CrimeType.BURGLARY: 3,
 	CrimeType.ROBBERY: 4,
+	CrimeType.VEHICULAR_ASSAULT: 3,
+	CrimeType.HIT_AND_RUN: 3,
 }
 
 ## Wanted stars a *reported* crime is worth. Separate from severity so the two
@@ -38,6 +51,8 @@ const WANTED_VALUE: Dictionary = {
 	CrimeType.ASSAULT: 2,
 	CrimeType.BURGLARY: 2,
 	CrimeType.ROBBERY: 3,
+	CrimeType.VEHICULAR_ASSAULT: 2,
+	CrimeType.HIT_AND_RUN: 2,
 }
 
 ## Records kept in memory, so a long session stays flat.
@@ -56,6 +71,55 @@ func report_crime(
 	target: Node = null,
 	witnessed: bool = false
 ) -> Dictionary:
+	var record := _make_record(type, position, perpetrator, target, witnessed)
+	_remember(record)
+
+	crime_reported.emit(record)
+	# Deliberately not "CRIME REPORTED": at this point the crime has happened,
+	# but nobody has necessarily seen it.
+	GameManager.notify(_describe(record), GameManager.Tone.BAD)
+	return record
+
+
+## Files something that happened without putting it in front of the witness
+## system. Phase F needs hit-and-runs on the record — for the stats screen, and
+## so a later phase can escalate them — but the brief is explicit that running
+## somebody over must not yet summon a police response, and `crime_reported` is
+## exactly the signal WitnessSystem listens to. Same ledger, quieter door.
+func log_incident(
+	type: CrimeType,
+	position: Vector3,
+	perpetrator: Node = null,
+	target: Node = null
+) -> Dictionary:
+	var record := _make_record(type, position, perpetrator, target, false)
+	record["incident_only"] = true
+	_remember(record)
+	incident_logged.emit(record)
+	return record
+
+
+func get_incidents_of(type: CrimeType) -> Array[Dictionary]:
+	var found: Array[Dictionary] = []
+	for record in _history:
+		if record["type"] == type and record.get("incident_only", false):
+			found.append(record)
+	return found
+
+
+func _remember(record: Dictionary) -> void:
+	_history.append(record)
+	if _history.size() > MAX_HISTORY:
+		_history.remove_at(0)
+
+
+func _make_record(
+	type: CrimeType,
+	position: Vector3,
+	perpetrator: Node,
+	target: Node,
+	witnessed: bool
+) -> Dictionary:
 	var record := {
 		"id": _next_id,
 		"type": type,
@@ -73,17 +137,9 @@ func report_crime(
 		"reporting_witness": null,
 		"reported": false,
 		"wanted_value": int(WANTED_VALUE.get(type, 1)),
+		"incident_only": false,
 	}
 	_next_id += 1
-
-	_history.append(record)
-	if _history.size() > MAX_HISTORY:
-		_history.remove_at(0)
-
-	crime_reported.emit(record)
-	# Deliberately not "CRIME REPORTED": at this point the crime has happened,
-	# but nobody has necessarily seen it.
-	GameManager.notify(_describe(record), GameManager.Tone.BAD)
 	return record
 
 

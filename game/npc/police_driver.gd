@@ -11,6 +11,12 @@ extends Node
 ## carriageway instead of cutting across the park.
 
 signal state_changed(state: State)
+## Raised and lowered with the light bar. Nothing listens: the prototype has no
+## audio at all, and a placeholder beep would be worse than silence. The state
+## behind it is real, though, so a siren later is an AudioStreamPlayer3D on the
+## car and one connection to this — no new logic and no new state to keep in
+## step with the lights.
+signal siren_changed(active: bool)
 
 enum State { PARKED, RESPONDING, PURSUING, SEARCHING, RETURNING }
 
@@ -25,6 +31,13 @@ enum State { PARKED, RESPONDING, PURSUING, SEARCHING, RETURNING }
 ## Distance from the final target at which the car brakes to a stop.
 @export var stopping_distance: float = 7.0
 @export var repath_interval: float = 1.0
+## Seconds of the suspect's motion the car steers ahead of while pursuing. Small
+## on purpose: enough to cut a corner rather than trail the player's bumper,
+## short enough that it never predicts its way into a wall.
+@export var interception_time: float = 0.9
+## Ceiling on how far ahead of the suspect the aim point may sit, so a fast car
+## is never aimed at through a building.
+@export var max_lead_distance: float = 14.0
 
 @export_group("Perception")
 @export var perception_interval: float = 0.25
@@ -65,7 +78,7 @@ func _ready() -> void:
 		set_physics_process(false)
 		return
 
-	_car.ai_controlled = true
+	_car.controller = Vehicle.Controller.POLICE_AI
 	_car.add_to_group(&"police")
 	_car.add_to_group(&"police_car")
 	_home = _car.global_transform
@@ -102,6 +115,12 @@ func _build_light_bar() -> void:
 
 func get_car() -> Vehicle:
 	return _car
+
+
+## True while the unit is out on a call — which is exactly when the light bar is
+## flashing, so lights and siren can never disagree.
+func is_siren_active() -> bool:
+	return state != State.PARKED and state != State.RETURNING
 
 
 func _physics_process(delta: float) -> void:
@@ -182,13 +201,39 @@ func _target_position() -> Vector3:
 	match state:
 		State.PURSUING:
 			var player := GameManager.player
-			return player.global_position if player != null else WantedManager.last_known_position
+			if player == null:
+				return WantedManager.last_known_position
+			return predict_intercept(player)
 		State.RESPONDING, State.SEARCHING:
 			return WantedManager.last_known_position
 		State.RETURNING:
 			return _home.origin
 		_:
 			return _car.global_position
+
+
+## Aims where the suspect is going rather than where they are — the simplest
+## interception there is, `position + velocity * t`, clamped so it cannot lead
+## the car through a wall. It only changes the aim point; routing still goes
+## through the road graph, so a lead across a building is corrected by the path.
+func predict_intercept(suspect: Node3D) -> Vector3:
+	var lead := _suspect_velocity(suspect) * interception_time
+	lead.y = 0.0
+	if lead.length() > max_lead_distance:
+		lead = lead.normalized() * max_lead_distance
+	return suspect.global_position + lead
+
+
+## A player on foot carries their own velocity; a player driving is a passenger
+## of the car, so the car's is the one that means anything.
+func _suspect_velocity(suspect: Node3D) -> Vector3:
+	if suspect.has_method("get_vehicle"):
+		var car := suspect.call("get_vehicle") as Node3D
+		if car is Vehicle:
+			return (car as Vehicle).velocity
+	if suspect is CharacterBody3D:
+		return (suspect as CharacterBody3D).velocity
+	return Vector3.ZERO
 
 
 func _repath() -> void:
@@ -277,7 +322,10 @@ func _on_wanted_cleared() -> void:
 func _set_state(new_state: State) -> void:
 	if state == new_state:
 		return
+	var siren_was := is_siren_active()
 	state = new_state
 	if state == State.PARKED:
 		_car.halt()
 	state_changed.emit(state)
+	if is_siren_active() != siren_was:
+		siren_changed.emit(is_siren_active())

@@ -20,13 +20,31 @@ signal driver_exited(driver: Node3D)
 signal health_changed(health: float, max_health: float)
 signal disabled()
 signal collided(impact_speed: float)
+signal hit_pedestrian(victim: Node3D, impact_speed: float)
 
 enum OwnerType { PLAYER, NPC, PUBLIC, COMPANY }
+## Who is at the wheel. PLAYER means "nobody, until a person gets in"; the AI
+## values mean an AI driver node is feeding set_ai_input() and the player cannot
+## take the car. Adding TAXI_AI or DELIVERY_AI later is a new entry here plus a
+## new driver node — nothing in this script has to change.
+enum Controller { PLAYER, TRAFFIC_AI, POLICE_AI }
 
 ## Speeds above this (m/s) are too fast to step out of.
 const SAFE_EXIT_SPEED := 6.0
 ## Beam strength once the headlights are lit.
 const HEADLIGHT_ENERGY := 5.0
+## Below this speed the car is manoeuvring, and touching somebody is not an
+## impact at all.
+const PEDESTRIAN_CONTACT_SPEED := 1.2
+## Seconds between checks of who is under the bumper. Vehicles do not collide
+## with the NPC layer — a crowd that physically blocked traffic would jam the
+## roads solid — so contact is resolved by an area poll instead, which is what
+## stops cars simply passing through people.
+const IMPACT_POLL_INTERVAL := 0.08
+## Speed kept after knocking somebody down, and after a nudge. A body does not
+## stop a car, but the hit has to read as one.
+const KNOCKDOWN_SPEED_RETENTION := 0.75
+const NUDGE_SPEED_RETENTION := 0.9
 ## Candidate exit spots in local space, tried in order: driver's side first,
 ## then passenger's, then the corners, then front and back.
 const EXIT_OFFSETS: Array[Vector3] = [
@@ -47,15 +65,20 @@ const EXIT_OFFSETS: Array[Vector3] = [
 ## Stable id for the save file. Empty means this vehicle is not persisted.
 @export var save_id: StringName = &""
 
-## Set by an AI driver (police) instead of a human at the keyboard. An
-## AI-controlled car takes its inputs from set_ai_input() and cannot be entered
-## by the player.
-var ai_controlled: bool = false
+@export_group("Pedestrian impacts")
+## How long after hitting somebody the driver has to stop before it counts as
+## having left the scene, and how far away counts as gone.
+@export var hit_and_run_grace: float = 6.0
+@export var hit_and_run_distance: float = 25.0
+
+## Set by an AI driver node when it attaches itself. See Controller above.
+var controller: Controller = Controller.PLAYER
 
 @onready var _body_root: Node3D = $Body
 @onready var _collision: CollisionShape3D = $Collision
 @onready var _seat: Marker3D = $Seat
 @onready var _door: VehicleDoor = $Door
+@onready var _impact_zone: Area3D = $ImpactZone
 @onready var _headlights: SpotLight3D = $Headlights
 
 var health: float = 100.0
@@ -69,6 +92,7 @@ var _front_wheels: Array[Node3D] = []
 var _theft_reported: bool = false
 ## Where this car was parked at load, so a stolen one can be put back.
 var _spawn_transform: Transform3D
+var _impact_timer: float = 0.0
 var _ai_throttle: float = 0.0
 var _ai_steer: float = 0.0
 var _ai_handbrake: bool = false
@@ -88,6 +112,7 @@ func _ready() -> void:
 
 	_build_body()
 	_build_collision()
+	_build_impact_zone()
 	_door.setup(self)
 	health_changed.emit(health, data.max_health)
 
@@ -125,12 +150,27 @@ func get_speed_kmh() -> float:
 	return absf(_forward_speed) * 3.6
 
 
+## Direction of travel on the ground plane — the nose, or the tail in reverse.
+## The camera's look-ahead reads this; a reversing car should show the player
+## where it is backing into.
+func get_facing() -> Vector3:
+	var forward := -global_transform.basis.z
+	forward.y = 0.0
+	if _forward_speed < 0.0:
+		forward = -forward
+	return forward.normalized() if forward.length_squared() > 0.0001 else Vector3.FORWARD
+
+
 func get_display_name() -> String:
 	return data.display_name if data != null else "Vehicle"
 
 
+func is_ai_controlled() -> bool:
+	return controller != Controller.PLAYER
+
+
 func can_be_entered_by(_who: Node3D) -> bool:
-	return _driver == null and not is_disabled() and not ai_controlled
+	return _driver == null and not is_disabled() and not is_ai_controlled()
 
 
 ## Feeds the same three inputs the player supplies. Keeping AI on this path
@@ -238,7 +278,7 @@ func _physics_process(delta: float) -> void:
 	var handbrake := false
 
 	if not is_disabled():
-		if ai_controlled:
+		if is_ai_controlled():
 			throttle = _ai_throttle
 			steer = _ai_steer
 			handbrake = _ai_handbrake
@@ -257,6 +297,7 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 	_resolve_collisions(speed_before, delta)
+	_check_pedestrian_impacts(delta)
 	_update_wheels(delta)
 
 	# The driver rides along, so their world position stays meaningful for the
@@ -341,6 +382,62 @@ func _resolve_collisions(speed_before: float, delta: float) -> void:
 	collided.emit(hardest_impact)
 	if hardest_impact > data.damage_speed_threshold:
 		apply_damage((hardest_impact - data.damage_speed_threshold) * data.damage_per_impact_speed)
+
+
+## Resolves contact with people. Polled rather than signalled, because
+## `body_entered` only fires on the frame someone crosses the boundary — a
+## pedestrian already stood in front of a parked car that then pulls away would
+## never trigger one.
+func _check_pedestrian_impacts(delta: float) -> void:
+	_impact_timer -= delta
+	if _impact_timer > 0.0:
+		return
+	_impact_timer = IMPACT_POLL_INTERVAL
+
+	var speed := get_planar_speed()
+	if speed < PEDESTRIAN_CONTACT_SPEED:
+		return
+
+	for body in _impact_zone.get_overlapping_bodies():
+		var walker := body as Pedestrian
+		if walker == null or walker.is_down():
+			continue
+
+		var direction := walker.global_position - global_position
+		direction.y = 0.0
+		if direction.length_squared() > 0.0001:
+			direction = direction.normalized()
+
+		var floored := walker.knock_down(speed, direction)
+		_forward_speed *= KNOCKDOWN_SPEED_RETENTION if floored else NUDGE_SPEED_RETENTION
+		hit_pedestrian.emit(walker, speed)
+		if floored:
+			_report_pedestrian_incident(walker, speed)
+
+
+## Running somebody over is filed as an incident, not a crime report: the brief
+## is explicit that Phase F must not build the wanted response around it yet, and
+## `report_crime` is what the witness system listens to.
+func _report_pedestrian_incident(victim: Node3D, speed: float) -> void:
+	if _driver == null or _driver != GameManager.player:
+		return
+	var scene := global_position
+	CrimeManager.log_incident(
+		CrimeManager.CrimeType.VEHICULAR_ASSAULT, scene, _driver, victim
+	)
+	GameManager.notify("PEDESTRIAN HIT", GameManager.Tone.BAD)
+	_watch_for_hit_and_run(scene, victim)
+
+
+## A hit only becomes a hit-and-run once the driver is demonstrably gone. Stop,
+## or get out, and nothing further is filed.
+func _watch_for_hit_and_run(scene: Vector3, victim: Node3D) -> void:
+	await get_tree().create_timer(hit_and_run_grace).timeout
+	if not is_inside_tree() or _driver == null:
+		return
+	if global_position.distance_to(scene) < hit_and_run_distance:
+		return
+	CrimeManager.log_incident(CrimeManager.CrimeType.HIT_AND_RUN, scene, _driver, victim)
 
 
 ## Front wheels visibly turn with the steering — cheap, and it reads clearly
@@ -545,6 +642,17 @@ func _build_collision() -> void:
 	shape.size = Vector3(data.body_width, height, data.body_length)
 	_collision.shape = shape
 	_collision.position = Vector3(0.0, height * 0.5, 0.0)
+
+
+## Slightly proud of the body all round, so a glancing pass still counts as
+## contact rather than the pedestrian threading the gap.
+func _build_impact_zone() -> void:
+	var shape := BoxShape3D.new()
+	var height := maxf(data.ground_clearance + data.body_height, 0.9)
+	shape.size = Vector3(data.body_width + 0.35, height, data.body_length + 0.5)
+	var volume := _impact_zone.get_node("Volume") as CollisionShape3D
+	volume.shape = shape
+	volume.position = Vector3(0.0, height * 0.5, 0.0)
 
 
 # --- Save ----------------------------------------------------------------
