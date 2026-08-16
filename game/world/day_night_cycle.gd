@@ -90,6 +90,9 @@ func _set_street_lights(should_be_on: bool) -> void:
 	if wanted == _street_lights_on:
 		return
 	_street_lights_on = wanted
-	for light in get_tree().get_nodes_in_group("street_light"):
-		if light is Light3D:
-			light.visible = should_be_on
+	# Headlights are a separate group so the two can be counted and reasoned
+	# about independently, even though they switch on together.
+	for group in [&"street_light", &"vehicle_headlight"]:
+		for light in get_tree().get_nodes_in_group(group):
+			if light is Light3D:
+				light.visible = should_be_on

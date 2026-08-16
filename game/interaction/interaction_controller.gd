@@ -59,6 +59,22 @@ func get_focused() -> Interactable:
 	return _current
 
 
+## Switches prompt detection off and on — used while the player is driving, so
+## on-foot prompts do not fire from the driver's seat. Turning it off clears the
+## current focus, which hides the prompt.
+func set_active(active: bool) -> void:
+	monitoring = active
+	set_process(active)
+	set_process_unhandled_input(active)
+	if active:
+		_refresh_accumulator = refresh_interval
+		return
+	_candidates.clear()
+	if _current != null:
+		_current = null
+		focus_changed.emit(null)
+
+
 func _on_area_entered(area: Area3D) -> void:
 	var target := area as Interactable
 	if target == null or _candidates.has(target):

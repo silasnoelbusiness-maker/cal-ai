@@ -48,7 +48,7 @@ func _ready() -> void:
 	if _args.has("pitch"):
 		rig.pitch_degrees = _number("pitch", rig.pitch_degrees)
 
-	await _wait(40)
+	await _wait(20)
 	await RenderingServer.frame_post_draw
 
 	var output_path := String(_args.get("out", "user://screenshot.png"))
@@ -95,12 +95,55 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"warehouse":
 			player.global_position = Vector3(-58.0, 0.5, 13.4)
 
+		"car":
+			var car := _find_vehicle(true)
+			player.global_position = car.global_transform * Vector3(-2.1, 0.5, 0.4)
+
+		"driving", "driving_night":
+			var car := _find_vehicle(true)
+			# A clear eastbound run along Main Street, toward the junction.
+			car.global_position = Vector3(-45.0, 0.0, 3.0)
+			car.rotation_degrees.y = -90.0
+			car.halt()
+			await _wait(10)
+			car.enter(player)
+			# Throttle stays down through the capture, so the speedometer and
+			# the speed zoom are both showing real values.
+			Input.action_press("move_forward")
+			# ~2.2s: long enough to reach top speed and for the camera's speed
+			# zoom to settle, short enough to still be short of the junction.
+			await _wait(130)
+
+		"theft":
+			var car := _find_vehicle(false)
+			car.global_position = Vector3(-30.0, 0.0, 3.0)
+			car.rotation_degrees.y = -90.0
+			car.halt()
+			await _wait(10)
+			player.global_position = car.global_transform * Vector3(-2.1, 0.5, 0.4)
+			await _wait(10)
+			# Driven through the real door interactable, so the toast on screen
+			# is the one the game actually posts.
+			car.get_node("Door").interact(player)
+
 	await _wait(20)
 
 
+## First vehicle matching the requested ownership.
+func _find_vehicle(player_owned: bool) -> Vehicle:
+	for car in get_tree().get_nodes_in_group(&"vehicle"):
+		if car.is_player_owned() == player_owned:
+			return car
+	return null
+
+
+## Waits on physics frames, not render frames. Physics runs at a fixed 60Hz
+## regardless of how slow the renderer is, so a scenario takes the same amount
+## of game time under a software rasteriser as it does on a GPU. Counting draw
+## calls instead let a car drive the length of the district before capture.
 func _wait(frames: int) -> void:
 	for i in frames:
-		await get_tree().process_frame
+		await get_tree().physics_frame
 
 
 func _parse_args() -> void:

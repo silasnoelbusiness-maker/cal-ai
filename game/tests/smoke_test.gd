@@ -45,6 +45,13 @@ func _run() -> void:
 	_test_clock_and_economy()
 	await _test_life_loop()
 	await _test_shop_and_job_rules()
+	await _test_vehicles_spawned()
+	await _test_enter_and_exit()
+	await _test_driving()
+	await _test_vehicle_collision()
+	await _test_vehicle_theft()
+	await _test_camera_speed_zoom()
+	await _test_vehicle_save_load()
 
 	_report()
 
@@ -61,7 +68,7 @@ func _test_world_built() -> void:
 	_check(buildings.get_child_count() == 12, "12 buildings placed")
 	_check(interactables.get_child_count() >= 9, "interaction points placed")
 	_check(
-		get_tree().get_nodes_in_group("street_light").size() == 32, "32 street lights registered"
+		get_tree().get_nodes_in_group("street_light").size() == 44, "44 street lights registered"
 	)
 	_check(GameManager.player == _player, "player registered with GameManager")
 
@@ -453,6 +460,422 @@ func _test_shop_and_job_rules() -> void:
 	)
 
 
+# --- Phase D: vehicles ---------------------------------------------------
+
+func _test_vehicles_spawned() -> void:
+	var cars := _vehicles()
+	_check(cars.size() == 8, "8 vehicles parked in the district (got %d)" % cars.size())
+
+	var owned := 0
+	var npc := 0
+	var healthy := true
+	for car in cars:
+		if car.owner_type == Vehicle.OwnerType.PLAYER:
+			owned += 1
+		elif car.owner_type == Vehicle.OwnerType.NPC:
+			npc += 1
+		if car.data == null or car.health < car.data.max_health:
+			healthy = false
+	_check(owned == 1, "exactly one is the player's")
+	_check(npc == 7, "the rest are NPC-owned (%d)" % npc)
+	_check(healthy, "every vehicle starts with full health and a data resource")
+	_check(_player_car() != null, "the player's car can be found by ownership")
+
+
+## TEST 1 and TEST 4: walk up, get in, get out beside the car, get back in.
+func _test_enter_and_exit() -> void:
+	var car := _player_car()
+	await _park_for_test(car, Vector3(-56.0, 0.0, -4.0), 90.0)
+
+	await _stand_beside(car)
+	var door := _player.interaction.get_focused()
+	_check(door is VehicleDoor, "standing by the car offers a door prompt")
+	_check(
+		door != null and door.get_prompt_text() == "F — Enter Vehicle",
+		"the prompt is '%s', not an E prompt" % (door.get_prompt_text() if door else "<none>")
+	)
+
+	await _press_action("enter_vehicle")
+	await _settle(8)
+	_check(_player.is_driving(), "F puts the player in the driver's seat")
+	_check(car.get_driver() == _player, "the car knows who is driving it")
+	_check(_camera_rig.get_target() == car, "the camera hands over to the vehicle")
+	_check(_player.interaction.get_focused() == null, "on-foot prompts stop while driving")
+	_check(_main.get_node("HUD/Root/SpeedPanel").visible, "the speedometer appears")
+
+	await _press_action("enter_vehicle")
+	await _settle(20)
+	_check(not _player.is_driving(), "F again gets the player out")
+	_check(_camera_rig.get_target() == _player, "the camera comes back to the player")
+	_check(not _main.get_node("HUD/Root/SpeedPanel").visible, "the speedometer goes away")
+
+	# TEST 4: beside the car, on the ground, not inside it and not under the map.
+	var offset := _player.global_position - car.global_position
+	var gap := Vector2(offset.x, offset.z).length()
+	_check(gap > 1.2 and gap < 4.5, "the player is put beside the car (%.1fm)" % gap)
+	_check(_player.global_position.y > -0.5 and _player.global_position.y < 2.0,
+		"the player is not under the map (y=%.2f)" % _player.global_position.y)
+	_check(_player.is_on_floor(), "the player is standing on solid ground")
+
+	await _settle(20)
+	await _press_action("enter_vehicle")
+	await _settle(8)
+	_check(_player.is_driving(), "the player can get straight back in")
+	await _leave_vehicle()
+
+
+## TEST 2: throttle, brake, reverse, handbrake, steering.
+func _test_driving() -> void:
+	var car := _player_car()
+	# A long clear run north up Center Boulevard, well away from parked cars,
+	# the junctions and the park.
+	var line := Vector3(0.0, 0.0, 78.0)
+	await _park_for_test(car, line, 0.0)
+	await _drive(car)
+
+	var start := car.global_position
+	await _hold(["move_forward"], 90)
+	_check(car.get_forward_speed() > 8.0, "the throttle builds speed (%.1f m/s)" % car.get_forward_speed())
+	_check(
+		car.get_forward_speed() <= car.data.max_speed + 0.01,
+		"speed is capped at the model's maximum"
+	)
+	_check(car.global_position.distance_to(start) > 8.0, "the car actually moves")
+	_check(
+		car.global_position.z < start.z - 5.0, "the car drives forward, along its own nose"
+	)
+
+	# Coasting: no input bleeds speed off without stopping dead.
+	var coasting_from := car.get_forward_speed()
+	await _settle(30)
+	_check(
+		car.get_forward_speed() < coasting_from and car.get_forward_speed() > 0.0,
+		"lifting off coasts down rather than stopping dead (%.1f m/s)" % car.get_forward_speed()
+	)
+
+	# Braking is sharper than coasting.
+	var brake_from := car.get_forward_speed()
+	await _hold(["move_back"], 15)
+	var braked := brake_from - car.get_forward_speed()
+	_check(braked > 0.5, "the brake pulls speed off (%.1f m/s in a quarter second)" % braked)
+
+	# Reverse, from a standstill.
+	await _reposition(car, line, 0.0)
+	var before_reverse := car.global_position
+	await _hold(["move_back"], 70)
+	_check(car.get_forward_speed() < -2.0, "holding S from rest reverses (%.1f m/s)" % car.get_forward_speed())
+	_check(
+		car.global_position.z > before_reverse.z + 1.0, "reversing moves the car backwards"
+	)
+	_check(
+		absf(car.get_forward_speed()) <= car.data.max_reverse_speed + 0.01,
+		"reverse has its own, lower speed cap"
+	)
+
+	# Handbrake.
+	await _reposition(car, line, 0.0)
+	await _hold(["move_forward"], 70)
+	var handbrake_from := car.get_forward_speed()
+	await _hold(["handbrake"], 20)
+	_check(
+		car.get_forward_speed() < handbrake_from - 3.0,
+		"the handbrake hauls it down (%.1f -> %.1f m/s)" % [handbrake_from, car.get_forward_speed()]
+	)
+
+	# Steering, and the fact that it tightens at low speed.
+	await _reposition(car, line, 0.0)
+	var still_yaw := car.rotation.y
+	await _hold(["move_left"], 30)
+	_check(
+		is_equal_approx(car.rotation.y, still_yaw),
+		"a stationary car cannot pivot on the spot"
+	)
+
+	await _reposition(car, line, 0.0)
+	var slow_turn := await _measure_turn(car, 25, 30)
+	await _reposition(car, line, 0.0)
+	var fast_turn := await _measure_turn(car, 110, 30)
+	_check(slow_turn > 0.05, "the car steers while moving (%.2f rad)" % slow_turn)
+	_check(
+		fast_turn < slow_turn,
+		"steering tightens up at speed (%.2f rad fast vs %.2f slow)" % [fast_turn, slow_turn]
+	)
+
+	await _leave_vehicle()
+
+
+## TEST 3: a building is a wall, not a suggestion.
+func _test_vehicle_collision() -> void:
+	var car := _player_car()
+	# North up the empty westmost bay, straight at the Larkspur frontage. Clear
+	# of the parked cars, the notice board and the street lights.
+	await _park_for_test(car, Vector3(-68.0, 0.0, 0.0), 0.0)
+	await _drive(car)
+
+	var health_before := car.health
+	await _hold(["move_forward"], 120)
+	await _settle(20)
+
+	# The plinth face is at z = -12.82; a 4.3m car stopped against it sits at
+	# about -10.7. Anything past the facade means it drove through.
+	_check(
+		car.global_position.z > -11.3,
+		"the car cannot drive through a building (z=%.2f)" % car.global_position.z
+	)
+	_check(
+		absf(car.get_forward_speed()) < 4.0,
+		"the impact scrubs speed instead of grinding (%.1f m/s)" % car.get_forward_speed()
+	)
+	_check(car.health < health_before, "a solid hit damages the car (%.0f)" % car.health)
+	_check(car.health > 0.0, "one crash does not write it off")
+
+	car.repair()
+	await _leave_vehicle()
+
+
+## TEST 5: theft is recorded, and nothing else happens yet.
+func _test_vehicle_theft() -> void:
+	CrimeManager.clear_history()
+	_notifications.clear()
+
+	var target: Vehicle = null
+	for car in _vehicles():
+		if car.owner_type == Vehicle.OwnerType.NPC:
+			target = car
+			break
+	_check(target != null, "there is an NPC car to steal")
+	if target == null:
+		return
+
+	await _park_for_test(target, Vector3(0.0, 0.0, 60.0), 0.0)
+	await _stand_beside(target)
+	var door := _player.interaction.get_focused()
+	_check(
+		door is VehicleDoor and door.prompt_subtitle.ends_with("not yours"),
+		"the prompt warns the car is not the player's"
+	)
+
+	await _press_action("enter_vehicle")
+	await _settle(8)
+	_check(_player.is_driving(), "the player can still take it")
+
+	var record := CrimeManager.get_last_crime()
+	_check(not record.is_empty(), "a crime was filed")
+	_check(
+		record.get("type") == CrimeManager.CrimeType.VEHICLE_THEFT,
+		"it is filed as vehicle theft"
+	)
+	_check(record.get("target") == target, "the record names the stolen vehicle")
+	_check(record.get("perpetrator") == _player, "the record names the player")
+	_check(int(record.get("severity", 0)) == 2, "vehicle theft carries its severity")
+	_check(record.has("position") and record.has("day") and record.has("time"),
+		"the record carries where and when, for the witness system later")
+	_check(record.get("witnessed") == false, "nothing witnessed it — no witnesses exist yet")
+	_check(
+		_notifications.any(func(m: String) -> bool: return m.begins_with("VEHICLE THEFT")),
+		"the player is told a theft happened"
+	)
+
+	# The brief is explicit: no police response in this phase.
+	_check(
+		not GameManager.has_method("set_wanted_level"),
+		"no wanted level was wired up"
+	)
+
+	# Driving a stolen car is still driving.
+	await _hold(["move_forward"], 40)
+	_check(target.get_forward_speed() > 3.0, "the stolen car drives away")
+
+	# Getting back into the same car must not re-file the same crime.
+	await _leave_vehicle()
+	var crimes_before := CrimeManager.get_history().size()
+	await _stand_beside(target)
+	await _press_action("enter_vehicle")
+	await _settle(8)
+	_check(
+		CrimeManager.get_history().size() == crimes_before,
+		"re-entering an already-stolen car does not re-file it"
+	)
+	await _leave_vehicle()
+	# Leave the boulevard clear: a car abandoned mid-road here would be an
+	# obstacle the later driving tests would silently crash into.
+	await _park_for_test(target, Vector3(60.0, 0.0, 72.0), 0.0)
+
+
+## TEST 6: the view opens up with speed and comes back in.
+func _test_camera_speed_zoom() -> void:
+	var car := _player_car()
+	await _park_for_test(car, Vector3(0.0, 0.0, 78.0), 0.0)
+	await _drive(car)
+	await _settle(40)
+
+	var parked_view := _camera_rig.get_effective_distance()
+	await _hold(["move_forward"], 150)
+	var fast_view := _camera_rig.get_effective_distance()
+	# Asserted so an obstacle in the run-up fails here, loudly, rather than
+	# quietly turning into a "camera did not widen" result.
+	_check(
+		car.get_forward_speed() > 12.0,
+		"the car got up to speed for this test (%.1f m/s)" % car.get_forward_speed()
+	)
+	_check(
+		fast_view > parked_view + 2.0,
+		"the camera widens at speed (%.1f -> %.1f)" % [parked_view, fast_view]
+	)
+	_check(
+		fast_view < parked_view * 1.6,
+		"but not excessively (%.1f from %.1f)" % [fast_view, parked_view]
+	)
+
+	await _stop_vehicle(car)
+	await _settle(120)
+	_check(
+		_camera_rig.get_effective_distance() < parked_view + 1.0,
+		"slowing down brings it back in (%.1f)" % _camera_rig.get_effective_distance()
+	)
+	await _leave_vehicle()
+
+
+## TEST 7: the player's car survives a save and load.
+func _test_vehicle_save_load() -> void:
+	var slot := 99
+	var car := _player_car()
+
+	await _park_for_test(car, Vector3(-20.0, 0.0, 30.0), 45.0)
+	car.apply_damage(30.0)
+	await _teleport(Vector3(-24.0, 0.5, 30.0))
+	EconomyManager.restore(742)
+	_player.inventory.clear()
+	_player.inventory.add(ItemCatalogue.by_id(&"snack_bar"), 2)
+	await _settle(6)
+
+	var saved_position := car.global_position
+	var saved_yaw := car.rotation.y
+	var saved_health := car.health
+	_check(SaveManager.save_to_slot(slot), "the game saves")
+	_check(SaveManager.has_save(slot), "the save file exists")
+
+	# Move everything somewhere else so a no-op load would be obvious.
+	await _park_for_test(car, Vector3(40.0, 0.0, -20.0), 0.0)
+	car.repair()
+	await _teleport(Vector3(30.0, 0.5, 20.0))
+	EconomyManager.restore(1)
+	_player.inventory.clear()
+	await _settle(6)
+
+	_check(SaveManager.load_from_slot(slot), "the game loads")
+	await _settle(10)
+
+	_check(
+		car.global_position.distance_to(saved_position) < 0.6,
+		"the car is back where it was saved (%.2fm off)" % car.global_position.distance_to(saved_position)
+	)
+	_check(absf(car.rotation.y - saved_yaw) < 0.05, "its heading is restored")
+	_check(is_equal_approx(car.health, saved_health), "its damage is restored (%.0f)" % car.health)
+	_check(EconomyManager.cash == 742, "the player's cash is restored")
+	_check(_player.inventory.count_of(&"snack_bar") == 2, "the inventory is restored")
+	_check(
+		_player.global_position.distance_to(Vector3(-24.0, 0.5, 30.0)) < 2.0,
+		"the player is back where they were saved"
+	)
+
+	# An unknown future version must be refused rather than half-applied.
+	var path := SaveManager.get_slot_path(slot)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(JSON.stringify({"version": SaveManager.SAVE_VERSION + 5}))
+	file.close()
+	_check(not SaveManager.load_from_slot(slot), "a newer save format is refused, not half-read")
+
+	# A save missing whole sections must not crash the load.
+	file = FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(JSON.stringify({"version": SaveManager.SAVE_VERSION}))
+	file.close()
+	_check(SaveManager.load_from_slot(slot), "a save with missing sections still loads")
+
+	SaveManager.delete_slot(slot)
+	_check(not SaveManager.has_save(slot), "the test save is cleaned up")
+
+
+# --- Vehicle helpers -----------------------------------------------------
+
+func _vehicles() -> Array:
+	return get_tree().get_nodes_in_group(&"vehicle")
+
+
+func _player_car() -> Vehicle:
+	for car in _vehicles():
+		if car.owner_type == Vehicle.OwnerType.PLAYER:
+			return car
+	return null
+
+
+## Moves a car to a clear test spot and lets it settle.
+func _park_for_test(car: Vehicle, spot: Vector3, yaw_degrees: float) -> void:
+	if car.has_driver():
+		await _leave_vehicle()
+	car.global_position = spot
+	car.rotation = Vector3(0.0, deg_to_rad(yaw_degrees), 0.0)
+	car.velocity = Vector3.ZERO
+	await _settle(12)
+
+
+func _stand_beside(car: Vehicle) -> void:
+	await _teleport(car.global_transform * Vector3(-2.0, 0.5, 0.0))
+	await _settle(20)
+
+
+func _drive(car: Vehicle) -> void:
+	if _player.is_driving():
+		await _leave_vehicle()
+	await _stand_beside(car)
+	car.enter(_player)
+	await _settle(6)
+
+
+func _leave_vehicle() -> void:
+	_release_all()
+	var car := _player.get_vehicle() as Vehicle
+	if car == null:
+		return
+	car.exit_driver(true)
+	await _settle(12)
+
+
+## Moves a car without ejecting its driver, and zeroes its motion, so each
+## driving measurement starts from an identical, obstacle-free state.
+func _reposition(car: Vehicle, spot: Vector3, yaw_degrees: float) -> void:
+	_release_all()
+	car.global_position = spot
+	car.rotation = Vector3(0.0, deg_to_rad(yaw_degrees), 0.0)
+	car.halt()
+	await _settle(10)
+
+
+## Holds the handbrake until the car is genuinely stopped, rather than for a
+## fixed number of frames that may not be enough from top speed.
+func _stop_vehicle(car: Vehicle) -> void:
+	_release_all()
+	Input.action_press("handbrake")
+	var frames := 0
+	while absf(car.get_forward_speed()) > 0.05 and frames < 400:
+		await get_tree().physics_frame
+		frames += 1
+	Input.action_release("handbrake")
+	await _settle(10)
+
+
+## Drives forward for `run_up` frames, then measures how far the car turns over
+## `turn_frames` of steering — the comparison that proves steering scales with
+## speed.
+func _measure_turn(car: Vehicle, run_up: int, turn_frames: int) -> float:
+	await _hold(["move_forward"], run_up)
+	Input.action_press("move_forward")
+	var before := car.rotation.y
+	await _hold(["move_left"], turn_frames)
+	Input.action_release("move_forward")
+	return absf(angle_difference(before, car.rotation.y))
+
+
 func _find_first_button(node: Node) -> Button:
 	if node is Button:
 		return node as Button
@@ -494,7 +917,9 @@ func _hold(actions: Array, frames: int) -> void:
 
 
 func _release_all() -> void:
-	for action in ["move_forward", "move_back", "move_left", "move_right", "sprint"]:
+	for action in [
+		"move_forward", "move_back", "move_left", "move_right", "sprint", "handbrake"
+	]:
 		Input.action_release(action)
 
 

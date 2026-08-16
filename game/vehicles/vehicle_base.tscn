@@ -1,0 +1,37 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://vehicles/vehicle_base.gd" id="1_vehicle"]
+[ext_resource type="Script" path="res://vehicles/vehicle_door.gd" id="2_door"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_door"]
+radius = 2.6
+
+[node name="Vehicle" type="CharacterBody3D" groups=["vehicle"]]
+collision_layer = 8
+collision_mask = 9
+floor_snap_length = 0.5
+script = ExtResource("1_vehicle")
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+
+[node name="Body" type="Node3D" parent="."]
+
+[node name="Headlights" type="SpotLight3D" parent="." groups=["vehicle_headlight"]]
+transform = Transform3D(1, 0, 0, 0, 0.965926, -0.258819, 0, 0.258819, 0.965926, 0, 0.62, -2.1)
+visible = false
+light_color = Color(1, 0.960784, 0.870588, 1)
+light_energy = 0.0
+shadow_enabled = false
+spot_range = 26.0
+spot_angle = 38.0
+spot_angle_attenuation = 0.6
+
+[node name="Seat" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.42, 0.95, -0.25)
+
+[node name="Door" type="Area3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, 0)
+script = ExtResource("2_door")
+
+[node name="Volume" type="CollisionShape3D" parent="Door"]
+shape = SubResource("SphereShape3D_door")

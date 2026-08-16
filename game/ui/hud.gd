@@ -3,8 +3,8 @@ extends CanvasLayer
 ##
 ## The HUD is a pure listener: it connects to the managers and to whatever the
 ## player registers, and never reaches into gameplay state itself. Panels that
-## have no system behind them yet (wanted stars, speedometer) are deliberately
-## absent rather than faked.
+## have no system behind them yet (wanted stars) are deliberately absent rather
+## than faked; the speedometer only exists while the player is in a vehicle.
 
 const TOAST_HOLD_SECONDS := 2.6
 const TOAST_FADE_SECONDS := 0.6
@@ -30,12 +30,20 @@ const TONE_COLORS: Array[Color] = [
 @onready var _screen_fade: ColorRect = %ScreenFade
 @onready var _inventory_panel: Control = %InventoryPanel
 @onready var _shop_panel: Control = %ShopPanel
+@onready var _speed_panel: PanelContainer = %SpeedPanel
+@onready var _speed_label: Label = %SpeedLabel
+@onready var _vehicle_name: Label = %VehicleName
+@onready var _vehicle_health_bar: ProgressBar = %VehicleHealthBar
 
+var _player: Node3D = null
 var _stats: PlayerStats = null
 var _inventory: Inventory = null
 var _interaction: InteractionController = null
 var _toast_tween: Tween = null
 var _fade_tween: Tween = null
+## The vehicle currently being driven, if any. The speedometer polls it rather
+## than the vehicle pushing every frame.
+var _vehicle: Vehicle = null
 
 
 func _ready() -> void:
@@ -59,6 +67,8 @@ func _ready() -> void:
 	_prompt_panel.visible = false
 	_toast_panel.modulate.a = 0.0
 	_pause_overlay.visible = false
+	_speed_panel.visible = false
+	set_process(false)
 
 	_refresh_clock()
 	_cash_label.text = EconomyManager.get_cash_string()
@@ -70,6 +80,7 @@ func _ready() -> void:
 
 func _bind_player(player: Node3D) -> void:
 	_unbind_player()
+	_player = player
 
 	if player.has_method("get_stats"):
 		_stats = player.call("get_stats")
@@ -87,13 +98,18 @@ func _bind_player(player: Node3D) -> void:
 		_inventory.item_used.connect(_on_item_used)
 		_inventory.add_rejected.connect(_on_add_rejected)
 
+	if player.has_signal("vehicle_changed"):
+		player.connect("vehicle_changed", _on_vehicle_changed)
+		if player.has_method("get_vehicle"):
+			_on_vehicle_changed(player.call("get_vehicle"))
+
 	_interaction = player.get_node_or_null("InteractionController") as InteractionController
 	if _interaction != null:
 		_interaction.focus_changed.connect(_on_focus_changed)
 		_on_focus_changed(_interaction.get_focused())
 
 
-func _unbind_player(_player: Node3D = null) -> void:
+func _unbind_player(_old_player: Node3D = null) -> void:
 	if _stats != null:
 		_stats.health_changed.disconnect(_on_health_changed)
 		_stats.energy_changed.disconnect(_on_energy_changed)
@@ -106,7 +122,47 @@ func _unbind_player(_player: Node3D = null) -> void:
 	if _interaction != null:
 		_interaction.focus_changed.disconnect(_on_focus_changed)
 		_interaction = null
+	if _player != null and _player.has_signal("vehicle_changed"):
+		if _player.is_connected("vehicle_changed", _on_vehicle_changed):
+			_player.disconnect("vehicle_changed", _on_vehicle_changed)
+	_player = null
+	_on_vehicle_changed(null)
 	_on_focus_changed(null)
+
+
+# --- Speedometer ---------------------------------------------------------
+
+## Shown only while driving, per the brief. Polled rather than pushed: one label
+## update per frame beats a signal per physics tick.
+func _on_vehicle_changed(vehicle: Node3D) -> void:
+	if _vehicle != null and _vehicle.health_changed.is_connected(_on_vehicle_health_changed):
+		_vehicle.health_changed.disconnect(_on_vehicle_health_changed)
+
+	_vehicle = vehicle as Vehicle
+	_speed_panel.visible = _vehicle != null
+	set_process(_vehicle != null)
+
+	if _vehicle == null:
+		return
+	_vehicle_name.text = _vehicle.get_display_name().to_upper()
+	_vehicle.health_changed.connect(_on_vehicle_health_changed)
+	_on_vehicle_health_changed(_vehicle.health, _vehicle.data.max_health)
+	_refresh_speed()
+
+
+func _process(_delta: float) -> void:
+	_refresh_speed()
+
+
+func _refresh_speed() -> void:
+	if _vehicle == null or not is_instance_valid(_vehicle):
+		return
+	_speed_label.text = "%d km/h" % roundi(_vehicle.get_speed_kmh())
+
+
+func _on_vehicle_health_changed(value: float, max_value: float) -> void:
+	_vehicle_health_bar.max_value = max_value
+	_vehicle_health_bar.value = value
 
 
 # --- Screens -------------------------------------------------------------

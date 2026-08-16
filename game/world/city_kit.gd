@@ -73,6 +73,9 @@ static func make_emissive_material(
 ## Adds a box. `size` is the full extent; `center` is the centre of the box.
 ## Returns the created node (a StaticBody3D when solid, a MeshInstance3D when
 ## purely decorative) so callers can parent extra props to it.
+##
+## `layer` is the physics layer the solid body occupies. It exists so kerbs can
+## sit on a layer vehicles ignore while pedestrians still step up them.
 static func add_box(
 	parent: Node3D,
 	node_name: String,
@@ -80,7 +83,8 @@ static func add_box(
 	size: Vector3,
 	material: StandardMaterial3D,
 	solid: bool = true,
-	cast_shadow: bool = true
+	cast_shadow: bool = true,
+	layer: int = 1
 ) -> Node3D:
 	var mesh_instance := MeshInstance3D.new()
 	mesh_instance.mesh = unit_box()
@@ -98,7 +102,7 @@ static func add_box(
 	var body := StaticBody3D.new()
 	body.name = node_name
 	body.position = center
-	body.collision_layer = 1
+	body.collision_layer = layer
 	body.collision_mask = 0
 	parent.add_child(body)
 
@@ -124,7 +128,8 @@ static func add_slab(
 	height: float,
 	material: StandardMaterial3D,
 	solid: bool = true,
-	cast_shadow: bool = true
+	cast_shadow: bool = true,
+	layer: int = 1
 ) -> Node3D:
 	var center := Vector3(
 		rect.position.x + rect.size.x * 0.5,
@@ -132,7 +137,7 @@ static func add_slab(
 		rect.position.y + rect.size.y * 0.5
 	)
 	var size := Vector3(rect.size.x, height, rect.size.y)
-	return add_box(parent, node_name, center, size, material, solid, cast_shadow)
+	return add_box(parent, node_name, center, size, material, solid, cast_shadow, layer)
 
 
 static func add_cylinder(

@@ -9,6 +9,8 @@ extends CharacterBody3D
 ## owned by PlayerStats.
 
 signal move_state_changed(state: MoveState)
+## Emitted with the vehicle on getting in, and with null on getting out.
+signal vehicle_changed(vehicle: Node3D)
 
 enum MoveState { IDLE, WALK, RUN }
 
@@ -28,17 +30,24 @@ enum MoveState { IDLE, WALK, RUN }
 ## Sprinting stops below this much energy.
 @export var min_energy_to_sprint: float = 2.0
 
+## Stable id for the save file.
+@export var save_id: StringName = &"player"
+
 @onready var stats: PlayerStats = $Stats
 @onready var inventory: Inventory = $Inventory
 @onready var interaction: InteractionController = $InteractionController
 @onready var _body_pivot: Node3D = $BodyPivot
+@onready var _collision: CollisionShape3D = $Collision
 
 var _move_state: MoveState = MoveState.IDLE
 var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 20.0)
 var _is_sprinting: bool = false
+## The vehicle being driven, or null when on foot.
+var _vehicle: Node3D = null
 
 
 func _ready() -> void:
+	add_to_group(&"saveable")
 	GameManager.register_player(self)
 
 
@@ -52,6 +61,47 @@ func get_stats() -> PlayerStats:
 
 func get_inventory() -> Inventory:
 	return inventory
+
+
+func get_vehicle() -> Node3D:
+	return _vehicle
+
+
+func is_driving() -> bool:
+	return _vehicle != null
+
+
+## Called by the vehicle, not by the player. The character stays in the tree so
+## its position, stats and inventory keep working; it just stops driving itself
+## around and stops colliding with the world it is being carried through.
+func enter_vehicle(vehicle: Node3D) -> void:
+	if _vehicle == vehicle:
+		return
+	_vehicle = vehicle
+	velocity = Vector3.ZERO
+	_is_sprinting = false
+	set_physics_process(false)
+	_body_pivot.visible = false
+	_collision.set_deferred("disabled", true)
+	# On-foot prompts must not fire from the driver's seat.
+	interaction.set_active(false)
+	_update_move_state(0.0)
+	vehicle_changed.emit(vehicle)
+
+
+## Called by the vehicle when stepping out. `at` is the already-validated spot
+## beside the car.
+func exit_vehicle(at: Transform3D) -> void:
+	if _vehicle == null:
+		return
+	_vehicle = null
+	global_position = at.origin
+	_body_pivot.rotation.y = at.basis.get_euler().y
+	velocity = Vector3.ZERO
+	_collision.set_deferred("disabled", false)
+	set_physics_process(true)
+	interaction.set_active(true)
+	vehicle_changed.emit(null)
 
 
 func get_move_state() -> MoveState:
@@ -146,3 +196,47 @@ func _update_move_state(speed: float) -> void:
 		return
 	_move_state = new_state
 	move_state_changed.emit(_move_state)
+
+
+# --- Save ----------------------------------------------------------------
+
+func save_state() -> Dictionary:
+	var slots: Array = []
+	for slot in inventory.get_slots():
+		if slot.is_empty():
+			continue
+		slots.append({"id": String(slot.item.id), "quantity": slot.quantity})
+
+	return {
+		"position": [global_position.x, global_position.y, global_position.z],
+		"facing": _body_pivot.rotation.y,
+		"health": stats.health,
+		"energy": stats.energy,
+		"hunger": stats.hunger,
+		"inventory": slots,
+	}
+
+
+func load_state(state: Dictionary) -> void:
+	var raw: Array = state.get("position", [])
+	if raw.size() == 3:
+		# Routed through GameManager so the camera cuts instead of flying, and
+		# the HUD covers the jump — the same path doorways use.
+		GameManager.teleport_player(
+			Transform3D(global_transform.basis, Vector3(raw[0], raw[1], raw[2]))
+		)
+	_body_pivot.rotation.y = float(state.get("facing", _body_pivot.rotation.y))
+
+	stats.restore_values(
+		float(state.get("health", stats.health)),
+		float(state.get("energy", stats.energy)),
+		float(state.get("hunger", stats.hunger))
+	)
+
+	inventory.clear()
+	for entry in state.get("inventory", []):
+		var item := ItemCatalogue.by_id(StringName(entry.get("id", "")))
+		# An item that no longer exists in the catalogue is dropped rather than
+		# breaking the whole load.
+		if item != null:
+			inventory.add(item, int(entry.get("quantity", 1)))

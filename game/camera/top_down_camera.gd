@@ -33,10 +33,13 @@ extends Node3D
 @export_group("Speed Zoom")
 ## Pull the camera back as the target speeds up.
 @export var speed_zoom_enabled: bool = true
-## Target speed (units/s) at which the full zoom-out is reached.
-@export var speed_zoom_reference: float = 26.0
-## Extra distance added at the reference speed.
-@export var speed_zoom_amount: float = 9.0
+## Target speed (units/s) at which the full zoom-out is reached. Set to a car's
+## top speed, so sprinting on foot only widens the view slightly and driving
+## flat out opens it up enough to read the next junction.
+@export var speed_zoom_reference: float = 23.0
+## Extra distance added at the reference speed. Kept modest on purpose: the
+## brief asks for the classic elevated framing, not an aerial view.
+@export var speed_zoom_amount: float = 8.0
 @export var speed_zoom_sharpness: float = 1.8
 
 @export_group("Orbit")
@@ -58,11 +61,13 @@ var _follow_blend: float = 1.0
 ## The exported framing, remembered so a temporary interior view can be undone.
 var _default_distance: float = 0.0
 var _default_pitch: float = 0.0
+var _default_yaw: float = 0.0
 
 
 func _ready() -> void:
 	_default_distance = distance
 	_default_pitch = pitch_degrees
+	_default_yaw = yaw_degrees
 	_apply_pitch()
 	rotation_degrees.y = yaw_degrees
 	GameManager.player_teleported.connect(_on_player_teleported)
@@ -82,6 +87,13 @@ func apply_view(new_distance: float, new_pitch: float) -> void:
 
 func reset_view() -> void:
 	apply_view(_default_distance, _default_pitch)
+
+
+## Puts the orbit back where it started. Bound to R, because E is interact and
+## must stay that way.
+func reset_orientation() -> void:
+	yaw_degrees = _default_yaw
+	rotation_degrees.y = yaw_degrees
 
 
 ## A teleport is a cut, not a move: re-seat the pivot instead of flying the
@@ -111,6 +123,13 @@ func get_target() -> Node3D:
 	return _target
 
 
+## Distance the arm is actually holding right now, i.e. `distance` plus whatever
+## the speed zoom has added. What you want when checking how far out the camera
+## has pulled, rather than what it was configured to sit at.
+func get_effective_distance() -> float:
+	return _spring_arm.spring_length if _spring_arm != null else distance
+
+
 func get_yaw() -> float:
 	return deg_to_rad(yaw_degrees)
 
@@ -120,6 +139,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		distance = clampf(distance - zoom_step, min_distance, max_distance)
 	elif event.is_action_pressed("camera_zoom_out"):
 		distance = clampf(distance + zoom_step, min_distance, max_distance)
+	elif event.is_action_pressed("camera_reset"):
+		reset_orientation()
 	elif event is InputEventMouseMotion and Input.is_action_pressed("camera_look"):
 		yaw_degrees -= event.relative.x * mouse_sensitivity
 

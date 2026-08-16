@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="VehicleData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://vehicles/vehicle_data.gd" id="1_vehicle_data"]
+
+[resource]
+script = ExtResource("1_vehicle_data")
+id = &"sedan"
+display_name = "Kestrel Sedan"
+description = "An unremarkable four-door. Starts most of the time."
+max_speed = 23.0
+max_reverse_speed = 8.0
+acceleration = 12.0
+brake_deceleration = 22.0
+engine_braking = 5.5
+handbrake_deceleration = 16.0
+steer_rate_low = 2.5
+steer_rate_high = 0.95
+steer_response = 7.0
+handbrake_steer_bonus = 1.35
+min_speed_to_steer = 0.6
+full_steer_speed = 3.0
+max_health = 100.0
+damage_speed_threshold = 7.0
+damage_per_impact_speed = 3.2
+impact_speed_retention = 0.15
+body_length = 4.3
+body_width = 1.9
+body_height = 0.62
+cabin_height = 0.58
+ground_clearance = 0.22
+wheel_radius = 0.34
+wheel_width = 0.25
+body_color = Color(0.541176, 0.258824, 0.243137, 1)
+trim_color = Color(0.176471, 0.184314, 0.207843, 1)
+glass_color = Color(0.121569, 0.184314, 0.215686, 1)

@@ -55,6 +55,14 @@ const WAREHOUSE_JOB: JobData = preload("res://jobs/definitions/warehouse_worker.
 const INTERIOR_CAMERA_DISTANCE := 11.0
 const INTERIOR_CAMERA_PITCH := 74.0
 
+## Kerbs live on their own physics layer (6). Pedestrians collide with it and
+## step up; vehicles do not, so a car can mount a kerb instead of being stopped
+## dead by a 12cm lip. The visual cost is that a car on the pavement sits a few
+## centimetres into it, which is invisible at this camera distance.
+const CURB_LAYER := 1 << 5
+
+const SEDAN_SCENE: PackedScene = preload("res://vehicles/cars/sedan.tscn")
+
 var _palette: Dictionary = {}
 var _geometry: Node3D
 var _props: Node3D
@@ -80,6 +88,7 @@ func _ready() -> void:
 	_build_warehouse_yard()
 	_build_venue_doors()
 	_build_notice_board()
+	_build_vehicles()
 
 	var sun := get_node_or_null("Sun") as DayNightCycle
 	if sun != null:
@@ -334,7 +343,15 @@ func _add_sidewalk(rect: Rect2) -> void:
 	if rect.size.x <= 0.01 or rect.size.y <= 0.01:
 		return
 	CityKit.add_slab(
-		_geometry, "Sidewalk%d" % _sidewalk_index, rect, 0.0, CURB_HEIGHT, _mat("sidewalk")
+		_geometry,
+		"Sidewalk%d" % _sidewalk_index,
+		rect,
+		0.0,
+		CURB_HEIGHT,
+		_mat("sidewalk"),
+		true,
+		true,
+		CURB_LAYER
 	)
 	_sidewalk_index += 1
 
@@ -640,7 +657,9 @@ func _add_bay(parent: Node3D, node_name: String, rect: Rect2) -> void:
 func _build_street_lights() -> void:
 	var container := _make_container("StreetLights")
 	var index := 0
-	for x in [-72.0, -48.0, -24.0, 24.0, 48.0, 72.0]:
+	# The inner pair light the junction approaches, which are the darkest and
+	# most important places to see from a moving car.
+	for x in [-72.0, -48.0, -24.0, -12.0, 12.0, 24.0, 48.0, 72.0]:
 		for road_z in [MAIN_ST_Z, NORTH_AVE_Z]:
 			_add_street_light(
 				container, index, Vector3(x, 0.0, road_z - ROAD_HALF - 1.5), Vector3.BACK
@@ -650,7 +669,7 @@ func _build_street_lights() -> void:
 				container, index, Vector3(x, 0.0, road_z + ROAD_HALF + 1.5), Vector3.FORWARD
 			)
 			index += 1
-	for z in [-74.0, -30.0, 30.0, 74.0]:
+	for z in [-74.0, -30.0, -12.0, 12.0, 30.0, 74.0]:
 		_add_street_light(
 			container, index, Vector3(-ROAD_HALF - 1.5, 0.0, z), Vector3.RIGHT
 		)
@@ -857,6 +876,77 @@ func _add_door_panel(node_name: String, interaction_point: Vector3, facing: Vect
 	CityKit.add_box(
 		_geometry, "DoorPanel_%s" % node_name, panel_center, size, _mat("door"), false
 	)
+
+
+# --- Parked vehicles -----------------------------------------------------
+
+## Where the district's cars start. Each entry: node name, save id, position on
+## the ground plane, heading in degrees, owner type, owner id, body colour.
+##
+## Yaw 90 faces west, -90 faces east, 180 faces south. Every spot is on the
+## carriageway or in a marked bay, clear of doorways, crosswalks, the junctions
+## and the sidewalk interaction points.
+func _vehicle_table() -> Array:
+	return [
+		[
+			"PlayerSedan", &"vehicle_player_sedan", Vector2(-56.0, -4.0), 90.0,
+			Vehicle.OwnerType.PLAYER, &"player", Color(0.243, 0.376, 0.494),
+		],
+		# Main Street kerbside bays, between the flat and the market.
+		[
+			"NpcSedanMarket", &"vehicle_npc_market", Vector2(-43.0, -4.0), 90.0,
+			Vehicle.OwnerType.NPC, &"npc_market", Color(0.639, 0.612, 0.529),
+		],
+		[
+			"NpcSedanMain", &"vehicle_npc_main", Vector2(-32.0, -4.0), 90.0,
+			Vehicle.OwnerType.NPC, &"npc_main", Color(0.400, 0.451, 0.376),
+		],
+		[
+			"NpcSedanBlvd", &"vehicle_npc_blvd", Vector2(-21.0, -4.0), 90.0,
+			Vehicle.OwnerType.NPC, &"npc_blvd", Color(0.541, 0.259, 0.243),
+		],
+		# South kerb of Main Street, across from the warehouse gate.
+		[
+			"NpcSedanWarehouse", &"vehicle_npc_warehouse", Vector2(-60.0, 4.0), -90.0,
+			Vehicle.OwnerType.NPC, &"npc_warehouse", Color(0.298, 0.310, 0.345),
+		],
+		# Civic hall car park, north of North Avenue.
+		[
+			"NpcSedanLotA", &"vehicle_npc_lot_a", Vector2(12.3, -73.0), 180.0,
+			Vehicle.OwnerType.NPC, &"npc_lot_a", Color(0.647, 0.522, 0.310),
+		],
+		[
+			"NpcSedanLotB", &"vehicle_npc_lot_b", Vector2(17.7, -73.0), 180.0,
+			Vehicle.OwnerType.NPC, &"npc_lot_b", Color(0.208, 0.286, 0.322),
+		],
+		# North Avenue kerbside.
+		[
+			"NpcSedanNorth", &"vehicle_npc_north", Vector2(30.0, -46.0), -90.0,
+			Vehicle.OwnerType.NPC, &"npc_north", Color(0.475, 0.404, 0.478),
+		],
+	]
+
+
+func _build_vehicles() -> void:
+	var container := _make_container("Vehicles")
+
+	for entry in _vehicle_table():
+		var car: Vehicle = SEDAN_SCENE.instantiate()
+		car.name = entry[0]
+		car.save_id = entry[1]
+		car.owner_type = entry[4]
+		car.owner_id = entry[5]
+
+		# One VehicleData per model is shared, so recolouring an individual car
+		# needs its own copy. Everything else still comes from the shared model.
+		var tinted: VehicleData = car.data.duplicate()
+		tinted.body_color = entry[6]
+		car.data = tinted
+
+		var spot: Vector2 = entry[2]
+		car.position = Vector3(spot.x, 0.0, spot.y)
+		car.rotation_degrees.y = entry[3]
+		container.add_child(car)
 
 
 func _build_notice_board() -> void:
