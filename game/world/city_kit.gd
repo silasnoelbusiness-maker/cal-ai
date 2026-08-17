@@ -466,12 +466,16 @@ static func add_wire(
 		var mesh_instance := MeshInstance3D.new()
 		mesh_instance.name = "%s_%d" % [node_name, step]
 		mesh_instance.mesh = unit_box()
-		mesh_instance.scale = Vector3(thickness, thickness, span.length())
-		mesh_instance.position = middle
-		mesh_instance.look_at_from_position(middle, point, Vector3.UP)
 		mesh_instance.material_override = material
 		mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# Order matters, and getting it wrong is silent: look_at works off the
+		# global transform, so it does nothing at all on a node that is not in
+		# the tree yet, and it rebuilds the basis from scratch, so any scale set
+		# beforehand is thrown away. Parent, aim, then stretch.
 		parent.add_child(mesh_instance)
+		mesh_instance.position = middle
+		mesh_instance.look_at(point, Vector3.UP)
+		mesh_instance.scale = Vector3(thickness, thickness, span.length())
 		previous = point
 
 

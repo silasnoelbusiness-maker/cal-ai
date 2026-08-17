@@ -21,8 +21,12 @@ signal daylight_changed(amount: float)
 @export_group("Sky")
 @export var day_sky_energy: float = 1.0
 @export var night_sky_energy: float = 0.16
-@export var day_ambient_energy: float = 0.35
-@export var night_ambient_energy: float = 0.3
+## Dropping the daytime figure buys shadow contrast, but it was taken too far at
+## first: 0.35 against a night value of 0.3 left almost no day/night difference
+## in the fill light, and late afternoon — when the sun is low and the fill is
+## doing most of the work — went nearly black. The two now sit clearly apart.
+@export var day_ambient_energy: float = 0.44
+@export var night_ambient_energy: float = 0.26
 @export_group("Street Lights")
 ## Street lights switch on once the sun drops below this height (-1..1).
 @export var street_light_threshold: float = 0.08
@@ -57,7 +61,13 @@ func _process(_delta: float) -> void:
 func _apply(fraction: float) -> void:
 	# -1 at midnight, 0 at 06:00 and 18:00, +1 at noon.
 	var sun_height := sin((fraction - 0.25) * TAU)
-	var daylight := clampf(sun_height * 1.8, 0.0, 1.0)
+	# Full brightness by the time the sun is ~17 degrees up, which is about 07:00,
+	# and held until about 17:00. The original ramp reached full daylight only
+	# near noon, so the city was dusk-dark by mid-afternoon — the sun is only
+	# 7 degrees up at half past five, and that was enough to put the lights out.
+	# Golden hour still reads, because the warm tint below is driven off
+	# sun_height directly and peaks exactly where this saturates.
+	var daylight := clampf(sun_height * 3.2 + 0.08, 0.0, 1.0)
 	# Peaks when the sun is near the horizon, for sunrise/sunset warmth.
 	var golden := clampf(1.0 - absf(sun_height) * 4.0, 0.0, 1.0) * clampf(sun_height * 8.0, 0.0, 1.0)
 

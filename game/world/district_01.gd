@@ -1317,7 +1317,12 @@ func _add_street_trees(parent: Node3D) -> void:
 ## Timber poles and strung cable down both long streets, set back onto the lots
 ## so they are clear of the pavement entirely.
 func _add_overhead_lines(parent: Node3D) -> void:
-	var pole_height := 8.5
+	# Street-light height, and no taller. A tall pole close to the camera splays
+	# hard toward the corner of the frame at this field of view, and a thick one
+	# with a long crossarm read as fallen timber lying across the pavement. The
+	# street lights have always had the same perspective and never looked wrong,
+	# because they are thin — so the poles match them.
+	var pole_height := 6.2
 	# Behind the tree line, or the canopies swallow the poles.
 	var setback := ROAD_HALF + WALK_WIDTH + 2.4
 	var spacing := 32.0
@@ -1356,15 +1361,15 @@ func _add_overhead_lines(parent: Node3D) -> void:
 			parent.add_child(holder)
 			CityKit.add_cylinder(
 				holder, "Post", Vector3(0.0, pole_height * 0.5, 0.0),
-				0.16, pole_height, _mat("wood"), false
+				0.1, pole_height, _mat("wood"), false
 			)
 			CityKit.add_box(
-				holder, "CrossArm", Vector3(0.0, pole_height - 0.55, 0.0),
-				Vector3(2.4 if along_x else 0.18, 0.14, 0.18 if along_x else 2.4),
+				holder, "CrossArm", Vector3(0.0, pole_height - 0.45, 0.0),
+				Vector3(1.3 if along_x else 0.11, 0.09, 0.11 if along_x else 1.3),
 				_mat("wood"), false, false
 			)
 
-			var top := base + Vector3(0.0, pole_height - 0.6, 0.0)
+			var top := base + Vector3(0.0, pole_height - 0.5, 0.0)
 			if have_previous:
 				CityKit.add_wire(
 					parent, "Wire%d_%d" % [run_index, i], previous, top,
