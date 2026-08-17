@@ -11,6 +11,7 @@ const ITEMS: Array[ItemData] = [
 	preload("res://items/definitions/basic_meal.tres"),
 	preload("res://items/definitions/snack_bar.tres"),
 	preload("res://items/definitions/energy_drink.tres"),
+	preload("res://items/definitions/steel_pipe.tres"),
 ]
 
 

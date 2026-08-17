@@ -36,6 +36,7 @@ enum MoveState { IDLE, WALK, RUN }
 @onready var stats: PlayerStats = $Stats
 @onready var inventory: Inventory = $Inventory
 @onready var interaction: InteractionController = $InteractionController
+@onready var combat: CombatController = $Combat
 @onready var _body_pivot: Node3D = $BodyPivot
 @onready var _collision: CollisionShape3D = $Collision
 
@@ -61,6 +62,20 @@ func get_stats() -> PlayerStats:
 
 func get_inventory() -> Inventory:
 	return inventory
+
+
+func get_combat() -> CombatController:
+	return combat
+
+
+## Called by ItemData when an equippable item is used from the bag. Forwarded
+## rather than handled here: what holding something *does* belongs to combat.
+func equip_item(item: ItemData) -> bool:
+	return combat.equip_item(item)
+
+
+func get_equipped_item() -> ItemData:
+	return combat.get_equipped_item()
 
 
 func get_vehicle() -> Node3D:
@@ -213,7 +228,11 @@ func save_state() -> Dictionary:
 	for slot in inventory.get_slots():
 		if slot.is_empty():
 			continue
-		slots.append({"id": String(slot.item.id), "quantity": slot.quantity})
+		slots.append({
+			"id": String(slot.item.id),
+			"quantity": slot.quantity,
+			"stolen": slot.stolen,
+		})
 
 	return {
 		"position": [global_position.x, global_position.y, global_position.z],
@@ -222,6 +241,7 @@ func save_state() -> Dictionary:
 		"energy": stats.energy,
 		"hunger": stats.hunger,
 		"inventory": slots,
+		"equipped": String(combat.get_equipped_item().id) if combat.get_equipped_item() != null else "",
 	}
 
 
@@ -247,4 +267,18 @@ func load_state(state: Dictionary) -> void:
 		# An item that no longer exists in the catalogue is dropped rather than
 		# breaking the whole load.
 		if item != null:
-			inventory.add(item, int(entry.get("quantity", 1)))
+			var quantity := int(entry.get("quantity", 1))
+			# A save written before provenance existed has no "stolen" key, and
+			# the goods in it were all legitimately obtained.
+			var stolen := clampi(int(entry.get("stolen", 0)), 0, quantity)
+			if stolen > 0:
+				inventory.add(item, stolen, true)
+			if quantity - stolen > 0:
+				inventory.add(item, quantity - stolen, false)
+
+	# Absent from a save written before equipment existed, and empty-handed is
+	# the right answer for one.
+	combat.unequip_item()
+	var held := ItemCatalogue.by_id(StringName(state.get("equipped", "")))
+	if held != null:
+		combat.equip_item(held)

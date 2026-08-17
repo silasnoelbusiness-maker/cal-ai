@@ -21,8 +21,17 @@ signal health_changed(health: float, max_health: float)
 signal disabled()
 signal collided(impact_speed: float)
 signal hit_pedestrian(victim: Node3D, impact_speed: float)
+## Somebody has been pulled out of this car and it has changed hands.
+signal carjacked(thief: Node3D, ejected_driver: Node3D)
 
 enum OwnerType { PLAYER, NPC, PUBLIC, COMPANY }
+## Who is sat in the car when the player finds it. This is about the *person*,
+## not about the control scheme: an occupied car has somebody to pull out of it,
+## which is the difference between stealing a parked car and carjacking one.
+enum DriverType { NONE, CIVILIAN, POLICE }
+## EMPTY is a parked car; SEATED is one with somebody in it; FLED is one whose
+## driver has been pulled out and is running away.
+enum DriverState { EMPTY, SEATED, FLED }
 ## Who is at the wheel. PLAYER means "nobody, until a person gets in"; the AI
 ## values mean an AI driver node is feeding set_ai_input() and the player cannot
 ## take the car. Adding TAXI_AI or DELIVERY_AI later is a new entry here plus a
@@ -45,6 +54,14 @@ const IMPACT_POLL_INTERVAL := 0.08
 ## stop a car, but the hit has to read as one.
 const KNOCKDOWN_SPEED_RETENTION := 0.75
 const NUDGE_SPEED_RETENTION := 0.9
+## The person pulled out of a carjacked car carries on as an ordinary civilian,
+## so they are the ordinary civilian scene rather than anything bespoke.
+##
+## Loaded on first use rather than preloaded: the pedestrian scene's script and
+## this one refer to each other's types, and a preload here makes that a cycle
+## Godot refuses to resolve ("Parse Error: Busy").
+const OCCUPANT_SCENE_PATH := "res://npc/pedestrian.tscn"
+static var _occupant_scene: PackedScene = null
 ## Candidate exit spots in local space, tried in order: driver's side first,
 ## then passenger's, then the corners, then front and back.
 const EXIT_OFFSETS: Array[Vector3] = [
@@ -64,6 +81,19 @@ const EXIT_OFFSETS: Array[Vector3] = [
 @export var owner_id: StringName = &"npc"
 ## Stable id for the save file. Empty means this vehicle is not persisted.
 @export var save_id: StringName = &""
+
+@export_group("Occupant")
+@export var driver_type: DriverType = DriverType.NONE
+## Identifies the person in the seat, so the pedestrian who gets out of a
+## carjacked car is demonstrably the same individual who was driving it.
+@export var driver_id: StringName = &""
+@export var driver_state: DriverState = DriverState.EMPTY
+## Colour the ejected driver wears, matched to the figure sat in the seat.
+@export var driver_color: Color = Color(0.478, 0.494, 0.541)
+## Fastest a car can be moving and still be dragged out of. Stopped and crawling
+## traffic can be taken; anything at speed cannot, which is what makes waiting
+## for a red light the way to do it.
+@export var carjack_max_speed: float = 4.0
 
 @export_group("Pedestrian impacts")
 ## How long after hitting somebody the driver has to stop before it counts as
@@ -171,6 +201,48 @@ func is_ai_controlled() -> bool:
 
 func can_be_entered_by(_who: Node3D) -> bool:
 	return _driver == null and not is_disabled() and not is_ai_controlled()
+
+
+func has_occupant() -> bool:
+	return driver_state == DriverState.SEATED
+
+
+## Whether this car can be taken off the person driving it right now.
+##
+## Deliberately strict. A car doing 40 cannot be opened, a wreck is not worth
+## taking, and only civilians are dragged out — a police car with an officer in
+## it is a fight, which is not this phase.
+func can_be_carjacked_by(who: Node3D) -> bool:
+	if who == null or is_disabled():
+		return false
+	if driver_type != DriverType.CIVILIAN or driver_state != DriverState.SEATED:
+		return false
+	if _driver != null:
+		return false
+	return get_planar_speed() <= carjack_max_speed
+
+
+## Pulls the driver out and takes their place. Returns false if the car was not
+## takeable, so the caller can fall back to the ordinary enter path.
+func carjack(thief: Node3D) -> bool:
+	if not can_be_carjacked_by(thief):
+		return false
+
+	var scene := global_position
+	var victim := _eject_occupant(thief)
+	_release_ai_driver()
+
+	# Filed as a carjacking rather than a theft, and never as both: getting in is
+	# part of the same act.
+	_theft_reported = true
+	var record := CrimeManager.report_crime(
+		CrimeManager.CrimeType.CARJACKING, scene, thief, self
+	)
+	# The victim was sat in it. There is no perception test to pass.
+	WitnessSystem.witness_directly(record, victim)
+
+	carjacked.emit(thief, victim)
+	return enter(thief)
 
 
 ## Feeds the same three inputs the player supplies. Keeping AI on this path
@@ -499,6 +571,47 @@ func _find_exit_point() -> Transform3D:
 	return Transform3D(global_transform.basis, _seat.global_position)
 
 
+## Puts the person who was driving onto the pavement, frightened and about to
+## run. They are a normal Pedestrian from this point on: they can be knocked
+## down, they can witness what happens next, and they wander off if left alone.
+func _eject_occupant(threat: Node3D) -> Pedestrian:
+	var spot := _find_exit_point()
+
+	if _occupant_scene == null:
+		_occupant_scene = load(OCCUPANT_SCENE_PATH) as PackedScene
+	var walker: Pedestrian = _occupant_scene.instantiate()
+	walker.name = "EjectedDriver_%s" % (driver_id if driver_id != &"" else name)
+	walker.body_color = driver_color
+	walker.accent_color = driver_color.darkened(0.35)
+
+	# Ejected drivers join the crowd if there is one, so they are recycled and
+	# counted with everybody else rather than living under a car.
+	var host := get_tree().get_first_node_in_group(&"crowd") as Node
+	if host == null:
+		host = get_parent()
+	host.add_child(walker)
+	walker.global_position = spot.origin + Vector3.UP * 0.05
+
+	driver_state = DriverState.FLED
+	_refresh_occupant()
+	# A short fear beat first, so the player sees them react before they run.
+	walker.enter_fear(threat.global_position if threat != null else global_position, 0.9)
+	return walker
+
+
+## Detaches whatever AI was driving and hands the car back to the enter/exit
+## path. The node is stopped before it is freed, so it cannot feed one more
+## frame of throttle after the player is in the seat.
+func _release_ai_driver() -> void:
+	for child in get_children():
+		if child is TrafficDriver or child is PoliceDriver:
+			child.set_physics_process(false)
+			child.queue_free()
+	controller = Controller.PLAYER
+	set_ai_input(0.0, 0.0, false)
+	halt()
+
+
 func _hand_camera_to(target: Node3D) -> void:
 	var rig := get_tree().get_first_node_in_group(&"camera_rig") as TopDownCamera
 	if rig != null:
@@ -598,7 +711,34 @@ func _build_body() -> void:
 			false
 		)
 
+	_build_occupant(cabin_y)
 	_build_wheels(trim_mat)
+
+
+## A head and shoulders behind the glass. Without it an occupied car and a
+## parked one look identical from the top-down camera, and the player has no way
+## to tell which one they are walking up to.
+func _build_occupant(cabin_y: float) -> void:
+	var figure := Node3D.new()
+	figure.name = "Occupant"
+	# Forward of the roof panel, so the figure reads through the windscreen from
+	# directly above rather than being hidden under the roof.
+	figure.position = Vector3(-data.body_width * 0.2, cabin_y - 0.08, -data.body_length * 0.14)
+	_body_root.add_child(figure)
+
+	var cloth := CityKit.make_material(driver_color, 0.85)
+	CityKit.add_box(figure, "Shoulders", Vector3.ZERO, Vector3(0.46, 0.3, 0.3), cloth, false, false)
+	CityKit.add_box(
+		figure, "Head", Vector3(0.0, 0.26, 0.0), Vector3(0.24, 0.24, 0.24),
+		CityKit.make_material(driver_color.lightened(0.25), 0.9), false, false
+	)
+	_refresh_occupant()
+
+
+func _refresh_occupant() -> void:
+	var figure := _body_root.get_node_or_null("Occupant") as Node3D
+	if figure != null:
+		figure.visible = driver_state == DriverState.SEATED
 
 
 func _build_wheels(wheel_mat: StandardMaterial3D) -> void:
@@ -663,6 +803,7 @@ func save_state() -> Dictionary:
 		"yaw": rotation.y,
 		"health": health,
 		"theft_reported": _theft_reported,
+		"driver_state": int(driver_state),
 	}
 
 
@@ -673,6 +814,10 @@ func load_state(state: Dictionary) -> void:
 	rotation = Vector3(0.0, float(state.get("yaw", rotation.y)), 0.0)
 	health = clampf(float(state.get("health", health)), 0.0, data.max_health)
 	_theft_reported = bool(state.get("theft_reported", _theft_reported))
+	# Saves written before carjacking existed have no occupant recorded, and the
+	# cars they describe are parked ones.
+	driver_state = int(state.get("driver_state", driver_state)) as DriverState
+	_refresh_occupant()
 	_forward_speed = 0.0
 	velocity = Vector3.ZERO
 	health_changed.emit(health, data.max_health)

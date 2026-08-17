@@ -13,9 +13,16 @@ signal state_changed(state: State)
 signal knocked_down(impact_speed: float)
 signal recovered()
 
-enum State { IDLE, WALKING, WITNESSING, FLEEING, DODGING, KNOCKED_DOWN }
+enum State { IDLE, WALKING, WITNESSING, FLEEING, DODGING, KNOCKED_DOWN, FEAR }
+## Whether this civilian is still on their feet. Zero health leaves them down
+## rather than dead — the prototype has no need for death, and an incapacitated
+## body on the pavement tells the player the same thing.
+enum Condition { ACTIVE, INCAPACITATED }
 
 @export_group("Wandering")
+## Cleared for civilians with a post to stand at — a shop cashier is a
+## pedestrian in every other respect, and this is the only difference.
+@export var wanders: bool = true
 @export var idle_time_range: Vector2 = Vector2(1.5, 5.0)
 ## Destinations closer than this are rejected, so nobody shuffles on the spot.
 @export var min_wander_distance: float = 14.0
@@ -46,8 +53,26 @@ enum State { IDLE, WALKING, WITNESSING, FLEEING, DODGING, KNOCKED_DOWN }
 @export var damage_per_impact_speed: float = 4.0
 ## How long they stay down, before a slower scramble back to their feet.
 @export var down_seconds: Vector2 = Vector2(2.4, 4.0)
+## Below this health they stop getting up.
+@export var incapacitated_below: float = 1.0
+
+@export_group("Crime reactions")
+## Civilians get away from a wanted player from this far off, per wanted star. A
+## street that carries on shopping around an active police chase is the single
+## thing that most makes the crime systems feel like they are not connected to
+## the city.
+@export var wanted_fear_radius: float = 11.0
+
+@export_group("Fear")
+## How long a frightened civilian stays frightened before fleeing properly.
+@export var fear_seconds: float = 4.0
+## Roughly one civilian in this many fights back instead of running. Kept low:
+## a street where everyone squares up is not the reaction the crime systems are
+## trying to produce.
+@export var defiance_chance: float = 0.12
 
 var state: State = State.IDLE
+var condition: Condition = Condition.ACTIVE
 var health: float = 100.0
 var _state_timer: float = 0.0
 var _rng := RandomNumberGenerator.new()
@@ -76,9 +101,14 @@ func _process(delta: float) -> void:
 	if _danger_timer <= 0.0:
 		_danger_timer = danger_check_interval
 		_check_traffic()
+		_check_wanted_player()
 
 	_state_timer -= delta
 	if _state_timer > 0.0:
+		return
+
+	if condition == Condition.INCAPACITATED:
+		_state_timer = 4.0
 		return
 
 	match state:
@@ -90,6 +120,10 @@ func _process(delta: float) -> void:
 			_enter_idle(_rng.randf_range(idle_time_range.x, idle_time_range.y))
 		State.KNOCKED_DOWN:
 			_stand_up()
+		State.FEAR:
+			# Frightened people do not stand still forever: once the immediate
+			# shock passes they get out of the area.
+			_begin_fleeing()
 		State.DODGING:
 			# Out of the road; carry on shaken rather than resuming mid-street.
 			_begin_fleeing()
@@ -114,8 +148,20 @@ func witness_crime(crime_position: Vector3) -> void:
 		body_pivot.rotation.y = atan2(to_crime.x, to_crime.z)
 
 
+## Who can still see a crime and call it in.
+##
+## Deliberately wider than "going about their day": somebody already frightened,
+## or running from a chase, is looking straight at the person causing it, and
+## they report what they see. If they did not, a player at one star could never
+## escalate in a street they had already cleared — every remaining witness would
+## be too scared to notice a robbery happening in front of them.
+##
+## The exclusions are the ones that genuinely cannot report: face-down on the
+## pavement, out cold, or already mid-report on something else.
 func is_available_as_witness() -> bool:
-	return state == State.IDLE or state == State.WALKING
+	if condition != Condition.ACTIVE:
+		return false
+	return state != State.KNOCKED_DOWN and state != State.WITNESSING
 
 
 ## Stands still and makes no decisions for `seconds`. Reactions still interrupt
@@ -166,6 +212,13 @@ func knock_down(impact_speed: float, from_direction: Vector3 = Vector3.ZERO) -> 
 
 
 func _stand_up() -> void:
+	# Nobody gets up from zero. They stay on the floor, out of the collision
+	# world, until something restores them — which nothing does yet, and which is
+	# the whole of "incapacitated" for now.
+	if health <= incapacitated_below:
+		condition = Condition.INCAPACITATED
+		_state_timer = 6.0
+		return
 	collision_layer = 1 << 4
 	body_pivot.rotation.x = 0.0
 	body_pivot.position.y = 0.0
@@ -173,6 +226,68 @@ func _stand_up() -> void:
 	# Someone who has just been run over does not go back to window shopping.
 	_crime_position = _threat_position
 	_begin_fleeing()
+
+
+# --- Fear and harm -------------------------------------------------------
+
+func is_incapacitated() -> bool:
+	return condition == Condition.INCAPACITATED
+
+
+## Frightened, and looking at whatever frightened them. Used by the robbery, and
+## by anyone nearby when something serious happens.
+##
+## Fear is not the same as fleeing: a cashier being robbed has to stay at the
+## till long enough to hand the money over, and a witness has to see the thing
+## before running from it. FEAR holds them in place, then falls through to
+## FLEEING on its own timer.
+func enter_fear(source_position: Vector3, seconds: float = -1.0) -> void:
+	if state == State.KNOCKED_DOWN or is_incapacitated():
+		return
+	_threat_position = source_position
+	_crime_position = source_position
+	stop()
+	set_running(false)
+	_set_state(State.FEAR)
+	_state_timer = fear_seconds if seconds < 0.0 else seconds
+
+	var to_source := source_position - global_position
+	to_source.y = 0.0
+	if to_source.length_squared() > 0.01:
+		body_pivot.rotation.y = atan2(to_source.x, to_source.z)
+
+
+func is_afraid() -> bool:
+	return state == State.FEAR
+
+
+## Damage from a punch, a shove or anything else that is not a car. Returns true
+## if this put them down.
+func take_damage(amount: float, from_direction: Vector3 = Vector3.ZERO) -> bool:
+	if amount <= 0.0 or is_incapacitated():
+		return false
+	health = maxf(health - amount, 0.0)
+
+	if health <= incapacitated_below:
+		# Straight to the floor, and staying there.
+		stop()
+		collision_layer = 0
+		_lay_down(from_direction)
+		_set_state(State.KNOCKED_DOWN)
+		condition = Condition.INCAPACITATED
+		_state_timer = 6.0
+		knocked_down.emit(amount)
+		return true
+
+	# Still standing: frightened, and away from whoever did it. A small minority
+	# stand their ground instead, so a street is not uniformly cowardly.
+	var threat := global_position - from_direction * dodge_distance
+	if _rng.randf() < defiance_chance:
+		enter_fear(threat, fear_seconds * 0.5)
+	else:
+		_crime_position = threat
+		_begin_fleeing()
+	return false
 
 
 func _lay_down(from_direction: Vector3) -> void:
@@ -225,6 +340,24 @@ func _check_traffic() -> void:
 		return
 
 
+## Clears the street around somebody the police are after. Runs on the same
+## coarse timer as the traffic scan — a distance check per civilian per quarter
+## second — and widens with the wanted level, so one star turns heads nearby and
+## three empties the block.
+func _check_wanted_player() -> void:
+	if not (state == State.IDLE or state == State.WALKING):
+		return
+	if WantedManager.level <= 0:
+		return
+	var player := GameManager.player
+	if player == null:
+		return
+	var radius := wanted_fear_radius * float(WantedManager.level)
+	if global_position.distance_to(player.global_position) > radius:
+		return
+	enter_fear(player.global_position, fear_seconds * 0.5)
+
+
 ## Sideways is signed; standing exactly in the middle of the lane is not, so
 ## pick a side rather than freezing.
 func signf_or_random(value: float) -> float:
@@ -259,6 +392,9 @@ func _enter_idle(seconds: float) -> void:
 
 
 func _choose_wander() -> void:
+	if not wanders:
+		_state_timer = 2.0
+		return
 	if nav == null:
 		_state_timer = 2.0
 		return

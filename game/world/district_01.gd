@@ -1108,8 +1108,8 @@ func _venue_table() -> Array:
 			"portal", "",
 		],
 		[
-			"MarketDoor", Vector3(-38.0, 1.2, -12.4), Vector3.BACK, "Shop",
-			"shop", "",
+			"MarketDoor", Vector3(-38.0, 1.2, -12.4), Vector3.BACK, "Enter the shop",
+			"market", "",
 		],
 		[
 			"DinerDoor", Vector3(20.5, 1.2, -26.4), Vector3.BACK, "Enter Diner",
@@ -1141,8 +1141,8 @@ func _build_venue_doors() -> void:
 		match kind:
 			"portal":
 				door = _make_apartment_portal(point, facing)
-			"shop":
-				door = _make_market_shop()
+			"market":
+				door = _make_market_portal(point, facing)
 			"job":
 				door = _make_warehouse_station()
 			_:
@@ -1177,14 +1177,23 @@ func _make_apartment_portal(point: Vector3, facing: Vector3) -> Portal:
 	return portal
 
 
-func _make_market_shop() -> Shop:
-	var shop := Shop.new()
-	shop.shop_name = "Harbour Row Market"
-	shop.prompt_subtitle = "Harbour Row Market"
-	shop.stock = MARKET_STOCK
-	shop.opens_hour = 6
-	shop.closes_hour = 23
-	return shop
+## The market is a room now rather than a counter on the pavement. The counter
+## moved inside with the shelves, the cashier and the staff-only area, because
+## shoplifting needs an inside to walk out of.
+func _make_market_portal(point: Vector3, facing: Vector3) -> Portal:
+	var street_marker := Marker3D.new()
+	street_marker.name = "MarketStreetExit"
+	street_marker.position = point + facing * 1.8 - Vector3(0.0, 0.8, 0.0)
+	street_marker.add_to_group(ConvenienceStoreInterior.EXIT_GROUP)
+	_interactables.add_child(street_marker)
+
+	var portal := Portal.new()
+	portal.destination_group = ConvenienceStoreInterior.ENTRY_GROUP
+	portal.prompt_subtitle = "Harbour Row Market"
+	portal.override_camera = true
+	portal.camera_distance = 14.0
+	portal.camera_pitch = 70.0
+	return portal
 
 
 func _make_warehouse_station() -> JobStation:
@@ -1627,6 +1636,9 @@ func _build_traffic() -> void:
 
 func _build_pedestrians() -> void:
 	var container := _make_container("Pedestrians")
+	# Anything that creates a civilian mid-game — a carjacking victim, for now —
+	# looks this group up rather than parenting people to whatever spawned them.
+	container.add_to_group(&"crowd")
 	# Seeded so a run is reproducible and a failing test can be re-run.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("HarbourRowCrowd")

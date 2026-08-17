@@ -152,7 +152,7 @@ layout_mode = 1
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 28.0
-offset_top = -128.0
+offset_top = -154.0
 offset_right = 328.0
 offset_bottom = -26.0
 grow_vertical = 0
@@ -236,6 +236,40 @@ theme_override_styles/background = SubResource("StyleBoxFlat_bar_bg")
 theme_override_styles/fill = SubResource("StyleBoxFlat_hunger")
 value = 100.0
 show_percentage = false
+
+[node name="EquippedRow" type="HBoxContainer" parent="Root/BottomLeft"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="EquippedName" type="Label" parent="Root/BottomLeft/EquippedRow"]
+custom_minimum_size = Vector2(74, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.803922, 0.831373, 0.87451, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.6)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 13
+text = "IN HAND"
+vertical_alignment = 1
+
+[node name="EquippedSwatch" type="ColorRect" parent="Root/BottomLeft/EquippedRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(14, 14)
+layout_mode = 2
+size_flags_vertical = 4
+color = Color(0.721569, 0.701961, 0.658824, 1)
+
+[node name="EquippedLabel" type="Label" parent="Root/BottomLeft/EquippedRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.933333, 0.941176, 0.964706, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.6)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 13
+text = "FISTS"
+vertical_alignment = 1
 
 [node name="PromptHolder" type="CenterContainer" parent="Root"]
 layout_mode = 1

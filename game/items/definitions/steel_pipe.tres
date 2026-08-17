@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+[ext_resource type="Resource" path="res://items/weapons/pipe.tres" id="2_pipe"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"steel_pipe"
+display_name = "Steel Pipe"
+description = "A length of scaffold pipe. Heavier than a fist, and it shows."
+category = 2
+price = 0
+max_stack = 1
+icon_color = Color(0.482353, 0.505882, 0.541176, 1)
+consumable = false
+can_equip = true
+equipment_slot = &"hand"
+weapon_data = ExtResource("2_pipe")

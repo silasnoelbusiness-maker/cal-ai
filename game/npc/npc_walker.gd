@@ -38,7 +38,10 @@ const ARRIVE_DISTANCE := 0.9
 @export var body_height: float = 1.75
 @export var body_radius: float = 0.36
 
-@onready var body_pivot: Node3D = $BodyPivot
+## The turnable part of the figure. Comes from the scene for NPCs that have one,
+## and is built here for the ones created in code — a shop's cashier, or the
+## driver pulled out of a carjacked car.
+var body_pivot: Node3D = null
 
 var nav: NavGraph = null
 
@@ -49,6 +52,7 @@ var _running: bool = false
 var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity", 20.0)
 var _stuck_time: float = 0.0
 var _last_progress_position: Vector3 = Vector3.ZERO
+var _pending_shove: Vector3 = Vector3.ZERO
 
 
 func _ready() -> void:
@@ -56,6 +60,13 @@ func _ready() -> void:
 	collision_mask = COLLISION_MASK
 	nav = get_tree().get_first_node_in_group(&"nav_graph") as NavGraph
 	_last_progress_position = global_position
+
+	body_pivot = get_node_or_null("BodyPivot")
+	if body_pivot == null:
+		body_pivot = Node3D.new()
+		body_pivot.name = "BodyPivot"
+		add_child(body_pivot)
+
 	_build_body()
 
 
@@ -175,7 +186,20 @@ func _physics_process(delta: float) -> void:
 
 	_face(planar, delta)
 	move_and_slide()
+	if _pending_shove != Vector3.ZERO:
+		move_and_collide(_pending_shove)
+		_pending_shove = Vector3.ZERO
 	_check_stuck(delta)
+
+
+## Knocks this NPC back by `distance` metres. Applied on the next physics frame
+## rather than immediately: whoever threw the punch is not in the physics step,
+## and a kinematic body moved from outside it slides through walls.
+func shove(direction: Vector3, distance: float) -> void:
+	var flat := Vector3(direction.x, 0.0, direction.z)
+	if distance <= 0.0 or flat.length_squared() < 0.0001:
+		return
+	_pending_shove = flat.normalized() * distance
 
 
 func _advance_path() -> void:

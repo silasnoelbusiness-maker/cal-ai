@@ -43,6 +43,9 @@ enum State { DRIVING, WAITING, STUCK }
 @export var light_lane_tolerance: float = 5.0
 ## Inside this distance from a red, the car commits to stopping for it.
 @export var light_commit_distance: float = 18.0
+## How close a police car with its lights on has to be before civilian traffic
+## slows for it.
+@export var siren_yield_radius: float = 22.0
 
 @export_group("Recovery")
 ## Barely moving while trying to drive for this long counts as stuck.
@@ -67,6 +70,8 @@ var _target_node: int = -1
 var _sense_timer: float = 0.0
 var _blocked_distance: float = INF
 var _blocked_by_pedestrian: bool = false
+## A police car is close by with its lights on.
+var _siren_close: bool = false
 var _stuck_time: float = 0.0
 var _recoveries: int = 0
 var _reverse_time: float = 0.0
@@ -202,6 +207,9 @@ func _wanted_speed(heading_error: float) -> float:
 		if _blocked_by_pedestrian:
 			wanted = minf(wanted, corner_speed * 0.5)
 
+	if _siren_close:
+		wanted = minf(wanted, corner_speed * 0.55)
+
 	var light_stop := _distance_to_red_light()
 	if light_stop < INF:
 		if light_stop < 1.6:
@@ -280,6 +288,26 @@ func _sense_ahead() -> void:
 			continue
 		_blocked_distance = distance
 		_blocked_by_pedestrian = hit.get("collider") is NpcWalker
+
+	_check_for_sirens()
+
+
+## Civilian traffic gets out of the way of a chase. Checked on the same coarse
+## timer as the forward sensor, against a handful of police cars, so it costs
+## nothing — and it is what makes a pursuit look like it is happening *to* the
+## city rather than alongside it.
+func _check_for_sirens() -> void:
+	_siren_close = false
+	for node in get_tree().get_nodes_in_group(&"police_car"):
+		var car := node as Vehicle
+		if car == null or car == _car:
+			continue
+		var driver := car.get_node_or_null("Driver") as PoliceDriver
+		if driver == null or not driver.is_siren_active():
+			continue
+		if car.global_position.distance_to(_car.global_position) < siren_yield_radius:
+			_siren_close = true
+			return
 
 
 ## Distance to the stop line of a red light this car is approaching, or INF.

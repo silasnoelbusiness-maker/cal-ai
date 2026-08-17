@@ -4,7 +4,8 @@ An original 3D open-world life & crime simulator, viewed from an elevated
 top-down camera. This directory holds a self-contained **Godot 4.3** project; it
 is unrelated to the Next.js app in the repository root.
 
-**V0.1 phases A–G are complete.** The full life/economy loop is playable end to
+**V0.1 phases A–H are complete** (two of them were called G — the art pass and
+the crime expansion; the naming is kept here as it happened). The full life/economy loop is playable end to
 end — wake up in your flat, sleep off the night, walk to the warehouse for a
 paid shift, buy food at the convenience store, eat it, head home — and the city
 around it now moves: civilian traffic on both streets, signals at the two
@@ -38,6 +39,26 @@ not make it is knocked down, gets up shaken and hurries off. Driving away
 after hitting somebody is recorded as a hit-and-run — as an incident on your
 record, not yet as something the police come for.
 
+The crime expansion turns the single theft into a set of things you can do, all
+priced against one another. Behind the stars is a points meter: every crime is
+worth points, points add up, and the stars are a reading of the total — so a
+theft and then a robbery is worse than either alone.
+
+| Crime | Points | How you commit it |
+| --- | --- | --- |
+| Trespassing | 5 | Stay in a staff-only area after the warning |
+| Shoplifting | 10 | Walk out of a shop with goods you have not paid for |
+| Vehicle theft | 20 | Take a parked car that is not yours |
+| Assault | 25 | Hit somebody (left mouse) |
+| Carjacking | 35 | Take a car with somebody still in it |
+| Store robbery | 40 | Hold up a till (`G` at the counter) |
+
+Stars light at 20, 40 and 70 points, and the response scales with them: one star
+sends up to two units, two stars three, three stars five, and the police drive
+and run faster at each step. An arrest costs $100, $250 or $500 by level, never
+more than you are carrying, and anything in your bag flagged as stolen is
+confiscated.
+
 ## Running
 
 Open `game/project.godot` in Godot 4.3 (or newer 4.x) and press Play. The main
@@ -56,7 +77,9 @@ scene is `res://main.tscn`.
 | Mouse wheel | Zoom in / out |
 | `Esc` | Close an open screen, else pause / resume |
 | `R` | Reset the camera orientation |
-| `F` | Enter / exit a vehicle |
+| `F` | Enter / exit a vehicle · carjack an occupied one |
+| `G` | Rob the till you are stood at |
+| Left mouse | Attack with whatever is in your hand |
 
 Driving:
 
@@ -77,6 +100,8 @@ Development keys, to be removed before release:
 | `F8` | Unstick the current vehicle |
 | `F6` / `F7` | Set wanted level 1 / 2 |
 | `F9` | Clear the wanted level |
+| `F3` | Show / hide the crime overlay (points, response, statistics) |
+| `F4` | Put a steel pipe in the bag, for testing melee |
 
 `F9` was quick-load in Phase D; it is now clear-wanted, and quick-load moved to
 `F12`.
@@ -242,11 +267,24 @@ that a pedestrian jumps clear of an approaching car, and that one who does not
 is knocked down, logged as an incident rather than a crime, gets back up and
 runs:
 
+The crime expansion is tested the same way, in two halves. The table — what each
+crime is worth, where the stars light, what an arrest costs — is checked
+directly, because a table either says the right thing or it does not. Everything
+else is played: the player walks into the shop, takes something off a shelf,
+carries it out and the crime lands; stands behind the counter until the warning
+runs out; robs the till, walks out of one mid-way and finds the same till empty
+for days afterwards; pulls a driver out of a stopped car and drives it away
+while they run off; punches somebody, then does it with a pipe until they stop
+getting up. Three crimes stack to three stars, five units answer, and the
+arrest at the end costs $500. Afterwards the shop still serves them, which is
+the check that the city carries on.
+
 ```sh
 godot --headless --path game res://tests/smoke_test.tscn
 ```
 
-It exits non-zero if any check fails.
+It exits non-zero if any check fails. As of the crime expansion it runs 431
+checks.
 
 A screenshot tool renders the game to a PNG without a desktop, for eyeballing
 the district:
@@ -262,18 +300,29 @@ Args after `++` are `key=value` pairs, all optional: `out`, `hour`, `scenario`
 `cleared`, `busted`, `night_chase`, `traffic`, `vehicle_types`, `red_light`,
 `green_light`, `crossing`, `pedestrian_reacts`, `driving_traffic`,
 `traffic_crash`, `pursuit_traffic`, `police_lights`, `escaping_traffic`,
-`night_traffic`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
+`night_traffic`, `store_interior`, `shoplifting`, `robbery`, `trespassing`,
+`carjacking`, `carjack_victim`, `melee`, `weapon`, `incapacitated`,
+`three_stars`, `police_response`, `fear_crowd`, `crime_overlay`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
 rather than faking their results. It runs under the Compatibility renderer, so
 lighting is close to but not identical to the Forward+ game.
 
 ## What is next
 
-Nothing is started. The obvious candidates are a real pause menu with settings
-over the existing save system, turning the hit-and-run incident into something
-the police actually respond to, and the in-world UI layer — marker pins over
-objectives, a phone-style app panel. The diner and precinct doors are real
-interaction points holding those places; only what happens behind the prompt is
-still to come.
+Nothing is started. The largest gap the crime expansion left is interiors: the
+flat and the convenience store are the only two you can walk into, and the
+diner, the small retail unit, the precinct lobby and the warehouse floor are
+still doors with prompts on them. The store interior is built from five reusable
+components — shelves, counter, restricted area, store zone, employee — so
+another one is a stock list and a room rather than new systems.
+
+The weapon side stops deliberately at the architecture: `WeaponData` carries a
+`RANGED` kind that nothing fires yet. Adding a projectile is a new component
+reading the same resource, not a change to how attacking works.
+
+Other obvious candidates are a real pause menu with settings over the existing
+save system, turning the hit-and-run incident into something the police actually
+respond to, and the in-world UI layer — marker pins over objectives, a
+phone-style app panel.
 
 On the art, the procedural ceiling is roughly where it is now. Going further —
 real window frames, porches, varied house types, foliage that is not spheres —

@@ -84,6 +84,19 @@ func _run() -> void:
 	await _test_night_pursuit()
 	await _test_wanted_debug_keys()
 
+	# Phase G: crime expansion.
+	_test_crime_profiles()
+	_test_wanted_thresholds()
+	_test_bust_fine_scaling()
+	await _test_shoplifting()
+	await _test_trespassing()
+	await _test_store_robbery()
+	await _test_carjacking()
+	await _test_melee_and_assault()
+	await _test_three_star_escalation()
+	await _test_life_after_crime()
+	await _test_crime_save_load()
+
 	_report()
 
 
@@ -368,11 +381,29 @@ func _test_life_loop() -> void:
 	# ~22m east along the frontage, from Larkspur's door to the market's.
 	await _hold(["move_right"], 300)
 	await _settle(30)
-	var counter := _player.interaction.get_focused()
+	var street_door := _player.interaction.get_focused()
 	_check(
-		counter is Shop,
-		"walking east along the frontage reaches the market counter (x=%.1f)" % _player.global_position.x
+		street_door is Portal,
+		"walking east along the frontage reaches the market door (x=%.1f)"
+		% _player.global_position.x
 	)
+
+	# --- Inside ---
+	await _press_action("interact")
+	await _settle(25)
+	var store: ConvenienceStoreInterior = _main.get_node("Interiors/ConvenienceStore")
+	_check(
+		_player.global_position.distance_to(store.global_position) < 20.0,
+		"the door leads into the shop"
+	)
+	_check(_camera_rig.distance < 16.0, "the camera tightens indoors (%.0f)" % _camera_rig.distance)
+
+	# Walking the aisle is not what this test is about — the walk to the door
+	# above already proves movement — so step straight to the till.
+	await _teleport(store.get_shop().global_position + Vector3(0.0, 0.1, 1.2))
+	await _settle(20)
+	var counter := _player.interaction.get_focused()
+	_check(counter is Shop, "the counter is at the back of the shop")
 
 	# --- Buy a meal through the real shop screen ---
 	await _press_action("interact")
@@ -430,7 +461,8 @@ func _test_life_loop() -> void:
 ## The rules that stop the loop being a money printer.
 func _test_shop_and_job_rules() -> void:
 	var district: Node3D = _main.get_node("District01")
-	var shop: Shop = district.get_node("Interactables/MarketDoor")
+	# The counter lives inside the shop now; the street door is just a doorway.
+	var shop: Shop = _market_counter()
 	var station: JobStation = district.get_node("Interactables/WarehouseGate")
 	var stats := _player.stats
 
@@ -1533,7 +1565,15 @@ func _test_civilian_witness() -> void:
 	await _settle(10)
 
 	var record := CrimeManager.get_last_crime()
-	_check(record.get("witnessed") == true, "the civilian saw it")
+	_check(
+		record.get("witnessed") == true,
+		"the civilian saw it (state %d, cond %d, available %s, %.1fm)" % [
+			civilian.state,
+			civilian.condition,
+			civilian.is_available_as_witness(),
+			civilian.global_position.distance_to(car.global_position),
+		]
+	)
 	_check(record.get("reporting_witness") == civilian, "the record names who saw it")
 	_check(civilian.state == Pedestrian.State.WITNESSING, "the witness stops and stares")
 	_check(WantedManager.level == 0, "no heat yet — they have not called it in")
@@ -1664,9 +1704,10 @@ func _test_bust() -> void:
 	_check(WantedManager.is_busting() or GameManager.cutscene_active, "the arrest starts")
 	_check(_main.get_node("HUD/Root/BustedOverlay").visible, "BUSTED is on screen")
 
+	var fine := WantedManager.get_bust_fine()
 	await _settle(int((WantedManager.bust_hold_seconds + 1.0) * 60.0))
 
-	_check(EconomyManager.cash == 600 - WantedManager.bust_fine, "the fine is charged (now $%d)" % EconomyManager.cash)
+	_check(EconomyManager.cash == 600 - fine, "the fine is charged (now $%d)" % EconomyManager.cash)
 	_check(WantedManager.level == 0, "the wanted level is cleared")
 	_check(not GameManager.cutscene_active, "control comes back")
 	_check(not get_tree().paused, "the world unfreezes")
@@ -1776,6 +1817,12 @@ func _prepare_crime_scene() -> void:
 	await _leave_vehicle()
 	WantedManager.clear_wanted("")
 	await _isolate_scene()
+	# A witness from the previous test may still be part-way through their
+	# report delay. Let those land before the ledger is wiped, or one arrives in
+	# the middle of the next test and moves its wanted level — which cost an
+	# afternoon to work out the first time it happened.
+	await _settle(int((WitnessSystem.report_delay + 0.5) * 60.0))
+	WantedManager.clear_wanted("")
 	CrimeManager.clear_history()
 	_notifications.clear()
 	await _settle(6)
@@ -1857,6 +1904,10 @@ func _vehicles() -> Array:
 		func(car: Node) -> bool:
 			return not car.is_in_group(&"police") and not car.is_in_group(&"traffic")
 	)
+
+
+func _market_counter() -> Shop:
+	return (_main.get_node("Interiors/ConvenienceStore") as ConvenienceStoreInterior).get_shop()
 
 
 func _traffic_manager() -> TrafficManager:
@@ -2065,3 +2116,593 @@ func _report() -> void:
 	for failure in _failures:
 		print("  - ", failure)
 	get_tree().quit(1)
+
+
+# --- Phase G: crime expansion --------------------------------------------
+#
+# The crime systems are tested in two halves. The data — severities, points,
+# thresholds, fines — is checked directly, because it is a table and a table
+# either says the right thing or it does not. Everything else is played: the
+# player walks in, takes something, walks out, and the crime either lands or it
+# does not. Anything checked by calling the same method the game calls proves
+# nothing about whether the game can reach it.
+
+## The crime table itself: every crime priced, and priced in the right order.
+func _test_crime_profiles() -> void:
+	var missing: Array[String] = []
+	for type in CrimeManager.CrimeType.values():
+		if not CrimeManager.PROFILES.has(type):
+			missing.append(CrimeManager.get_type_name(type))
+	_check(missing.is_empty(), "every crime type has a profile (missing: %s)" % ", ".join(missing))
+
+	_check(CrimeManager.points_for(CrimeManager.CrimeType.TRESPASSING) == 5, "trespassing is 5 points")
+	_check(CrimeManager.points_for(CrimeManager.CrimeType.SHOPLIFTING) == 10, "shoplifting is 10 points")
+	_check(CrimeManager.points_for(CrimeManager.CrimeType.VEHICLE_THEFT) == 20, "vehicle theft is 20 points")
+	_check(CrimeManager.points_for(CrimeManager.CrimeType.ASSAULT) == 25, "assault is 25 points")
+	_check(CrimeManager.points_for(CrimeManager.CrimeType.CARJACKING) == 35, "carjacking is 35 points")
+	_check(CrimeManager.points_for(CrimeManager.CrimeType.STORE_ROBBERY) == 40, "store robbery is 40 points")
+
+	_check(
+		CrimeManager.severity_of(CrimeManager.CrimeType.TRESPASSING)
+		< CrimeManager.severity_of(CrimeManager.CrimeType.STORE_ROBBERY),
+		"a robbery is more serious than a trespass"
+	)
+	_check(
+		CrimeManager.evidence_for(CrimeManager.CrimeType.STORE_ROBBERY)
+		> CrimeManager.evidence_for(CrimeManager.CrimeType.SHOPLIFTING),
+		"a robbery leaves more evidence than a shoplifting"
+	)
+
+
+## Stars are a reading of the points meter, and points add up.
+func _test_wanted_thresholds() -> void:
+	WantedManager.clear_wanted("")
+	_check(WantedManager.level == 0 and WantedManager.points == 0, "the meter starts empty")
+
+	WantedManager.add_points(10, Vector3.ZERO)
+	_check(WantedManager.level == 0, "10 points is not yet a star")
+	WantedManager.add_points(10, Vector3.ZERO)
+	_check(WantedManager.level == 1, "20 points is one star")
+	WantedManager.add_points(20, Vector3.ZERO)
+	_check(WantedManager.level == 2, "40 points is two stars")
+	WantedManager.add_points(30, Vector3.ZERO)
+	_check(WantedManager.level == 3, "70 points is three stars")
+	_check(WantedManager.points == 70, "points accumulate rather than being replaced")
+
+	_check(WantedManager.get_response_budget() == 5, "three stars sends up to five units")
+	WantedManager.set_level(1)
+	_check(WantedManager.get_response_budget() == 2, "one star sends up to two")
+	WantedManager.set_level(2)
+	_check(WantedManager.get_response_budget() == 3, "two stars sends up to three")
+	_check(
+		WantedManager.get_pursuit_pressure() > 1.0,
+		"the police push harder above one star (x%.2f)" % WantedManager.get_pursuit_pressure()
+	)
+
+	# Escalation is what the points model exists for: a second crime while
+	# already wanted has to move the meter, not restate it.
+	WantedManager.clear_wanted("")
+	WantedManager.add_points(CrimeManager.points_for(CrimeManager.CrimeType.VEHICLE_THEFT), Vector3.ZERO)
+	var after_theft := WantedManager.points
+	WantedManager.add_points(CrimeManager.points_for(CrimeManager.CrimeType.STORE_ROBBERY), Vector3.ZERO)
+	_check(WantedManager.points == after_theft + 40, "a robbery on top of a theft adds to the meter")
+	_check(WantedManager.level == 2, "theft plus robbery is two stars")
+	WantedManager.clear_wanted("")
+
+
+func _test_bust_fine_scaling() -> void:
+	WantedManager.set_level(1)
+	_check(WantedManager.get_bust_fine() == 100, "one star costs $100")
+	WantedManager.set_level(2)
+	_check(WantedManager.get_bust_fine() == 250, "two stars costs $250")
+	WantedManager.set_level(3)
+	_check(WantedManager.get_bust_fine() == 500, "three stars costs $500")
+	# A bust cannot happen at level 0, so the table is never read there. It still
+	# has to answer something sane rather than reading off the end of the array.
+	WantedManager.clear_wanted("")
+	_check(WantedManager.get_bust_fine() == 100, "an out-of-range level falls back to the one-star fine")
+
+
+## Taking goods off a shelf and walking out with them.
+func _test_shoplifting() -> void:
+	await _prepare_crime_scene()
+	var store: ConvenienceStoreInterior = _main.get_node("Interiors/ConvenienceStore")
+	var shelf := _first_shelf(store)
+	_check(shelf != null, "the shop has merchandise on the shelves")
+	if shelf == null:
+		return
+
+	_player.inventory.clear()
+	await _teleport(shelf.global_position + Vector3(0.0, 0.0, 0.6))
+	await _settle(12)
+
+	var focused := _player.interaction.get_focused()
+	_check(focused == shelf, "the shelf is what the player is looking at")
+	await _press_action("interact")
+	await _settle(6)
+
+	_check(_player.inventory.total_items() == 1, "the goods go into the bag")
+	_check(_player.inventory.stolen_count() == 1, "and are flagged as unpaid")
+	_check(_said("UNPAID"), "the player is told they have not paid")
+	_check(
+		CrimeManager.get_crimes_of(CrimeManager.CrimeType.SHOPLIFTING).is_empty(),
+		"picking something up is not yet a crime"
+	)
+
+	# Out of the door with it. Nobody is inside — the scene is isolated — so it
+	# is a crime that happened and was never seen.
+	await _teleport(store.global_position + Vector3(0.0, 0.5, 40.0))
+	await _settle(20)
+
+	var thefts := CrimeManager.get_crimes_of(CrimeManager.CrimeType.SHOPLIFTING)
+	_check(thefts.size() == 1, "leaving with it is the shoplifting (%d filed)" % thefts.size())
+	if not thefts.is_empty():
+		_check(int(thefts[0].get("quantity", 0)) == 1, "the record says how much was taken")
+		_check(int(thefts[0].get("wanted_points", 0)) == 10, "it is worth 10 points")
+		_check(thefts[0].get("witnessed") == false, "nobody saw it")
+	_check(WantedManager.level == 0, "an unseen shoplifting is free")
+	_check(
+		CrimeManager.get_statistic(&"items_shoplifted") >= 1,
+		"the statistics count it"
+	)
+
+	# Now the same again with a witness stood by the door.
+	CrimeManager.clear_history()
+	_notifications.clear()
+	_player.inventory.clear()
+	await _teleport(shelf.global_position + Vector3(0.0, 0.0, 0.6))
+	await _settle(12)
+	await _press_action("interact")
+	await _settle(6)
+
+	var civilian: Node3D = get_tree().get_nodes_in_group(&"pedestrian")[0]
+	await _place_witness(
+		civilian, store.global_position + Vector3(2.5, 0.4, 3.0), _player.global_position
+	)
+	await _teleport(store.global_position + Vector3(0.0, 0.5, 40.0))
+	await _settle(20)
+
+	var seen := CrimeManager.get_crimes_of(CrimeManager.CrimeType.SHOPLIFTING)
+	_check(
+		not seen.is_empty() and seen[0].get("witnessed") == true,
+		"a civilian in the shop sees it (%s)" % (
+			"no crime filed" if seen.is_empty() else str(seen[0].get("witnessed"))
+		)
+	)
+	await _settle(int((WitnessSystem.report_delay + 0.7) * 60.0))
+	_check(seen[0].get("reported") == true, "and calls it in")
+	_check(
+		WantedManager.points == 10,
+		"which puts 10 points on the meter (%d)" % WantedManager.points
+	)
+	_check(
+		WantedManager.level == 0,
+		"one petty theft is not yet a star — that is what the points model is for"
+	)
+
+	# Being arrested with it costs the goods. Petty theft alone will not summon
+	# the police, so the star comes from the meter directly.
+	WantedManager.raise_to(1)
+	EconomyManager.restore(600)
+	WantedManager.request_bust()
+	await _settle(int(WantedManager.bust_hold_seconds * 60.0) + 40)
+	_check(_player.inventory.stolen_count() == 0, "arrest confiscates the stolen goods")
+	_check(_said("STOLEN GOODS SEIZED"), "and says so")
+	_check(EconomyManager.cash == 500, "and charges the one-star fine (now $%d)" % EconomyManager.cash)
+	_player.inventory.clear()
+
+
+## Behind the counter is off limits, but only after a warning.
+func _test_trespassing() -> void:
+	await _prepare_crime_scene()
+	var store: ConvenienceStoreInterior = _main.get_node("Interiors/ConvenienceStore")
+	var area := _staff_area(store)
+	_check(area != null, "the shop has a staff-only area")
+	if area == null:
+		return
+
+	await _teleport(area.global_position + Vector3(0.0, -0.9, 0.0))
+	await _settle(20)
+	_check(area.is_player_inside(), "the player is stood behind the counter")
+	_check(_said("STAFF ONLY"), "they are warned first")
+	_check(
+		CrimeManager.get_crimes_of(CrimeManager.CrimeType.TRESPASSING).is_empty(),
+		"the warning alone is not a crime"
+	)
+
+	await _settle(int(area.grace_seconds * 60.0) + 30)
+	var offences := CrimeManager.get_crimes_of(CrimeManager.CrimeType.TRESPASSING)
+	_check(offences.size() >= 1, "staying files trespassing (%d)" % offences.size())
+	if not offences.is_empty():
+		_check(int(offences[0].get("wanted_points", 0)) == 5, "trespassing is worth 5 points")
+
+	# The repeat cooldown is what stops one room filing a crime every frame.
+	await _settle(120)
+	_check(
+		CrimeManager.get_crimes_of(CrimeManager.CrimeType.TRESPASSING).size() == offences.size(),
+		"and does not file another every second"
+	)
+
+	await _teleport(store.global_position + Vector3(0.0, 0.5, 40.0))
+	await _settle(10)
+
+
+## The till, the tension window, and the cooldown that stops it being a loop.
+func _test_store_robbery() -> void:
+	await _prepare_crime_scene()
+	var store: ConvenienceStoreInterior = _main.get_node("Interiors/ConvenienceStore")
+	var counter := store.get_shop()
+	var cashier := store.get_cashier()
+	TimeManager.set_total_minutes(TimeManager.day_index * 1440.0 + 12.0 * 60.0)
+	await _settle(6)
+
+	# --- Walking out mid-robbery costs the money, not the crime ---
+	await _teleport(counter.global_position + Vector3(0.0, 0.1, 1.2))
+	await _settle(12)
+	var cash_before := EconomyManager.cash
+	counter.rob(_player)
+	await _settle(12)
+	_check(counter.is_being_robbed(), "the robbery starts")
+	_check(cashier.is_afraid(), "the cashier is frightened")
+	_check(
+		not CrimeManager.get_crimes_of(CrimeManager.CrimeType.STORE_ROBBERY).is_empty(),
+		"the crime is filed at once, not at the payout"
+	)
+
+	await _teleport(store.global_position + Vector3(0.0, 0.5, 40.0))
+	await _settle(30)
+	_check(not counter.is_being_robbed(), "walking out abandons it")
+	_check(EconomyManager.cash == cash_before, "and pays nothing")
+	_check(_said("EMPTY HANDED"), "the player is told why")
+
+	# --- The cooldown, and its expiry ---
+	_check(counter.can_be_robbed() == Shop.RobberyResult.ON_COOLDOWN, "the same till cannot be done twice")
+	TimeManager.advance_minutes(counter.robbery_cooldown_days * 1440 + 60)
+	await _settle(10)
+	_check(counter.can_be_robbed() == Shop.RobberyResult.OK, "the till refills after a few days")
+
+	# --- The whole robbery, seen through ---
+	CrimeManager.clear_history()
+	_notifications.clear()
+	await _teleport(counter.global_position + Vector3(0.0, 0.1, 1.2))
+	await _settle(12)
+	cash_before = EconomyManager.cash
+	counter.rob(_player)
+	await _settle(int(counter.robbery_seconds.y * 60.0) + 60)
+
+	var takings := EconomyManager.cash - cash_before
+	_check(
+		takings >= counter.robbery_reward.x and takings <= counter.robbery_reward.y,
+		"the till pays $150-$500 (got $%d)" % takings
+	)
+	var robberies := CrimeManager.get_crimes_of(CrimeManager.CrimeType.STORE_ROBBERY)
+	_check(robberies.size() == 1, "one robbery is on the record")
+	if not robberies.is_empty():
+		_check(int(robberies[0].get("wanted_points", 0)) == 40, "it is worth 40 points")
+		_check(int(robberies[0].get("reward_value", 0)) == takings, "the record knows what was taken")
+	_check(CrimeManager.get_statistic(&"stores_robbed") >= 1, "the statistics count the robbery")
+	_check(
+		CrimeManager.get_statistic(&"illegal_income") >= takings,
+		"and count the money as crime income"
+	)
+	_check(EconomyManager.illegal_income >= takings, "the economy tracks it as illegal income")
+
+	await _teleport(store.global_position + Vector3(0.0, 0.5, 40.0))
+	await _settle(10)
+
+
+## Pulling somebody out of their car.
+func _test_carjacking() -> void:
+	await _prepare_crime_scene()
+	# Clear of the cars the earlier theft tests left parked further down the
+	# boulevard: a stolen car that drives four metres into a parked one has not
+	# been proved to drive.
+	var car := await _spawn_occupied_traffic(Vector3(0.0, 0.0, 40.0), 0.0)
+	var victims: Array[Node3D] = []
+	car.carjacked.connect(func(_thief: Node3D, victim: Node3D) -> void: victims.append(victim))
+
+	_check(car.has_occupant(), "the car has somebody in it")
+	_check(car.can_be_carjacked_by(_player), "a stopped car can be taken")
+	car.driver_state = Vehicle.DriverState.EMPTY
+	_check(not car.can_be_carjacked_by(_player), "an empty car cannot be carjacked, only stolen")
+	car.driver_state = Vehicle.DriverState.SEATED
+
+	await _stand_beside(car)
+	var door := _player.interaction.get_focused()
+	_check(door is VehicleDoor, "the door is what the player is looking at")
+	_check(
+		door != null and door.get_prompt_text().contains("Carjack"),
+		"the prompt says carjack, not enter (%s)" % (door.get_prompt_text() if door else "<none>")
+	)
+
+	await _press_action("enter_vehicle")
+	await _settle(10)
+
+	_check(_player.is_driving(), "the player ends up at the wheel")
+	_check(car.driver_state == Vehicle.DriverState.FLED, "the car knows its driver has gone")
+	_check(victims.size() == 1, "somebody got out of it")
+	var victim: Pedestrian = victims[0] if not victims.is_empty() else null
+	if victim != null:
+		_check(is_instance_valid(victim) and victim is Pedestrian, "the driver is now a pedestrian")
+		_check(
+			victim.global_position.distance_to(car.global_position) < 6.0,
+			"they are stood beside the car"
+		)
+		_check(victim.is_afraid(), "and they are frightened")
+	_check(
+		car.get_node_or_null("Driver") == null or car.controller == Vehicle.Controller.PLAYER,
+		"the AI driver has let go of the car"
+	)
+
+	var record := CrimeManager.get_last_crime()
+	_check(int(record.get("type", -1)) == CrimeManager.CrimeType.CARJACKING, "it is filed as a carjacking")
+	_check(int(record.get("wanted_points", 0)) == 35, "worth 35 points")
+	_check(record.get("witnessed") == true, "the victim saw it — they were sat in it")
+	_check(
+		CrimeManager.get_crimes_of(CrimeManager.CrimeType.VEHICLE_THEFT).is_empty(),
+		"and not also as an ordinary theft"
+	)
+	_check(CrimeManager.get_statistic(&"cars_carjacked") >= 1, "the statistics count it")
+
+	await _settle(int((WitnessSystem.report_delay + 0.8) * 60.0))
+	_check(WantedManager.level == 1, "the victim calls it in (level %d)" % WantedManager.level)
+
+	# The car drives, which is the point of taking it.
+	await _hold(["move_forward"], 45)
+	_check(car.get_forward_speed() > 1.0, "the stolen car drives (%.1f m/s)" % car.get_forward_speed())
+
+	await _leave_vehicle()
+	WantedManager.clear_wanted("")
+	if is_instance_valid(victim):
+		victim.queue_free()
+	await _despawn([car])
+
+
+## Fists, then something heavier.
+func _test_melee_and_assault() -> void:
+	await _prepare_crime_scene()
+	await _teleport(Vector3(0.0, 0.5, 70.0))
+	await _settle(10)
+
+	var combat := _player.get_combat()
+	_check(combat != null, "the player has a combat controller")
+	_check(combat.get_active_weapon().display_name == "Fists", "empty hands are still a weapon")
+
+	# Somebody stood right in front of the player.
+	var civilians := get_tree().get_nodes_in_group(&"pedestrian")
+	var victim: Pedestrian = civilians[0]
+	await _place_witness(
+		victim, _player.global_position + _player.get_facing() * 1.6, _player.global_position
+	)
+	victim.wait_for(30.0)
+	await _settle(6)
+
+	_check(combat.find_target() == victim, "the person in front is the target")
+	var health_before := victim.health
+	var where_before := victim.global_position
+	await _press_action("attack")
+	await _settle(12)
+
+	_check(victim.health < health_before, "the punch hurts (%.0f -> %.0f)" % [health_before, victim.health])
+	_check(
+		victim.global_position.distance_to(where_before) > 0.3,
+		"and knocks them back (%.2fm)" % victim.global_position.distance_to(where_before)
+	)
+	var assaults := CrimeManager.get_crimes_of(CrimeManager.CrimeType.ASSAULT)
+	_check(assaults.size() == 1, "it is filed as assault (%d)" % assaults.size())
+	if not assaults.is_empty():
+		_check(int(assaults[0].get("wanted_points", 0)) == 25, "worth 25 points")
+		_check(
+			int(assaults[0].get("intent", -1)) == CrimeManager.Intent.INTENTIONAL,
+			"and recorded as intentional"
+		)
+
+	# The cooldown, and one crime per victim rather than one per punch.
+	_check(combat.get_cooldown_left() > 0.0, "there is a cooldown between swings")
+	_check(not combat.can_attack(), "which blocks an immediate second swing")
+	await _settle(int(combat.get_active_weapon().cooldown * 60.0) + 10)
+	_check(combat.can_attack(), "and clears on its own")
+	await _press_action("attack")
+	await _settle(10)
+	_check(
+		CrimeManager.get_crimes_of(CrimeManager.CrimeType.ASSAULT).size() == 1,
+		"a flurry on one person is still one assault"
+	)
+
+	# Somebody behind the player is not a target.
+	var behind: Pedestrian = civilians[1]
+	await _place_witness(
+		behind, _player.global_position - _player.get_facing() * 1.4, _player.global_position
+	)
+	behind.wait_for(30.0)
+	await _settle(6)
+	_check(combat.find_target() != behind, "somebody stood behind the player is not swung at")
+
+	# --- A weapon out of the bag ---
+	_player.inventory.clear()
+	var pipe := ItemCatalogue.by_id(&"steel_pipe")
+	_check(pipe != null and pipe.is_weapon(), "the steel pipe is a weapon item")
+	_player.inventory.add(pipe, 1)
+	_check(_player.inventory.use_slot(0, _player), "using it from the bag equips it")
+	_check(_player.get_equipped_item() == pipe, "it ends up in the player's hand")
+	_check(_player.inventory.count_of(&"steel_pipe") == 1, "equipping does not consume it")
+	_check(
+		combat.get_active_weapon().damage > CombatController.FISTS.damage,
+		"the pipe hits harder than a fist"
+	)
+
+	# Enough swings to put somebody down for good.
+	var target: Pedestrian = civilians[2]
+	await _place_witness(
+		target, _player.global_position + _player.get_facing() * 1.6, _player.global_position
+	)
+	target.wait_for(60.0)
+	await _settle(6)
+	for i in 4:
+		if target.is_incapacitated():
+			break
+		await _press_action("attack")
+		await _settle(int(combat.get_active_weapon().cooldown * 60.0) + 12)
+		if not target.is_incapacitated():
+			# They run when hit; keep them in reach rather than chasing.
+			target.global_position = _player.global_position + _player.get_facing() * 1.5
+			await _settle(4)
+	_check(target.is_incapacitated(), "enough of it leaves them incapacitated")
+	_check(target.is_down(), "and on the floor")
+
+	_check(_player.inventory.use_slot(0, _player), "using it again unequips it")
+	_check(_player.get_equipped_item() == null, "back to bare hands")
+	_player.inventory.clear()
+	WantedManager.clear_wanted("")
+
+
+## Three stars, the response that comes with it, and the arrest at the end.
+func _test_three_star_escalation() -> void:
+	await _prepare_crime_scene()
+	await _teleport(Vector3(0.0, 0.5, 60.0))
+	EconomyManager.restore(900)
+
+	for type in [
+		CrimeManager.CrimeType.VEHICLE_THEFT,
+		CrimeManager.CrimeType.CARJACKING,
+		CrimeManager.CrimeType.STORE_ROBBERY,
+	]:
+		var record := CrimeManager.report_crime(type, _player.global_position, _player, null)
+		CrimeManager.mark_witnessed(record, _player)
+		CrimeManager.mark_reported(record)
+		WantedManager.on_crime_reported(record)
+		await _settle(4)
+
+	_check(WantedManager.points == 95, "three crimes stack to 95 points (%d)" % WantedManager.points)
+	_check(WantedManager.level == 3, "which is three stars (%d)" % WantedManager.level)
+	_check(WantedManager.get_response_budget() == 5, "three stars sends up to five units")
+	_check(
+		CrimeManager.get_statistic(&"highest_wanted_level") >= 3,
+		"the statistics remember the high-water mark"
+	)
+
+	await _station_police_near(_player.global_position, 40.0)
+	await _settle(90)
+	_check(_responding_units() >= 2, "more than one unit answers (%d)" % _responding_units())
+	_check(
+		WantedManager.get_active_responders() <= WantedManager.get_response_budget(),
+		"and never more than the budget allows (%d of %d)"
+		% [WantedManager.get_active_responders(), WantedManager.get_response_budget()]
+	)
+
+	var cash_before := EconomyManager.cash
+	WantedManager.request_bust()
+	await _settle(int(WantedManager.bust_hold_seconds * 60.0) + 40)
+	_check(EconomyManager.cash == cash_before - 500, "a three-star arrest costs $500")
+	_check(WantedManager.level == 0, "and clears the wanted level")
+	_check(EconomyManager.cash >= 0, "money never goes negative")
+
+
+## Life carries on afterwards: the shop still trades, the streets still work.
+func _test_life_after_crime() -> void:
+	await _prepare_crime_scene()
+	var store: ConvenienceStoreInterior = _main.get_node("Interiors/ConvenienceStore")
+	var counter := store.get_shop()
+	TimeManager.set_total_minutes(TimeManager.day_index * 1440.0 + 13.0 * 60.0)
+	EconomyManager.restore(200)
+	_player.inventory.clear()
+	await _settle(6)
+
+	await _teleport(counter.global_position + Vector3(0.0, 0.1, 1.2))
+	await _settle(12)
+	var cash_before := EconomyManager.cash
+	_check(
+		counter.buy(ItemCatalogue.by_id(&"snack_bar"), _player) == Shop.Result.OK,
+		"the shop still serves a customer with a record"
+	)
+	_check(EconomyManager.cash < cash_before, "and still charges for it")
+	_check(_player.inventory.stolen_count() == 0, "goods bought properly are not flagged stolen")
+	_check(not GameManager.cutscene_active, "the world is not left frozen")
+	_check(WantedManager.level == 0, "and the player is not still wanted")
+	_player.inventory.clear()
+	await _teleport(store.global_position + Vector3(0.0, 0.5, 40.0))
+	await _settle(10)
+
+
+## Everything Phase G added to the save file, plus a save that predates it.
+func _test_crime_save_load() -> void:
+	var slot := 98
+	var store: ConvenienceStoreInterior = _main.get_node("Interiors/ConvenienceStore")
+	var counter := store.get_shop()
+
+	_player.inventory.clear()
+	var pipe := ItemCatalogue.by_id(&"steel_pipe")
+	_player.inventory.add(pipe, 1)
+	_player.equip_item(pipe)
+	_player.inventory.add(ItemCatalogue.by_id(&"snack_bar"), 2, true)
+	counter.recently_robbed = true
+	var stats_before := CrimeManager.get_statistics()
+
+	_check(SaveManager.save_to_slot(slot), "the game saves with crime state in it")
+
+	_player.inventory.clear()
+	_player.combat.unequip_item()
+	counter.recently_robbed = false
+	CrimeManager.reset_statistics()
+	await _settle(6)
+
+	_check(SaveManager.load_from_slot(slot), "and loads it back")
+	await _settle(10)
+	_check(_player.get_equipped_item() == pipe, "the equipped weapon is restored")
+	_check(_player.inventory.stolen_count() == 2, "stolen goods stay flagged stolen")
+	_check(counter.recently_robbed, "a shop that has been robbed stays robbed")
+	_check(
+		CrimeManager.get_statistic(&"stores_robbed") == int(stats_before.get(&"stores_robbed", 0)),
+		"the crime statistics survive the round trip"
+	)
+
+	# A save from before any of this existed must still load.
+	_player.load_state({
+		"position": [0.0, 0.5, 60.0],
+		"health": 90.0,
+		"energy": 80.0,
+		"hunger": 70.0,
+		"inventory": [{"id": "snack_bar", "quantity": 2}],
+	})
+	await _settle(10)
+	_check(_player.inventory.count_of(&"snack_bar") == 2, "a pre-Phase-G save still loads")
+	_check(_player.inventory.stolen_count() == 0, "its goods are treated as legitimately owned")
+	_check(_player.get_equipped_item() == null, "and its player is empty-handed")
+
+	SaveManager.delete_slot(slot)
+	_player.inventory.clear()
+
+
+# --- Phase G helpers -----------------------------------------------------
+
+func _first_shelf(store: Node) -> MerchandiseShelf:
+	for node in get_tree().get_nodes_in_group(&"merchandise"):
+		if store.is_ancestor_of(node):
+			return node as MerchandiseShelf
+	return null
+
+
+func _staff_area(store: Node) -> RestrictedArea:
+	for node in get_tree().get_nodes_in_group(&"restricted_area"):
+		if store.is_ancestor_of(node):
+			return node as RestrictedArea
+	return null
+
+
+## A civilian car with somebody in it, parked and not driving off. The traffic
+## driver is stopped rather than removed, so the car is exactly what the manager
+## would have produced — a carjackable one — minus the moving about.
+func _spawn_occupied_traffic(at: Vector3, yaw_degrees: float) -> Vehicle:
+	var car := await _spawn_test_traffic(at, yaw_degrees)
+	car.driver_type = Vehicle.DriverType.CIVILIAN
+	car.driver_state = Vehicle.DriverState.SEATED
+	car.driver_id = &"test_driver"
+	var driver := car.get_node_or_null("Driver") as TrafficDriver
+	if driver != null:
+		driver.set_physics_process(false)
+	# The last input the driver posted is still latched on the car, so clearing
+	# the throttle matters as much as stopping the driver posting a new one.
+	car.set_ai_input(0.0, 0.0, true)
+	car.halt()
+	await _settle(8)
+	return car

@@ -38,11 +38,14 @@ const TONE_COLORS: Array[Color] = [
 @onready var _escape_label: Label = %EscapeLabel
 @onready var _busted_overlay: Control = %BustedOverlay
 @onready var _busted_text: Label = %BustedText
+@onready var _equipped_label: Label = %EquippedLabel
+@onready var _equipped_swatch: ColorRect = %EquippedSwatch
 
 var _player: Node3D = null
 var _stats: PlayerStats = null
 var _inventory: Inventory = null
 var _interaction: InteractionController = null
+var _combat: CombatController = null
 var _toast_tween: Tween = null
 var _fade_tween: Tween = null
 ## The vehicle currently being driven, if any. The speedometer polls it rather
@@ -122,6 +125,11 @@ func _bind_player(player: Node3D) -> void:
 		_interaction.focus_changed.connect(_on_focus_changed)
 		_on_focus_changed(_interaction.get_focused())
 
+	_combat = player.get_node_or_null("Combat") as CombatController
+	if _combat != null:
+		_combat.equipped_changed.connect(_on_equipped_changed)
+	_on_equipped_changed(_combat.get_equipped_item() if _combat != null else null)
+
 
 func _unbind_player(_old_player: Node3D = null) -> void:
 	if _stats != null:
@@ -136,6 +144,10 @@ func _unbind_player(_old_player: Node3D = null) -> void:
 	if _interaction != null:
 		_interaction.focus_changed.disconnect(_on_focus_changed)
 		_interaction = null
+	if _combat != null:
+		_combat.equipped_changed.disconnect(_on_equipped_changed)
+		_combat = null
+	_on_equipped_changed(null)
 	if _player != null and _player.has_signal("vehicle_changed"):
 		if _player.is_connected("vehicle_changed", _on_vehicle_changed):
 			_player.disconnect("vehicle_changed", _on_vehicle_changed)
@@ -166,6 +178,11 @@ func _on_vehicle_changed(vehicle: Node3D) -> void:
 
 func _process(_delta: float) -> void:
 	_refresh_speed()
+	# Prompts are re-read rather than cached: what a thing offers can change
+	# while the player stands in front of it — a car slowing to a stop becomes
+	# carjackable, a shop that has just been robbed stops offering the till.
+	if _prompt_panel.visible and _interaction != null:
+		_on_focus_changed(_interaction.get_focused())
 	if _escape_label.visible:
 		_escape_label.text = "ESCAPING...  %.0f" % ceilf(
 			WantedManager.get_escape_seconds_left()
@@ -226,7 +243,9 @@ func _on_bust_finished(fine_paid: int) -> void:
 
 ## The HUD only needs a per-frame tick while something on it is live.
 func _update_process_need() -> void:
-	set_process(_vehicle != null or _escape_label.visible)
+	# A visible prompt is a third reason to tick: what an interactable offers can
+	# change while the player stands still in front of it.
+	set_process(_vehicle != null or _escape_label.visible or _prompt_panel.visible)
 
 
 # --- Screens -------------------------------------------------------------
@@ -322,20 +341,36 @@ func _set_bar(bar: ProgressBar, value: float, max_value: float) -> void:
 	bar.value = value
 
 
+# --- Equipment -----------------------------------------------------------
+
+## Always shown, because empty hands are a state the player needs to be able to
+## read as clearly as a weapon in them.
+func _on_equipped_changed(item: ItemData) -> void:
+	if item == null:
+		_equipped_label.text = "FISTS"
+		_equipped_swatch.color = CombatController.FISTS.icon_color
+		return
+	_equipped_label.text = item.display_name.to_upper()
+	_equipped_swatch.color = item.icon_color
+
+
 # --- Interaction prompt --------------------------------------------------
 
 func _on_focus_changed(interactable: Interactable) -> void:
 	if interactable == null:
 		_prompt_panel.visible = false
+		_update_process_need()
 		return
 	var text := interactable.get_prompt_text()
 	if text.is_empty():
 		_prompt_panel.visible = false
+		_update_process_need()
 		return
 	if not interactable.prompt_subtitle.is_empty():
 		text += "\n" + interactable.prompt_subtitle
 	_prompt_label.text = text
 	_prompt_panel.visible = true
+	_update_process_need()
 
 
 # --- Toasts / pause ------------------------------------------------------

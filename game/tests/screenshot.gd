@@ -8,7 +8,10 @@ extends Node
 ## Args after `++` are key=value pairs, all optional:
 ##   out       output PNG path
 ##   hour      hour of the in-game day, e.g. 22.5
-##   scenario  street (default), apartment, shop, inventory, warehouse, car,
+##   scenario  street (default), apartment, shop, store_interior, shoplifting,
+##             robbery, trespassing, carjacking, carjack_victim, melee, weapon,
+##             incapacitated, three_stars, police_response, fear_crowd,
+##             crime_overlay, inventory, warehouse, car,
 ##             driving, theft, crowd, unseen_theft, witness, wanted, pursuit,
 ##             escaping, cleared, busted, night_chase, traffic, vehicle_types,
 ##             red_light, green_light, crossing, pedestrian_reacts,
@@ -25,6 +28,8 @@ const MAIN_SCENE := preload("res://main.tscn")
 const BASIC_MEAL := preload("res://items/definitions/basic_meal.tres")
 const SNACK_BAR := preload("res://items/definitions/snack_bar.tres")
 const ENERGY_DRINK := preload("res://items/definitions/energy_drink.tres")
+const PIPE := preload("res://items/definitions/steel_pipe.tres")
+const TRAFFIC_CAR := preload("res://vehicles/cars/sedan.tscn")
 
 var _args: Dictionary = {}
 
@@ -83,11 +88,33 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 			# Stand back from the door so the whole flat is in frame.
 			player.global_position += Vector3(0.0, 0.0, -2.0)
 
-		"shop":
+		"shop", "store_interior", "shoplifting", "robbery":
+			# Through the real doorway, so the shot is of the room the player
+			# actually walks into.
 			player.global_position = Vector3(-38.0, 0.5, -11.6)
+			await _wait(16)
+			(district.get_node("Interactables/MarketDoor") as Portal).interact(player)
 			await _wait(20)
-			var shop: Shop = district.get_node("Interactables/MarketDoor")
-			shop.interact(player)
+			var store: ConvenienceStoreInterior = main.get_node("Interiors/ConvenienceStore")
+			var counter := store.get_shop()
+			match scenario:
+				"store_interior":
+					player.global_position = store.global_position + Vector3(0.0, 0.5, 2.6)
+				"shoplifting":
+					var shelf: MerchandiseShelf = store.get_node("Shelf0")
+					player.global_position = shelf.global_position + Vector3(0.0, -0.5, 0.9)
+					await _wait(10)
+					shelf.interact(player)
+					await _wait(10)
+				"robbery":
+					player.global_position = counter.global_position + Vector3(0.0, 0.0, 1.0)
+					await _wait(10)
+					counter.rob(player)
+					await _wait(70)
+				_:
+					player.global_position = counter.global_position + Vector3(0.0, 0.0, 1.2)
+					await _wait(16)
+					counter.interact(player)
 
 		"inventory":
 			var inventory: Inventory = player.call("get_inventory")
@@ -265,6 +292,78 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"pursuit_traffic", "police_lights", "escaping_traffic", "night_traffic":
 			await _crime_scenario(main, scenario, false)
 
+		"trespassing":
+			var store: ConvenienceStoreInterior = main.get_node("Interiors/ConvenienceStore")
+			(district.get_node("Interactables/MarketDoor") as Portal).interact(player)
+			await _wait(16)
+			var staff: RestrictedArea = store.get_node("BehindTheCounter")
+			player.global_position = staff.global_position + Vector3(0.0, -0.9, 0.0)
+			# Long enough for the warning and the offence itself.
+			await _wait(int(staff.grace_seconds * 60.0) + 40)
+
+		"carjacking", "carjack_victim":
+			var jacked := await _occupied_car(main, Vector3(0.0, 0.0, 26.0), 0.0)
+			player.global_position = jacked.global_transform * Vector3(-2.1, 0.5, 0.2)
+			await _wait(8)
+			if scenario == "carjacking":
+				# Stood at the door of an occupied car, prompt on screen.
+				return
+			jacked.get_node("Door").interact(player)
+			await _wait(40)
+
+		"melee", "weapon", "incapacitated":
+			# No officers: a beating in front of a patrolling one ends in an
+			# arrest half way through, which is the systems working correctly and
+			# the wrong photograph.
+			for unit in get_tree().get_nodes_in_group(&"police"):
+				unit.process_mode = Node.PROCESS_MODE_DISABLED
+			var combat: CombatController = player.get_node("Combat")
+			player.global_position = Vector3(-30.0, 0.5, 12.0)
+			await _wait(8)
+			if scenario != "melee":
+				var inventory: Inventory = player.call("get_inventory")
+				inventory.add(PIPE, 1)
+				player.call("equip_item", PIPE)
+			var victim: Pedestrian = get_tree().get_nodes_in_group(&"pedestrian")[0]
+			victim.global_position = player.global_position + player.call("get_facing") * 1.5
+			victim.wait_for(60.0)
+			await _wait(8)
+			if scenario == "weapon":
+				return
+			var swings := 1 if scenario == "melee" else 5
+			for i in swings:
+				combat.attack()
+				await _wait(int(combat.get_active_weapon().cooldown * 60.0) + 8)
+				if scenario == "incapacitated" and not victim.is_incapacitated():
+					victim.global_position = player.global_position + player.call("get_facing") * 1.4
+					await _wait(4)
+
+		"three_stars", "police_response", "fear_crowd":
+			player.global_position = Vector3(-30.0, 0.5, 6.0)
+			await _wait(8)
+			for type in [
+				CrimeManager.CrimeType.VEHICLE_THEFT,
+				CrimeManager.CrimeType.CARJACKING,
+				CrimeManager.CrimeType.STORE_ROBBERY,
+			]:
+				var record := CrimeManager.report_crime(type, player.global_position, player, null)
+				CrimeManager.mark_witnessed(record, player)
+				CrimeManager.mark_reported(record)
+				WantedManager.on_crime_reported(record)
+			await _wait(20 if scenario == "three_stars" else 150)
+
+		"crime_overlay":
+			main.get_node("CrimeDebug").toggle()
+			main.get_node("TrafficDebug").toggle()
+			var inventory: Inventory = player.call("get_inventory")
+			inventory.add(PIPE, 1)
+			player.call("equip_item", PIPE)
+			WantedManager.add_points(55, player.global_position)
+			CrimeManager.report_crime(
+				CrimeManager.CrimeType.SHOPLIFTING, player.global_position, player, null
+			)
+			await _wait(30)
+
 		"theft":
 			var car := _find_vehicle(false)
 			car.global_position = Vector3(-30.0, 0.0, 3.0)
@@ -390,6 +489,32 @@ func _crime_scenario(main: Node, scenario: String, quiet_streets: bool = true) -
 	# arrest that follows it.
 	Input.action_press("move_forward")
 	await _wait(50)
+
+
+## A civilian car with somebody at the wheel, parked and held still, so the shot
+## is of a carjacking rather than of a car driving off mid-frame.
+func _occupied_car(main: Node, at: Vector3, yaw_degrees: float) -> Vehicle:
+	var car: Vehicle = TRAFFIC_CAR.instantiate()
+	car.controller = Vehicle.Controller.TRAFFIC_AI
+	car.owner_type = Vehicle.OwnerType.NPC
+	car.owner_id = &"traffic"
+	car.driver_type = Vehicle.DriverType.CIVILIAN
+	car.driver_state = Vehicle.DriverState.SEATED
+	car.driver_id = &"shot_driver"
+	car.driver_color = Color(0.545, 0.400, 0.353)
+	car.position = at
+	car.rotation = Vector3(0.0, deg_to_rad(yaw_degrees), 0.0)
+	main.add_child(car)
+
+	var driver := TrafficDriver.new()
+	driver.name = "Driver"
+	car.add_child(driver)
+	await _wait(4)
+	driver.set_physics_process(false)
+	car.set_ai_input(0.0, 0.0, true)
+	car.halt()
+	await _wait(6)
+	return car
 
 
 ## First *parked* vehicle matching the requested ownership. Moving traffic and

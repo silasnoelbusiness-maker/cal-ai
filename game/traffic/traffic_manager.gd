@@ -51,6 +51,14 @@ const BODY_COLOURS: Array[Color] = [
 	Color(0.180, 0.192, 0.216), Color(0.588, 0.612, 0.647),
 ]
 
+## Clothing colours for the people behind the wheel, kept apart from the body
+## palette so a driver never blends into their own car.
+const DRIVER_COLOURS: Array[Color] = [
+	Color(0.545, 0.400, 0.353), Color(0.396, 0.447, 0.510),
+	Color(0.424, 0.471, 0.396), Color(0.592, 0.541, 0.424),
+	Color(0.475, 0.400, 0.490), Color(0.349, 0.475, 0.490),
+]
+
 var _network: RoadNetwork = null
 var _vehicles: Array[Vehicle] = []
 var _upkeep_timer: float = 0.0
@@ -144,6 +152,12 @@ func _spawn_one(ignore_player_distance: bool) -> Vehicle:
 	vehicle.controller = Vehicle.Controller.TRAFFIC_AI
 	vehicle.owner_type = Vehicle.OwnerType.NPC
 	vehicle.owner_id = &"traffic"
+	# Somebody is driving it. Set before the car enters the tree so the figure in
+	# the seat is built with the right colour.
+	vehicle.driver_type = Vehicle.DriverType.CIVILIAN
+	vehicle.driver_state = Vehicle.DriverState.SEATED
+	vehicle.driver_id = StringName("driver_%d" % _spawn_count)
+	vehicle.driver_color = DRIVER_COLOURS[_rng.randi_range(0, DRIVER_COLOURS.size() - 1)]
 
 	var tinted: VehicleData = vehicle.data.duplicate()
 	tinted.body_color = BODY_COLOURS[_rng.randi_range(0, BODY_COLOURS.size() - 1)]
@@ -156,6 +170,8 @@ func _spawn_one(ignore_player_distance: bool) -> Vehicle:
 	driver.name = "Driver"
 	driver.recycle_requested.connect(_on_recycle_requested.bind(vehicle))
 	vehicle.add_child(driver)
+
+	vehicle.carjacked.connect(_on_vehicle_carjacked.bind(vehicle))
 
 	_vehicles.append(vehicle)
 	vehicle_spawned.emit(vehicle)
@@ -254,6 +270,13 @@ func _retire_furthest() -> void:
 	if furthest != null and best > recycle_distance * 0.6:
 		_vehicles.erase(furthest)
 		furthest.queue_free()
+
+
+## A stolen car stops being traffic. It leaves the pool entirely — otherwise the
+## upkeep pass would eventually teleport it back onto a lane with the player
+## sitting in it — and the population tops itself back up with a fresh one.
+func _on_vehicle_carjacked(_thief: Node3D, _victim: Node3D, vehicle: Vehicle) -> void:
+	_vehicles.erase(vehicle)
 
 
 func _on_recycle_requested(vehicle: Vehicle) -> void:

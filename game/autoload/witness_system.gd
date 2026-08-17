@@ -101,6 +101,25 @@ func _on_crime_recorded(record: Dictionary) -> void:
 	_report(record)
 
 
+## Files a crime as seen by one named person, with no perception test.
+##
+## For the cases where witnessing is part of the act rather than something that
+## might or might not have happened: the driver of a carjacked car does not need
+## a line of sight to know they have just been pulled out of it. Everything after
+## that — the delay, the call, the wanted level — is the ordinary path, so these
+## crimes behave like any other from here on.
+func witness_directly(record: Dictionary, witness: Node3D, delay: float = -1.0) -> void:
+	if record.is_empty():
+		return
+	CrimeManager.mark_witnessed(record, witness)
+	crime_witnessed.emit(record, witness)
+
+	var wait := report_delay if delay < 0.0 else delay
+	if wait > 0.0:
+		await get_tree().create_timer(wait).timeout
+	_report(record)
+
+
 func _report(record: Dictionary) -> void:
 	if record.get("reported", false):
 		return

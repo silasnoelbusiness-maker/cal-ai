@@ -41,11 +41,14 @@ var _perception_timer: float = 0.0
 var _repath_timer: float = 0.0
 var _state_timer: float = 0.0
 var _rng := RandomNumberGenerator.new()
+## Speed before pursuit pressure is applied, so the multiplier never compounds.
+var _base_run_speed: float = 0.0
 
 
 func _ready() -> void:
 	super()
 	_rng.randomize()
+	_base_run_speed = run_speed
 	add_to_group(&"police")
 	add_to_group(&"witness")
 	if post_position == Vector3.ZERO:
@@ -114,6 +117,9 @@ func _perceive() -> void:
 		return
 
 	if state != State.PURSUING:
+		# An officer who can see the player is past being told to stay at their
+		# post, so they join the call whether or not there is room in the budget.
+		WantedManager.request_dispatch(self, true)
 		_set_state(State.PURSUING)
 		_repath_timer = 0.0
 
@@ -165,17 +171,27 @@ func _tick_search() -> void:
 func _on_wanted_level_changed(level: int) -> void:
 	if level <= 0:
 		return
+	# Pressure is read per level rather than per unit, so three stars is a faster
+	# chase without a second set of AI.
+	run_speed = _base_run_speed * WantedManager.get_pursuit_pressure()
+
 	if state == State.PURSUING or state == State.BUSTING:
 		return
-	# Only officers near enough answer the call, so a level 1 theft does not
-	# summon the whole district.
+	# Two gates, and both have to open. Near enough to answer the call, and the
+	# call not already fully staffed — otherwise a one-star theft empties every
+	# post in the district.
 	var distance := global_position.distance_to(WantedManager.last_known_position)
-	if distance <= WantedManager.get_response_radius():
-		_set_state(State.RESPONDING)
-		_repath_timer = 0.0
+	if distance > WantedManager.get_response_radius():
+		return
+	if not WantedManager.request_dispatch(self):
+		return
+	_set_state(State.RESPONDING)
+	_repath_timer = 0.0
 
 
 func _on_wanted_cleared() -> void:
+	WantedManager.release_dispatch(self)
+	run_speed = _base_run_speed
 	if state == State.PATROL:
 		return
 	_set_state(State.RETURNING)

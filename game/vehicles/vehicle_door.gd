@@ -26,12 +26,33 @@ func setup(vehicle: Vehicle) -> void:
 func can_interact(interactor: Node3D) -> bool:
 	if not super.can_interact(interactor):
 		return false
-	return _vehicle != null and _vehicle.can_be_entered_by(interactor)
+	if _vehicle == null:
+		return false
+	return _vehicle.can_be_entered_by(interactor) or _vehicle.can_be_carjacked_by(interactor)
 
 
 func _perform(interactor: Node3D) -> void:
-	if _vehicle != null:
-		_vehicle.enter(interactor)
+	if _vehicle == null:
+		return
+	# One key, two acts. Which one it is depends on whether anybody is sat in it,
+	# and the prompt says so before the player commits.
+	if _vehicle.can_be_carjacked_by(interactor):
+		_vehicle.carjack(interactor)
+		_refresh_prompt()
+		return
+	_vehicle.enter(interactor)
+
+
+## Built fresh each frame the prompt is shown, because whether a car can be
+## taken off its driver depends on how fast it is going right now.
+func get_prompt_text() -> String:
+	if not available:
+		return unavailable_prompt
+	if _vehicle != null and _vehicle.has_occupant():
+		if _vehicle.can_be_carjacked_by(GameManager.player):
+			return "%s — Carjack" % key_hint
+		return "%s — Occupied" % key_hint
+	return super.get_prompt_text()
 
 
 func _on_driver_exited(_driver: Node3D) -> void:

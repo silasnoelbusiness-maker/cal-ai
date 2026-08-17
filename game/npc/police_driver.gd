@@ -56,6 +56,8 @@ var state: State = State.PARKED
 
 var _car: Vehicle = null
 var _nav: NavGraph = null
+## Top speed before pursuit pressure, so the multiplier never compounds.
+var _base_max_speed: float = 0.0
 var _home: Transform3D
 var _path: PackedVector3Array = PackedVector3Array()
 var _index: int = 0
@@ -79,6 +81,10 @@ func _ready() -> void:
 		return
 
 	_car.controller = Vehicle.Controller.POLICE_AI
+	# A private copy of the handling data, so pursuit pressure can raise this
+	# car's top speed without touching every other car sharing the resource.
+	_car.data = _car.data.duplicate()
+	_base_max_speed = _car.data.max_speed
 	_car.add_to_group(&"police")
 	_car.add_to_group(&"police_car")
 	_home = _car.global_transform
@@ -191,6 +197,8 @@ func _perceive() -> void:
 		return
 
 	if state != State.PURSUING:
+		# A crew with eyes on the player joins the call regardless of the budget.
+		WantedManager.request_dispatch(self, true)
 		_set_state(State.PURSUING)
 		_repath_timer = 0.0
 
@@ -304,15 +312,27 @@ func _check_stuck(delta: float, throttle: float) -> void:
 # --- Reactions -----------------------------------------------------------
 
 func _on_wanted_level_changed(level: int) -> void:
+	# Higher stars, faster cars. One multiplier, read from the level, rather
+	# than a separate set of driving parameters per star.
+	_car.data.max_speed = _base_max_speed * WantedManager.get_pursuit_pressure()
+
 	if level <= 0 or state == State.PURSUING:
 		return
+	# Near enough to answer, and the call not already fully crewed. See
+	# WantedManager's dispatch section: the radius says who could come, the
+	# budget says how many do.
 	var distance := _car.global_position.distance_to(WantedManager.last_known_position)
-	if distance <= WantedManager.get_response_radius():
-		_set_state(State.RESPONDING)
-		_repath_timer = 0.0
+	if distance > WantedManager.get_response_radius():
+		return
+	if not WantedManager.request_dispatch(self):
+		return
+	_set_state(State.RESPONDING)
+	_repath_timer = 0.0
 
 
 func _on_wanted_cleared() -> void:
+	WantedManager.release_dispatch(self)
+	_car.data.max_speed = _base_max_speed
 	if state == State.PARKED:
 		return
 	_set_state(State.RETURNING)

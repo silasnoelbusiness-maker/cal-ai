@@ -41,6 +41,29 @@ func get_slot(index: int) -> InventorySlot:
 	return slots[index]
 
 
+## How many unpaid items are being carried, across every stack.
+func stolen_count() -> int:
+	var total := 0
+	for slot in get_slots():
+		total += slot.stolen
+	return total
+
+
+func has_stolen_goods() -> bool:
+	return stolen_count() > 0
+
+
+## Drops every unpaid item and leaves the legitimate ones. Returns how many were
+## taken. Used by the arrest.
+func remove_stolen() -> int:
+	var taken := 0
+	for slot in get_slots():
+		taken += slot.remove_stolen()
+	if taken > 0:
+		changed.emit()
+	return taken
+
+
 ## How many of `item` would fit right now.
 func space_for(item: ItemData) -> int:
 	if item == null:
@@ -57,7 +80,7 @@ func can_add(item: ItemData, quantity: int = 1) -> bool:
 
 ## Adds as much as fits. Returns how many were actually stored; emits
 ## `add_rejected` with the remainder when the inventory ran out of room.
-func add(item: ItemData, quantity: int = 1) -> int:
+func add(item: ItemData, quantity: int = 1, stolen: bool = false) -> int:
 	if item == null or quantity <= 0:
 		return 0
 
@@ -67,12 +90,12 @@ func add(item: ItemData, quantity: int = 1) -> int:
 		if remaining <= 0:
 			break
 		if slot.holds(item):
-			remaining -= slot.add(item, remaining)
+			remaining -= slot.add(item, remaining, stolen)
 	for slot in get_slots():
 		if remaining <= 0:
 			break
 		if slot.is_empty():
-			remaining -= slot.add(item, remaining)
+			remaining -= slot.add(item, remaining, stolen)
 
 	var stored := quantity - remaining
 	if stored > 0:
@@ -105,9 +128,11 @@ func use_slot(index: int, user: Node) -> bool:
 	if not item.use(user):
 		return false
 
-	slot.remove(1)
 	item_used.emit(item)
-	item_removed.emit(item, 1)
+	# Equipment stays in the bag: holding something is not spending it.
+	if item.consumes_on_use():
+		slot.remove(1)
+		item_removed.emit(item, 1)
 	changed.emit()
 	return true
 
