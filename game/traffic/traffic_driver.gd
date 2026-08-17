@@ -41,6 +41,8 @@ enum State { DRIVING, WAITING, STUCK }
 ## A road half-width: enough for either lane, not enough to pick up the signals
 ## on the cross street.
 @export var light_lane_tolerance: float = 5.0
+## Inside this distance from a red, the car commits to stopping for it.
+@export var light_commit_distance: float = 18.0
 
 @export_group("Recovery")
 ## Barely moving while trying to drive for this long counts as stuck.
@@ -71,6 +73,8 @@ var _reverse_time: float = 0.0
 var _reverse_steer: float = 0.0
 var _jam_anchor: Vector3 = Vector3.ZERO
 var _jam_time: float = 0.0
+## The signal this car has committed to stopping for, if any.
+var _held_light: TrafficLight = null
 var _rng := RandomNumberGenerator.new()
 var _light_cache: Array[TrafficLight] = []
 
@@ -111,6 +115,7 @@ func restart_at(node_index: int) -> void:
 	_reverse_time = 0.0
 	_jam_time = 0.0
 	_jam_anchor = _car.global_position
+	_held_light = null
 	state = State.DRIVING
 	_advance_target()
 
@@ -278,6 +283,14 @@ func _sense_ahead() -> void:
 
 
 ## Distance to the stop line of a red light this car is approaching, or INF.
+##
+## Once a car is inside braking range of a red it commits, and stays committed
+## until that signal is actually green. Without the latch a single frame in which
+## the geometry below narrowly rejects the light — the car drifting a little
+## across its lane while it brakes is enough — puts the throttle back down, and
+## the car ends up stopped in the middle of the junction instead of at the line.
+## That failed about one run in three and was miserable to reproduce, which is
+## the signature of a missing latch rather than of bad tuning.
 func _distance_to_red_light() -> float:
 	if _light_cache.is_empty():
 		return INF
@@ -288,7 +301,14 @@ func _distance_to_red_light() -> float:
 	forward = forward.normalized()
 	var east_west := absf(forward.x) > absf(forward.z)
 
+	if _held_light != null:
+		if is_instance_valid(_held_light) and _held_light.should_stop_for(east_west):
+			# Never negative: a car that has crept over the line still holds.
+			return maxf(_line_distance(_held_light, forward), 0.0)
+		_held_light = null
+
 	var best := INF
+	var closest: TrafficLight = null
 	for light in _light_cache:
 		if not light.should_stop_for(east_west):
 			continue
@@ -306,8 +326,19 @@ func _distance_to_red_light() -> float:
 		var lateral := absf(offset.dot(Vector3(-forward.z, 0.0, forward.x)))
 		if lateral > light_lane_tolerance:
 			continue
-		best = minf(best, ahead)
+		if ahead < best:
+			best = ahead
+			closest = light
+	if closest != null and best < light_commit_distance:
+		_held_light = closest
 	return best
+
+
+## Signed distance from the car to a light's stop line along its own heading.
+func _line_distance(light: TrafficLight, forward: Vector3) -> float:
+	var offset := light.stop_line_for(forward) - _car.global_position
+	offset.y = 0.0
+	return offset.dot(forward)
 
 
 # --- Recovery ------------------------------------------------------------

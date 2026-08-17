@@ -4,7 +4,7 @@ An original 3D open-world life & crime simulator, viewed from an elevated
 top-down camera. This directory holds a self-contained **Godot 4.3** project; it
 is unrelated to the Next.js app in the repository root.
 
-**V0.1 phases A–F are complete.** The full life/economy loop is playable end to
+**V0.1 phases A–G are complete.** The full life/economy loop is playable end to
 end — wake up in your flat, sleep off the night, walk to the warehouse for a
 paid shift, buy food at the convenience store, eat it, head home — and the city
 around it now moves: civilian traffic on both streets, signals at the two
@@ -85,14 +85,20 @@ Development keys, to be removed before release:
 
 "Harbour Row" is roughly 176m square: two east–west streets (Main Street, North
 Avenue) crossed by Center Boulevard, giving two junctions with crosswalks. It
-holds 12 buildings, a park with a fountain and benches, kerbside parking bays
-and an off-street lot, 32 street lights, and a perimeter wall marking where the
-next district will connect.
+holds 12 buildings — pitched roofs on the low ones, parapets and pilasters on the
+tall ones — a park with a fountain, a paved plaza, hedges and benches, kerbside
+parking bays and an off-street lot, 44 street lights, tree-lined verges, overhead
+cable runs on timber poles, patched asphalt, driveway aprons, a set of signals at
+each junction, and a perimeter wall marking where the next district will
+connect.
 
 Everything is generated from the layout tables in `world/district_01.gd` rather
-than hand-placed, so the grid can be retuned by editing data. Geometry is
-primitives sharing a small palette of materials — placeholder art that gameplay
-does not depend on.
+than hand-placed, so the grid can be retuned by editing data. Geometry is still
+primitives — boxes, cylinders, spheres, one hip-roof mesh — sharing a small
+palette of procedurally textured materials. There are no imported art assets and
+no image files in the repository: every surface, canopy and cable is generated at
+load. Gameplay does not depend on any of it, so modelled meshes can replace the
+primitives later without touching a system.
 
 ## Layout
 
@@ -179,6 +185,31 @@ main.tscn     entry scene
   up are moved to a fresh lane node well away from the player rather than freed
   and re-instanced, so a much bigger city later still costs a fixed pool of
   vehicles.
+* **Surfaces are textured by world position, not by UV.** Everything here is a
+  scaled unit box, so a UV-mapped texture would stretch one tile across a 170m
+  road and squash another onto a bench. World *triplanar* mapping projects from
+  world coordinates instead, which is what makes texturing a kit of scaled
+  primitives possible at all — every surface gets the same grain at the same
+  size, and new geometry needs no UV work.
+* **The relief matters more than the tint.** A flat colour under a directional
+  light reads as plastic however carefully it is chosen; the same colour with a
+  few millimetres of normal-mapped relief reads as asphalt, grass or shingle.
+  Water is the one deliberate exception and is left smooth — noise on it looks
+  like television static.
+* **Pitched roofs are a mesh, not a stack of boxes.** There is no primitive for a
+  hipped roof, so one unit roof is built with a SurfaceTool and scaled per
+  instance like everything else. Its faces are wound from a supplied outward
+  normal rather than by hand, because getting that wrong is how a roof ends up
+  with two black slopes. Buildings low enough to look down onto get one; the
+  office slabs keep a flat parapet and get cornices and pilasters instead, so
+  they still have more than one silhouette.
+* **Scenery is not solid.** Bins, hydrants, post boxes, hedges, poles, wires and
+  street trees carry no collision at all. Every one of them sits within a metre
+  or two of a pedestrian route, and a crowd wedged against a litter bin is a bug
+  the player can see, where a bin they clip through is one nobody notices from
+  this camera. Planting *solid* street trees is what broke the walk to the
+  market — which is the argument for the rule, and for having a test that walks
+  it.
 
 ## Tests
 
@@ -238,7 +269,12 @@ lighting is close to but not identical to the Forward+ game.
 ## What is next
 
 Nothing is started. The obvious candidates are a real pause menu with settings
-over the existing save system, and turning the hit-and-run incident into
-something the police actually respond to. The diner and precinct doors are real
+over the existing save system, turning the hit-and-run incident into something
+the police actually respond to, and the in-world UI layer — marker pins over
+objectives, a phone-style app panel. The diner and precinct doors are real
 interaction points holding those places; only what happens behind the prompt is
 still to come.
+
+On the art, the procedural ceiling is roughly where it is now. Going further —
+real window frames, porches, varied house types, foliage that is not spheres —
+means modelled meshes rather than more code.

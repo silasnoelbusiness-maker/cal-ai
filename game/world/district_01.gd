@@ -86,11 +86,21 @@ const PAVEMENT_OFFSET := 8.4
 ## Street lights sit close to the kerb so their arms overhang the carriageway.
 const STREET_LIGHT_KERB_GAP := 0.8
 
+## The kerb lip along the road edge of a pavement: how wide the band is, and how
+## far it stands above the pavement so it catches the light.
+const KERB_WIDTH := 0.45
+const KERB_LIFT := 0.04
+
 ## Kerbs live on their own physics layer (6). Pedestrians collide with it and
 ## step up; vehicles do not, so a car can mount a kerb instead of being stopped
 ## dead by a 12cm lip. The visual cost is that a car on the pavement sits a few
 ## centimetres into it, which is invisible at this camera distance.
 const CURB_LAYER := 1 << 5
+
+## Which side of a pavement slab the road is on, and therefore where its kerb
+## goes. Passed in rather than inferred, because the pavement at a junction
+## corner faces two roads and a guess would put a kerb across the crossing.
+enum Kerb { NONE, NORTH, SOUTH, EAST, WEST }
 
 const SEDAN_SCENE: PackedScene = preload("res://vehicles/cars/sedan.tscn")
 const ROAD_NETWORK_SCRIPT: Script = preload("res://traffic/road_network.gd")
@@ -105,6 +115,7 @@ const NAV_GRAPH_SCRIPT: Script = preload("res://npc/nav_graph.gd")
 const PEDESTRIAN_COUNT := 16
 
 var _palette: Dictionary = {}
+var _foliage: Array = []
 var _geometry: Node3D
 var _props: Node3D
 var _interactables: Node3D
@@ -127,6 +138,7 @@ func _ready() -> void:
 	_build_park()
 	_build_parking()
 	_build_street_lights()
+	_build_streetscape()
 	_build_warehouse_yard()
 	_build_venue_doors()
 	_build_notice_board()
@@ -163,34 +175,52 @@ func _make_container(container_name: String) -> Node3D:
 	return node
 
 
+## Every surface the player looks at for any length of time gets relief on it —
+## see CityKit.make_surface. The detail scale is chosen per surface: asphalt is
+## fine-grained, grass and foliage are coarse and clumpy, brick is on the course
+## spacing, roof shingle on the row spacing. Markings, glass and lamps stay flat,
+## because a crisp painted line and a pane of glass are meant to look smooth.
 func _build_palette() -> void:
 	_palette = {
-		"ground": CityKit.make_material(Color(0.412, 0.408, 0.392)),
-		"asphalt": CityKit.make_material(Color(0.145, 0.149, 0.165)),
-		"sidewalk": CityKit.make_material(Color(0.529, 0.522, 0.498)),
+		"ground": CityKit.make_surface(Color(0.400, 0.396, 0.376), 0.94, 9.0, 1.0, 0.20, 0.0, 11),
+		"asphalt": CityKit.make_surface(Color(0.137, 0.141, 0.157), 0.88, 7.0, 1.3, 0.26, 0.0, 2),
+		"sidewalk": CityKit.make_surface(Color(0.506, 0.498, 0.475), 0.90, 7.0, 0.6, 0.11, 0.0, 3),
 		"marking": CityKit.make_material(Color(0.749, 0.733, 0.635), 0.8),
-		"grass": CityKit.make_material(Color(0.239, 0.353, 0.184)),
-		"roof": CityKit.make_material(Color(0.243, 0.247, 0.263)),
-		"plinth": CityKit.make_material(Color(0.310, 0.310, 0.325)),
-		"metal": CityKit.make_material(Color(0.400, 0.412, 0.443), 0.55, 0.5),
-		"wood": CityKit.make_material(Color(0.400, 0.278, 0.176), 0.85),
-		"foliage": CityKit.make_material(Color(0.196, 0.361, 0.184)),
-		"trunk": CityKit.make_material(Color(0.290, 0.216, 0.153)),
-		"water": CityKit.make_material(Color(0.267, 0.451, 0.510), 0.25, 0.2),
+		"grass": CityKit.make_surface(Color(0.231, 0.345, 0.176), 0.95, 4.0, 1.8, 0.34, 0.0, 4),
+		"roof": CityKit.make_surface(Color(0.235, 0.239, 0.255), 0.90, 3.0, 1.2, 0.22, 0.0, 5),
+		"shingle": CityKit.make_surface(Color(0.510, 0.286, 0.180), 0.92, 1.5, 1.6, 0.28, 0.0, 6),
+		"slate": CityKit.make_surface(Color(0.310, 0.325, 0.353), 0.86, 1.5, 1.5, 0.24, 0.0, 7),
+		"plinth": CityKit.make_surface(Color(0.302, 0.302, 0.318), 0.90, 4.0, 0.8, 0.16, 0.0, 8),
+		"metal": CityKit.make_surface(Color(0.400, 0.412, 0.443), 0.55, 2.0, 0.4, 0.09, 0.5, 9),
+		"wood": CityKit.make_surface(Color(0.392, 0.271, 0.169), 0.85, 0.9, 1.2, 0.24, 0.0, 10),
+		"trunk": CityKit.make_surface(Color(0.282, 0.208, 0.145), 0.95, 0.8, 1.8, 0.28, 0.0, 12),
+		# Water is the one surface that must stay smooth: relief on it reads as
+		# television static rather than as a fountain.
+		"water": CityKit.make_material(Color(0.216, 0.376, 0.435), 0.12, 0.25),
+		"kerb": CityKit.make_surface(Color(0.600, 0.592, 0.565), 0.90, 3.0, 0.7, 0.14, 0.0, 14),
+		"gravel": CityKit.make_surface(Color(0.443, 0.427, 0.400), 0.96, 1.6, 2.0, 0.34, 0.0, 15),
+		"hedge": CityKit.make_surface(Color(0.176, 0.294, 0.157), 0.95, 1.0, 2.0, 0.34, 0.0, 16),
 		# Dark glass by day, lit from inside after dark. The albedo stays dark
 		# so daylight does not blow the bands out to white; only the emission
 		# is animated, by _on_daylight_changed().
-		"windows": CityKit.make_emissive_material(Color(0.114, 0.133, 0.169), 0.0, WINDOW_GLOW),
+		"windows": CityKit.make_emissive_material(Color(0.192, 0.224, 0.278), 0.0, WINDOW_GLOW),
 		"lamp": CityKit.make_emissive_material(Color(0.180, 0.176, 0.157), 2.6, LAMP_GLOW),
-		"brick_a": CityKit.make_material(Color(0.541, 0.373, 0.318)),
-		"brick_b": CityKit.make_material(Color(0.612, 0.529, 0.443)),
-		"concrete_a": CityKit.make_material(Color(0.478, 0.494, 0.514)),
-		"concrete_b": CityKit.make_material(Color(0.396, 0.427, 0.463)),
-		"teal": CityKit.make_material(Color(0.294, 0.427, 0.412)),
-		"sand": CityKit.make_material(Color(0.671, 0.596, 0.451)),
-		"navy": CityKit.make_material(Color(0.216, 0.267, 0.365)),
+		"brick_a": CityKit.make_surface(Color(0.529, 0.361, 0.306), 0.93, 2.0, 1.4, 0.22, 0.0, 20),
+		"brick_b": CityKit.make_surface(Color(0.600, 0.518, 0.431), 0.93, 2.0, 1.4, 0.22, 0.0, 21),
+		"concrete_a": CityKit.make_surface(Color(0.467, 0.482, 0.502), 0.90, 5.0, 0.8, 0.16, 0.0, 22),
+		"concrete_b": CityKit.make_surface(Color(0.384, 0.416, 0.451), 0.90, 5.0, 0.8, 0.16, 0.0, 23),
+		"teal": CityKit.make_surface(Color(0.286, 0.416, 0.400), 0.90, 3.5, 0.9, 0.18, 0.0, 24),
+		"sand": CityKit.make_surface(Color(0.659, 0.584, 0.439), 0.92, 3.5, 0.9, 0.18, 0.0, 25),
+		"navy": CityKit.make_surface(Color(0.208, 0.259, 0.353), 0.88, 5.0, 0.8, 0.16, 0.0, 26),
 		"door": CityKit.make_material(Color(0.145, 0.157, 0.180), 0.5),
 	}
+	# Three shades of leaf, so a canopy is not one flat green and no two trees on
+	# a street are quite the same colour.
+	_foliage = [
+		CityKit.make_surface(Color(0.196, 0.361, 0.184), 0.95, 1.1, 2.2, 0.36, 0.0, 30),
+		CityKit.make_surface(Color(0.251, 0.427, 0.200), 0.95, 1.1, 2.2, 0.36, 0.0, 31),
+		CityKit.make_surface(Color(0.157, 0.302, 0.165), 0.95, 1.1, 2.2, 0.36, 0.0, 32),
+	]
 
 
 func _mat(key: String) -> StandardMaterial3D:
@@ -398,15 +428,19 @@ func _build_sidewalks() -> void:
 	]
 	for road_z in [MAIN_ST_Z, NORTH_AVE_Z]:
 		for span: Vector2 in ew_spans:
+			# The pavement north of the road has the carriageway on its south
+			# edge, and vice versa.
 			_add_sidewalk(
 				CityKit.rect_from_bounds(
 					span.x, road_z - ROAD_HALF - WALK_WIDTH, span.y, road_z - ROAD_HALF
-				)
+				),
+				Kerb.SOUTH
 			)
 			_add_sidewalk(
 				CityKit.rect_from_bounds(
 					span.x, road_z + ROAD_HALF, span.y, road_z + ROAD_HALF + WALK_WIDTH
-				)
+				),
+				Kerb.NORTH
 			)
 
 	var ns_spans := [
@@ -418,16 +452,18 @@ func _build_sidewalks() -> void:
 		_add_sidewalk(
 			CityKit.rect_from_bounds(
 				CENTER_BLVD_X - ROAD_HALF - WALK_WIDTH, span.x, CENTER_BLVD_X - ROAD_HALF, span.y
-			)
+			),
+			Kerb.EAST
 		)
 		_add_sidewalk(
 			CityKit.rect_from_bounds(
 				CENTER_BLVD_X + ROAD_HALF, span.x, CENTER_BLVD_X + ROAD_HALF + WALK_WIDTH, span.y
-			)
+			),
+			Kerb.WEST
 		)
 
 
-func _add_sidewalk(rect: Rect2) -> void:
+func _add_sidewalk(rect: Rect2, kerb: Kerb = Kerb.NONE) -> void:
 	if rect.size.x <= 0.01 or rect.size.y <= 0.01:
 		return
 	CityKit.add_slab(
@@ -441,7 +477,47 @@ func _add_sidewalk(rect: Rect2) -> void:
 		true,
 		CURB_LAYER
 	)
+	_add_kerb(rect, kerb)
 	_sidewalk_index += 1
+
+
+## The lip along the road edge of a pavement.
+##
+## Purely decorative — the pavement slab underneath already carries the
+## collision, on the layer vehicles ignore. But from an elevated camera an
+## unmarked pavement/road boundary reads as a change of paint rather than a
+## step, and that single light band is most of what makes a street look built
+## rather than drawn.
+func _add_kerb(rect: Rect2, edge: Kerb) -> void:
+	if edge == Kerb.NONE:
+		return
+	var strip := rect
+	match edge:
+		Kerb.NORTH:
+			strip = CityKit.rect_from_bounds(
+				rect.position.x, rect.position.y, rect.end.x, rect.position.y + KERB_WIDTH
+			)
+		Kerb.SOUTH:
+			strip = CityKit.rect_from_bounds(
+				rect.position.x, rect.end.y - KERB_WIDTH, rect.end.x, rect.end.y
+			)
+		Kerb.WEST:
+			strip = CityKit.rect_from_bounds(
+				rect.position.x, rect.position.y, rect.position.x + KERB_WIDTH, rect.end.y
+			)
+		Kerb.EAST:
+			strip = CityKit.rect_from_bounds(
+				rect.end.x - KERB_WIDTH, rect.position.y, rect.end.x, rect.end.y
+			)
+	CityKit.add_slab(
+		_geometry,
+		"Kerb%d" % _sidewalk_index,
+		strip,
+		0.0,
+		CURB_HEIGHT + KERB_LIFT,
+		_mat("kerb"),
+		false
+	)
 
 
 ## A low wall marking the edge of the playable district. New districts will
@@ -466,24 +542,28 @@ func _building_table() -> Array:
 	# Heights are kept at or below the camera's eye level (~18m) so the elevated
 	# view looks down onto roofs instead of being walled in by facades. The one
 	# taller landmark sits at the far end of the district.
+	# Roof style is the fifth column, and it is what decides whether a building
+	# reads as a block or as a place: a flat parapet for the offices and the
+	# apartment slabs, a pitched roof for everything low enough that you look
+	# down onto it. Sixth column is the roof material.
 	return [
 		# North-west block
-		["LarkspurApartments", [-70.0, -41.0, -50.0, -13.0], 11.0, "brick_a"],
-		["HarbourRowMarket", [-46.0, -27.0, -30.0, -13.0], 5.5, "teal"],
-		["WashHouse", [-46.0, -41.0, -30.0, -31.0], 8.0, "brick_b"],
-		["NorthwestOffices", [-26.0, -41.0, -13.0, -13.0], 13.0, "concrete_a"],
+		["LarkspurApartments", [-70.0, -41.0, -50.0, -13.0], 11.0, "brick_a", "flat", "roof"],
+		["HarbourRowMarket", [-46.0, -27.0, -30.0, -13.0], 5.5, "teal", "hip", "shingle"],
+		["WashHouse", [-46.0, -41.0, -30.0, -31.0], 8.0, "brick_b", "hip", "slate"],
+		["NorthwestOffices", [-26.0, -41.0, -13.0, -13.0], 13.0, "concrete_a", "flat", "roof"],
 		# North-east block
-		["TheGalleyDiner", [13.0, -41.0, 28.0, -27.0], 6.5, "sand"],
-		["EastsideOffices", [13.0, -23.0, 28.0, -13.0], 10.0, "concrete_b"],
-		["MeridianTower", [32.0, -41.0, 52.0, -13.0], 20.0, "navy"],
-		["QuaysideRetail", [56.0, -41.0, 72.0, -13.0], 7.5, "brick_b"],
+		["TheGalleyDiner", [13.0, -41.0, 28.0, -27.0], 6.5, "sand", "hip", "shingle"],
+		["EastsideOffices", [13.0, -23.0, 28.0, -13.0], 10.0, "concrete_b", "flat", "roof"],
+		["MeridianTower", [32.0, -41.0, 52.0, -13.0], 20.0, "navy", "flat", "roof"],
+		["QuaysideRetail", [56.0, -41.0, 72.0, -13.0], 7.5, "brick_b", "hip", "slate"],
 		# South-west block
-		["PierpointWarehouse", [-72.0, 15.0, -44.0, 45.0], 10.0, "concrete_a"],
+		["PierpointWarehouse", [-72.0, 15.0, -44.0, 45.0], 10.0, "concrete_a", "ridge", "roof"],
 		# South-east block
-		["PrecinctHouse", [13.0, 15.0, 36.0, 38.0], 8.5, "concrete_b"],
-		["SoutheastResidences", [42.0, 15.0, 70.0, 44.0], 12.0, "brick_a"],
+		["PrecinctHouse", [13.0, 15.0, 36.0, 38.0], 8.5, "concrete_b", "hip", "slate"],
+		["SoutheastResidences", [42.0, 15.0, 70.0, 44.0], 12.0, "brick_a", "flat", "roof"],
 		# North strip
-		["CivicHall", [-40.0, -80.0, -10.0, -63.0], 11.0, "sand"],
+		["CivicHall", [-40.0, -80.0, -10.0, -63.0], 11.0, "sand", "hip", "slate"],
 	]
 
 
@@ -495,11 +575,17 @@ func _build_buildings() -> void:
 		var height: float = entry[2]
 		var material: StandardMaterial3D = _mat(entry[3])
 		var rect := CityKit.rect_from_bounds(bounds[0], bounds[1], bounds[2], bounds[3])
-		_add_building(container, node_name, rect, height, material)
+		_add_building(container, node_name, rect, height, material, entry[4], _mat(entry[5]))
 
 
 func _add_building(
-	parent: Node3D, node_name: String, rect: Rect2, height: float, material: StandardMaterial3D
+	parent: Node3D,
+	node_name: String,
+	rect: Rect2,
+	height: float,
+	material: StandardMaterial3D,
+	roof_style: String,
+	roof_material: StandardMaterial3D
 ) -> void:
 	var holder := Node3D.new()
 	holder.name = node_name
@@ -511,9 +597,15 @@ func _add_building(
 	var plinth := rect.grow(0.18)
 	CityKit.add_slab(holder, "Plinth", plinth, 0.0, 3.2, _mat("plinth"))
 
-	# Parapet cap. Its top face is the roof the player looks down on.
-	CityKit.add_slab(holder, "Parapet", rect.grow(0.35), height, 0.7, _mat("roof"))
-	_add_rooftop_clutter(holder, node_name, rect, height + 0.7)
+	var top := height
+	if roof_style == "flat":
+		# Parapet cap. Its top face is the roof the player looks down on.
+		CityKit.add_slab(holder, "Parapet", rect.grow(0.35), height, 0.7, _mat("roof"))
+		_add_rooftop_clutter(holder, node_name, rect, height + 0.7)
+		_add_facade_relief(holder, rect, height, material)
+		top = height + 0.7
+	else:
+		top = _add_pitched_roof(holder, node_name, rect, height, roof_style, roof_material)
 
 	# Lit window bands, so the skyline still reads after dark. Cheap: one thin
 	# box per floor band rather than per window.
@@ -532,6 +624,113 @@ func _add_building(
 		)
 		band_y += 3.6
 		bands += 1
+
+
+## A cornice and vertical bays on the long faces of a flat-roofed block.
+##
+## The pitched roofs took care of the low buildings, but a twenty-metre office
+## slab is still a box, and from an elevated camera a box is given away by having
+## exactly one silhouette. Splitting the facade into bays gives the sun something
+## to cast small shadows down, which is what a facade actually looks like.
+func _add_facade_relief(
+	parent: Node3D, rect: Rect2, height: float, material: StandardMaterial3D
+) -> void:
+	# Cornice: a band under the parapet, proud of the wall.
+	CityKit.add_slab(
+		parent, "Cornice", rect.grow(0.42), height - 0.75, 0.55, _mat("plinth"), false
+	)
+
+	var along_x := rect.size.x >= rect.size.y
+	var run: float = rect.size.x if along_x else rect.size.y
+	var bays := clampi(int(run / 6.5), 2, 7)
+	var base := 3.2
+	var bay_height := height - 0.9 - base
+	if bay_height < 1.5:
+		return
+
+	for face in [-1.0, 1.0]:
+		var fixed: float = (
+			(rect.position.y if face < 0.0 else rect.end.y) if along_x
+			else (rect.position.x if face < 0.0 else rect.end.x)
+		)
+		for i in bays + 1:
+			var travel: float = (
+				(rect.position.x if along_x else rect.position.y)
+				+ run * float(i) / float(bays)
+			)
+			# Pull the end pilasters in so they sit on the wall, not past its corner.
+			travel = clampf(
+				travel,
+				(rect.position.x if along_x else rect.position.y) + 0.5,
+				(rect.end.x if along_x else rect.end.y) - 0.5
+			)
+			var centre := (
+				Vector3(travel, base + bay_height * 0.5, fixed) if along_x
+				else Vector3(fixed, base + bay_height * 0.5, travel)
+			)
+			var size := (
+				Vector3(0.7, bay_height, 0.34) if along_x else Vector3(0.34, bay_height, 0.7)
+			)
+			CityKit.add_box(
+				parent, "Pilaster%s%d" % ["N" if face < 0.0 else "S", i],
+				centre, size, material, false, false
+			)
+
+
+## A pitched roof with eaves, a fascia band under them and a chimney. Returns the
+## ridge height.
+##
+## "hip" is a proper hipped roof, which is what a house or a civic building has.
+## "ridge" is a long shallow one, for the warehouse — the ridge runs almost the
+## full length, so it reads as a shed rather than a cottage.
+func _add_pitched_roof(
+	parent: Node3D,
+	node_name: String,
+	rect: Rect2,
+	base_y: float,
+	style: String,
+	material: StandardMaterial3D
+) -> float:
+	var short_side := minf(rect.size.x, rect.size.y)
+	# A shallow roof reads as a tilted lid; the pitch has to be steep enough to
+	# throw a shadow down one slope before it reads as a roof at all.
+	var pitch := clampf(short_side * (0.14 if style == "ridge" else 0.34), 2.2, 6.5)
+	var overhang := 0.6
+
+	# Fascia: a thin band at the eaves line. Without it the slopes appear to
+	# grow straight out of the wall, which is the one thing that gives a
+	# primitive roof away from above.
+	CityKit.add_slab(
+		parent, "Fascia", rect.grow(overhang), base_y - 0.26, 0.3, _mat("roof")
+	)
+	CityKit.add_roof(
+		parent,
+		"Roof",
+		rect,
+		base_y,
+		pitch,
+		material,
+		0.82 if style == "ridge" else 0.4,
+		overhang
+	)
+
+	# One chimney, on the ridge, placed from the building's name so it lands in
+	# the same spot every run.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(node_name)
+	var along_x := rect.size.x >= rect.size.y
+	var centre := rect.position + rect.size * 0.5
+	var travel := (rect.size.x if along_x else rect.size.y) * 0.28
+	var offset := rng.randf_range(-travel, travel)
+	var stack := Vector3(
+		centre.x + (offset if along_x else 0.0),
+		base_y + pitch * 0.72,
+		centre.y + (0.0 if along_x else offset)
+	)
+	CityKit.add_box(
+		parent, "Chimney", stack, Vector3(1.1, pitch * 1.5, 1.1), _mat("brick_b"), false
+	)
+	return base_y + pitch
 
 
 ## Plant rooms, vents and a stair head on the roof. From an elevated top-down
@@ -624,9 +823,30 @@ func _build_park() -> void:
 		Vector2(-34.0, 20.0), Vector2(-18.0, 20.0), Vector2(-34.0, 30.0),
 		Vector2(-18.0, 30.0), Vector2(-34.0, 46.0), Vector2(-18.0, 46.0),
 		Vector2(-34.0, 55.0), Vector2(-18.0, 55.0),
+		Vector2(-30.5, 17.5), Vector2(-21.0, 26.0), Vector2(-35.5, 40.0),
+		Vector2(-16.0, 41.0), Vector2(-31.0, 58.5), Vector2(-20.5, 57.5),
+		Vector2(-35.0, 51.0), Vector2(-16.5, 33.0),
 	]
 	for i in tree_spots.size():
 		_add_tree(container, "Tree%d" % i, tree_spots[i], 1.0 + float(i % 3) * 0.14)
+
+	var bush_rng := RandomNumberGenerator.new()
+	bush_rng.seed = hash("HarbourRowParkPlanting")
+	var bush_spots := [
+		Vector2(-36.0, 22.5), Vector2(-15.5, 24.0), Vector2(-36.5, 33.0),
+		Vector2(-15.0, 48.0), Vector2(-33.0, 44.0), Vector2(-19.0, 53.0),
+		Vector2(-28.0, 19.0), Vector2(-22.5, 58.0),
+	]
+	for i in bush_spots.size():
+		CityKit.add_hedge(
+			container,
+			"ParkBush%d" % i,
+			bush_spots[i],
+			bush_spots[i] + Vector2(bush_rng.randf_range(-2.2, 2.2), bush_rng.randf_range(-2.2, 2.2)),
+			bush_rng.randf_range(0.8, 1.4),
+			_mat("hedge"),
+			bush_rng
+		)
 
 	_add_fountain(container, Vector2(-25.5, 37.5))
 
@@ -639,26 +859,26 @@ func _build_park() -> void:
 		_add_bench(container, "Bench%d" % i, bench_spots[i][0], bench_spots[i][1])
 
 
-func _add_tree(parent: Node3D, node_name: String, spot: Vector2, scale_factor: float) -> void:
-	var holder := Node3D.new()
-	holder.name = node_name
-	parent.add_child(holder)
-	var trunk_height := 3.2 * scale_factor
-	CityKit.add_cylinder(
-		holder,
-		"Trunk",
-		Vector3(spot.x, trunk_height * 0.5, spot.y),
-		0.28 * scale_factor,
-		trunk_height,
-		_mat("trunk")
-	)
-	var canopy := 4.0 * scale_factor
-	CityKit.add_sphere(
-		holder,
-		"Canopy",
-		Vector3(spot.x, trunk_height + canopy * 0.32, spot.y),
-		Vector3(canopy, canopy * 0.9, canopy),
-		_mat("foliage")
+## Seeded per tree from its name, so the crooked one is crooked in the same way
+## on every run and in every screenshot.
+func _add_tree(
+	parent: Node3D,
+	node_name: String,
+	spot: Vector2,
+	scale_factor: float,
+	solid_trunk: bool = true
+) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(node_name)
+	CityKit.add_tree(
+		parent,
+		node_name,
+		Vector3(spot.x, 0.0, spot.y),
+		scale_factor * rng.randf_range(0.9, 1.25),
+		_mat("trunk"),
+		_foliage,
+		rng,
+		solid_trunk
 	)
 
 
@@ -984,6 +1204,298 @@ func _add_door_panel(node_name: String, interaction_point: Vector3, facing: Vect
 	CityKit.add_box(
 		_geometry, "DoorPanel_%s" % node_name, panel_center, size, _mat("door"), false
 	)
+
+
+# --- Streetscape ---------------------------------------------------------
+
+## The small stuff: hedges, overhead lines, bins, hydrants, road repairs and
+## driveways.
+##
+## Nothing here is solid. Every one of these is within a metre or so of the
+## pedestrian walking line, and a crowd wedged against a litter bin is a bug the
+## player can see — whereas a bin they clip through is something nobody notices
+## from this camera. The street lights that already exist are the exception,
+## because they were placed before this rule and are far enough back.
+func _build_streetscape() -> void:
+	var container := _make_container("Streetscape")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("HarbourRowStreetscape")
+
+	_add_park_hedges(container, rng)
+	_add_street_trees(container)
+	_add_overhead_lines(container)
+	_add_street_clutter(container, rng)
+	_add_road_repairs(container, rng)
+	_add_driveways(container)
+
+
+## Hedge along the park's two street frontages, broken at the gates so the
+## entrances the navigation graph uses are visibly entrances.
+func _add_park_hedges(parent: Node3D, rng: RandomNumberGenerator) -> void:
+	var gate := 3.0
+	# North frontage, onto Main Street's pavement.
+	CityKit.add_hedge(
+		parent, "ParkHedgeNW",
+		Vector2(PARK_BOUNDS.position.x, PARK_BOUNDS.position.y),
+		Vector2(PARK_PATH_X - gate, PARK_BOUNDS.position.y),
+		1.1, _mat("hedge"), rng
+	)
+	CityKit.add_hedge(
+		parent, "ParkHedgeNE",
+		Vector2(PARK_PATH_X + gate, PARK_BOUNDS.position.y),
+		Vector2(PARK_BOUNDS.end.x, PARK_BOUNDS.position.y),
+		1.1, _mat("hedge"), rng
+	)
+	# East frontage, onto the boulevard.
+	CityKit.add_hedge(
+		parent, "ParkHedgeEN",
+		Vector2(PARK_BOUNDS.end.x, PARK_BOUNDS.position.y + 1.5),
+		Vector2(PARK_BOUNDS.end.x, PARK_PATH_Z - gate),
+		1.1, _mat("hedge"), rng
+	)
+	CityKit.add_hedge(
+		parent, "ParkHedgeES",
+		Vector2(PARK_BOUNDS.end.x, PARK_PATH_Z + gate),
+		Vector2(PARK_BOUNDS.end.x, PARK_BOUNDS.end.y),
+		1.1, _mat("hedge"), rng
+	)
+
+
+## Trees along the streets, standing on the lot strip just past the pavement so
+## their canopies overhang it without their trunks ever standing in the walking
+## line. Spots are listed rather than generated: the strip is interrupted by
+## doorways, parking bays and the warehouse gate, and a rule that avoided all of
+## them would be longer than the list.
+func _add_street_trees(parent: Node3D) -> void:
+	# Hard against the pavement edge. The strip further back is the frontage the
+	# player walks along to reach the doorways — planting there put a tree across
+	# the route to the market, which is exactly the kind of thing that only shows
+	# up when something walks it.
+	var verge := ROAD_HALF + WALK_WIDTH + 0.9
+	var spots := [
+		# Main Street, north side.
+		Vector2(-66.0, MAIN_ST_Z - verge), Vector2(-54.0, MAIN_ST_Z - verge),
+		Vector2(-34.0, MAIN_ST_Z - verge), Vector2(20.0, MAIN_ST_Z - verge),
+		Vector2(34.0, MAIN_ST_Z - verge), Vector2(48.0, MAIN_ST_Z - verge),
+		Vector2(62.0, MAIN_ST_Z - verge),
+		# Main Street, south side.
+		Vector2(-20.0, MAIN_ST_Z + verge), Vector2(-9.0, MAIN_ST_Z + verge),
+		Vector2(40.0, MAIN_ST_Z + verge), Vector2(52.0, MAIN_ST_Z + verge),
+		Vector2(66.0, MAIN_ST_Z + verge),
+		# North Avenue, north side only: the buildings come right up to the
+		# pavement on the other one.
+		Vector2(-60.0, NORTH_AVE_Z - verge), Vector2(-44.0, NORTH_AVE_Z - verge),
+		Vector2(-6.0, NORTH_AVE_Z - verge), Vector2(30.0, NORTH_AVE_Z - verge),
+		Vector2(46.0, NORTH_AVE_Z - verge), Vector2(62.0, NORTH_AVE_Z - verge),
+		# Center Boulevard, both sides.
+		Vector2(CENTER_BLVD_X - verge, -32.0), Vector2(CENTER_BLVD_X - verge, -20.0),
+		Vector2(CENTER_BLVD_X - verge, 24.0), Vector2(CENTER_BLVD_X - verge, 46.0),
+		Vector2(CENTER_BLVD_X - verge, 64.0),
+		Vector2(CENTER_BLVD_X + verge, -30.0), Vector2(CENTER_BLVD_X + verge, -18.0),
+		Vector2(CENTER_BLVD_X + verge, 44.0), Vector2(CENTER_BLVD_X + verge, 62.0),
+	]
+	# A square of lawn under each one. Trees standing on bare concrete was the
+	# last thing that read as "props placed on a plan" rather than as planting;
+	# a patch per tree rather than a continuous verge keeps it clear of the
+	# doorways and parking bays that interrupt the strip.
+	var patch := 1.5
+	for i in spots.size():
+		var spot: Vector2 = spots[i]
+		CityKit.add_slab(
+			parent,
+			"TreeLawn%d" % i,
+			CityKit.rect_from_bounds(spot.x - patch, spot.y - patch, spot.x + patch, spot.y + patch),
+			GRASS_BASE,
+			GRASS_THICKNESS,
+			_mat("grass"),
+			false,
+			false
+		)
+		_add_tree(parent, "StreetTree%d" % i, spot, 0.9, false)
+
+
+## Timber poles and strung cable down both long streets, set back onto the lots
+## so they are clear of the pavement entirely.
+func _add_overhead_lines(parent: Node3D) -> void:
+	var pole_height := 8.5
+	# Behind the tree line, or the canopies swallow the poles.
+	var setback := ROAD_HALF + WALK_WIDTH + 2.4
+	var spacing := 32.0
+	var reach := EXTENT - 8.0
+	var count := int(reach * 2.0 / spacing)
+	var runs := [
+		# [fixed coordinate, does the run go along X?]
+		[MAIN_ST_Z + setback, true],
+		[NORTH_AVE_Z - setback, true],
+		[CENTER_BLVD_X + setback, false],
+	]
+	for run_index in runs.size():
+		var fixed: float = runs[run_index][0]
+		var along_x: bool = runs[run_index][1]
+		var previous := Vector3.ZERO
+		var have_previous := false
+		for i in count + 1:
+			var travel := -reach + float(i) * spacing
+			var base := (
+				Vector3(travel, 0.0, fixed) if along_x else Vector3(fixed, 0.0, travel)
+			)
+			# Skip the junction mouths, where a pole would stand in the crossing.
+			if absf(base.x) < ROAD_HALF + WALK_WIDTH + 2.0 and along_x:
+				have_previous = false
+				continue
+			if not along_x and (
+				absf(base.z - MAIN_ST_Z) < ROAD_HALF + WALK_WIDTH + 2.0
+				or absf(base.z - NORTH_AVE_Z) < ROAD_HALF + WALK_WIDTH + 2.0
+			):
+				have_previous = false
+				continue
+
+			var holder := Node3D.new()
+			holder.name = "Pole%d_%d" % [run_index, i]
+			holder.position = base
+			parent.add_child(holder)
+			CityKit.add_cylinder(
+				holder, "Post", Vector3(0.0, pole_height * 0.5, 0.0),
+				0.16, pole_height, _mat("wood"), false
+			)
+			CityKit.add_box(
+				holder, "CrossArm", Vector3(0.0, pole_height - 0.55, 0.0),
+				Vector3(2.4 if along_x else 0.18, 0.14, 0.18 if along_x else 2.4),
+				_mat("wood"), false, false
+			)
+
+			var top := base + Vector3(0.0, pole_height - 0.6, 0.0)
+			if have_previous:
+				CityKit.add_wire(
+					parent, "Wire%d_%d" % [run_index, i], previous, top,
+					1.1, 0.05, _mat("metal")
+				)
+			previous = top
+			have_previous = true
+
+
+## Bins, hydrants and post boxes along the kerb line, in the gap between the
+## kerb and the walking line.
+func _add_street_clutter(parent: Node3D, rng: RandomNumberGenerator) -> void:
+	var band := ROAD_HALF + 1.05
+	var spots: Array = []
+	for road_z in [MAIN_ST_Z, NORTH_AVE_Z]:
+		for x in [-64.0, -37.0, -19.0, 21.0, 44.0, 63.0]:
+			spots.append(Vector3(x, 0.0, road_z - band))
+			spots.append(Vector3(x + 9.0, 0.0, road_z + band))
+	for z in [-70.0, -33.0, 22.0, 52.0, 74.0]:
+		spots.append(Vector3(CENTER_BLVD_X - band, 0.0, z))
+		spots.append(Vector3(CENTER_BLVD_X + band, 0.0, z + 7.0))
+
+	for i in spots.size():
+		var spot: Vector3 = spots[i]
+		if absf(spot.x) > EXTENT - 4.0 or absf(spot.z) > EXTENT - 4.0:
+			continue
+		match i % 3:
+			0:
+				_add_litter_bin(parent, "Bin%d" % i, spot, rng)
+			1:
+				_add_hydrant(parent, "Hydrant%d" % i, spot)
+			_:
+				_add_post_box(parent, "PostBox%d" % i, spot)
+
+
+func _add_litter_bin(
+	parent: Node3D, node_name: String, spot: Vector3, rng: RandomNumberGenerator
+) -> void:
+	var holder := Node3D.new()
+	holder.name = node_name
+	holder.position = spot + Vector3(0.0, CURB_HEIGHT, 0.0)
+	holder.rotation.y = rng.randf_range(0.0, TAU)
+	parent.add_child(holder)
+	CityKit.add_cylinder(
+		holder, "Body", Vector3(0.0, 0.42, 0.0), 0.3, 0.84, _mat("metal"), false
+	)
+	CityKit.add_cylinder(
+		holder, "Lid", Vector3(0.0, 0.9, 0.0), 0.33, 0.1, _mat("plinth"), false
+	)
+
+
+func _add_hydrant(parent: Node3D, node_name: String, spot: Vector3) -> void:
+	var holder := Node3D.new()
+	holder.name = node_name
+	holder.position = spot + Vector3(0.0, CURB_HEIGHT, 0.0)
+	parent.add_child(holder)
+	var paint := CityKit.make_material(Color(0.671, 0.161, 0.129), 0.6)
+	CityKit.add_cylinder(holder, "Barrel", Vector3(0.0, 0.34, 0.0), 0.14, 0.68, paint, false)
+	CityKit.add_sphere(holder, "Cap", Vector3(0.0, 0.72, 0.0), Vector3(0.3, 0.22, 0.3), paint)
+	CityKit.add_box(
+		holder, "Arms", Vector3(0.0, 0.5, 0.0), Vector3(0.52, 0.11, 0.11), paint, false, false
+	)
+
+
+func _add_post_box(parent: Node3D, node_name: String, spot: Vector3) -> void:
+	var holder := Node3D.new()
+	holder.name = node_name
+	holder.position = spot + Vector3(0.0, CURB_HEIGHT, 0.0)
+	parent.add_child(holder)
+	var paint := CityKit.make_material(Color(0.176, 0.267, 0.408), 0.55)
+	CityKit.add_box(holder, "Box", Vector3(0.0, 0.72, 0.0), Vector3(0.5, 0.62, 0.4), paint, false)
+	CityKit.add_cylinder(holder, "Leg", Vector3(0.0, 0.2, 0.0), 0.08, 0.4, _mat("metal"), false)
+
+
+## Patched-over repairs in the carriageway. A road with no history on it is the
+## last thing that reads as painted-on from above.
+func _add_road_repairs(parent: Node3D, rng: RandomNumberGenerator) -> void:
+	var patch := CityKit.make_surface(
+		Color(0.180, 0.180, 0.192), 0.82, 2.0, 1.0, 0.2, 0.0, 40
+	)
+	var lanes := [
+		Vector3(-52.0, 0.0, MAIN_ST_Z - 3.0), Vector3(-18.0, 0.0, MAIN_ST_Z + 3.4),
+		Vector3(34.0, 0.0, MAIN_ST_Z - 2.6), Vector3(58.0, 0.0, MAIN_ST_Z + 2.8),
+		Vector3(-29.0, 0.0, NORTH_AVE_Z + 3.2), Vector3(41.0, 0.0, NORTH_AVE_Z - 3.0),
+		Vector3(CENTER_BLVD_X - 2.8, 0.0, 27.0), Vector3(CENTER_BLVD_X + 3.0, 0.0, -68.0),
+		Vector3(CENTER_BLVD_X - 3.2, 0.0, 61.0),
+	]
+	for i in lanes.size():
+		var spot: Vector3 = lanes[i]
+		var size := Vector2(rng.randf_range(2.2, 4.6), rng.randf_range(1.6, 3.2))
+		CityKit.add_slab(
+			parent,
+			"RoadPatch%d" % i,
+			Rect2(spot.x - size.x * 0.5, spot.z - size.y * 0.5, size.x, size.y),
+			MARKING_BASE - 0.008,
+			0.01,
+			patch,
+			false,
+			false
+		)
+
+
+## Aprons where a vehicle crossing leaves the carriageway. They are what stops
+## the parking bays and the yard gate looking like cars simply drove over a kerb.
+func _add_driveways(parent: Node3D) -> void:
+	var apron := ROAD_HALF + WALK_WIDTH
+	var crossings := [
+		# [centre along the street, road coordinate, along X?, width]
+		[15.0, MAIN_ST_Z + apron, true, 7.0],     # civic lot / precinct side
+		[-58.0, MAIN_ST_Z + apron, true, 9.0],    # warehouse yard gate
+		[-36.0, MAIN_ST_Z - apron, true, 6.0],    # market service door
+		[15.0, NORTH_AVE_Z - apron, true, 8.0],   # car park entrance
+		[-30.0, NORTH_AVE_Z + apron, true, 6.0],
+	]
+	for i in crossings.size():
+		var entry: Array = crossings[i]
+		var centre: float = entry[0]
+		var edge: float = entry[1]
+		var width: float = entry[3]
+		var near := minf(edge, edge - signf(edge) * WALK_WIDTH)
+		var far := maxf(edge, edge - signf(edge) * WALK_WIDTH)
+		CityKit.add_slab(
+			parent,
+			"Driveway%d" % i,
+			CityKit.rect_from_bounds(centre - width * 0.5, near, centre + width * 0.5, far),
+			CURB_HEIGHT + KERB_LIFT + 0.001,
+			0.012,
+			_mat("gravel"),
+			false,
+			false
+		)
 
 
 # --- Navigation ----------------------------------------------------------

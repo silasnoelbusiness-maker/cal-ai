@@ -21,7 +21,7 @@ signal daylight_changed(amount: float)
 @export_group("Sky")
 @export var day_sky_energy: float = 1.0
 @export var night_sky_energy: float = 0.16
-@export var day_ambient_energy: float = 0.5
+@export var day_ambient_energy: float = 0.35
 @export var night_ambient_energy: float = 0.3
 @export_group("Street Lights")
 ## Street lights switch on once the sun drops below this height (-1..1).
