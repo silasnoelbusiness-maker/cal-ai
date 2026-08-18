@@ -4,8 +4,9 @@ An original 3D open-world life & crime simulator, viewed from an elevated
 top-down camera. This directory holds a self-contained **Godot 4.3** project; it
 is unrelated to the Next.js app in the repository root.
 
-**V0.1 phases A–H are complete** (two of them were called G — the art pass and
-the crime expansion; the naming is kept here as it happened). The full life/economy loop is playable end to
+**V0.1 phases A–I are complete** (two of them were called G — the art pass and
+the crime expansion; the naming is kept here as it happened, so the business
+phase is the ninth milestone and the eighth letter). The full life/economy loop is playable end to
 end — wake up in your flat, sleep off the night, walk to the warehouse for a
 paid shift, buy food at the convenience store, eat it, head home — and the city
 around it now moves: civilian traffic on both streets, signals at the two
@@ -79,7 +80,9 @@ scene is `res://main.tscn`.
 | `R` | Reset the camera orientation |
 | `F` | Enter / exit a vehicle · carjack an occupied one |
 | `G` | Rob the till you are stood at |
-| Left mouse | Attack with whatever is in your hand |
+| `B` | Open the business dashboard |
+| Left mouse | Attack with whatever is in your hand · place equipment |
+| `R` | Rotate the equipment being placed |
 
 Driving:
 
@@ -102,9 +105,47 @@ Development keys, to be removed before release:
 | `F9` | Clear the wanted level |
 | `F3` | Show / hide the crime overlay (points, response, statistics) |
 | `F4` | Put a steel pipe in the bag, for testing melee |
+| `F10` | Show / hide the business overlay |
+| `1`–`0` | Business debug commands, only while that overlay is up |
 
 `F9` was quick-load in Phase D; it is now clear-wanted, and quick-load moved to
 `F12`.
+
+## Running a business
+
+Two vacant retail units are advertised on Main Street and at Quayside. Standing
+at the door of one offers the letting details; signing takes the deposit and the
+first rent out of your own pocket and hands you the keys.
+
+    save up  ->  rent a unit  ->  found a business  ->  fund it  ->  fit it out
+    ->  order stock  ->  fill the shelves  ->  set prices  ->  open  ->  serve
+    ->  hire a cashier  ->  walk away and it keeps trading
+
+The business account is separate from your wallet, and nothing moves between
+them except by your own deposit or withdrawal. A shop cannot open without a
+till, a shelf and something on it. Customers walk in off the street, browse the
+shelf holding what they came for, queue at the counter and pay — and only if
+somebody is on the till, which is what makes hiring worth the wages.
+
+| Startup cost | |
+| --- | --- |
+| Deposit and first rent (Main Street) | $1,150 |
+| Checkout counter | $300 |
+| Two shelves | $240 |
+| Storage rack | $150 |
+| Opening stock | $150–$400 |
+| **Total** | **about $2,000–$2,250** |
+
+Rent falls due every seven days and comes out of the business account. A shop
+that is priced sensibly, kept in stock and staffed clears roughly $150–$300 a
+day against the warehouse job's $120 a shift — better, but only after the
+capital and only if it is managed. Charge double and nobody buys; run out of
+stock and the visits become lost sales; overstaff a quiet shop and the wages
+eat the margin. None of that is prevented.
+
+Everything is one screen, on `B`: an overview with the cash on both sides of the
+boundary, the stock and the supplier, the prices, the equipment (buying, placing,
+moving), the staff and their shifts, the day's finances, and the opening hours.
 
 ## The district
 
@@ -279,11 +320,25 @@ getting up. Three crimes stack to three stars, five units answer, and the
 arrest at the end costs $500. Afterwards the shop still serves them, which is
 the check that the city carries on.
 
+The business phase is tested as one continuous story, because that is what it
+is: the unit rented in the first test is the shop staffed in the ninth. The
+player walks up to a vacant unit, signs for it, founds a business, moves capital
+in, buys a counter and two shelves and puts them down — with the walls, the
+doorway and the other equipment refusing the bad spots — orders stock at
+wholesale, fills the shelves to their capacity and no further, sets prices,
+opens, and serves a customer who walks in, browses, queues and pays. Then the
+shelves are emptied to prove a lost sale is recorded rather than a phantom sale,
+a cashier is hired and reaches the register, the player leaves and the shop
+keeps trading, the staff are dismissed and it stops trading again, the books are
+checked for double counting, rent is charged and missed, a crime and a police
+chase happen around it, and the whole thing goes through a save file and comes
+back.
+
 ```sh
 godot --headless --path game res://tests/smoke_test.tscn
 ```
 
-It exits non-zero if any check fails. As of the crime expansion it runs 431
+It exits non-zero if any check fails. As of the business phase it runs 610
 checks.
 
 A screenshot tool renders the game to a PNG without a desktop, for eyeballing
@@ -302,13 +357,25 @@ Args after `++` are `key=value` pairs, all optional: `out`, `hour`, `scenario`
 `traffic_crash`, `pursuit_traffic`, `police_lights`, `escaping_traffic`,
 `night_traffic`, `store_interior`, `shoplifting`, `robbery`, `trespassing`,
 `carjacking`, `carjack_victim`, `melee`, `weapon`, `incapacitated`,
-`three_stars`, `police_response`, `fear_crowd`, `crime_overlay`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
+`three_stars`, `police_response`, `fear_crowd`, `crime_overlay`,
+`vacant_property`, `property_rental`, `empty_store`, `business_creation`,
+`equipment_buy`, `equipment_place`, `business_storage`, `stocked_shelf`,
+`pricing_screen`, `store_open`, `customers_browsing`, `checkout_queue`,
+`player_register`, `employee_cashier`, `business_dashboard`, `daily_report`,
+`player_away`, `driving_business`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
 rather than faking their results. It runs under the Compatibility renderer, so
 lighting is close to but not identical to the Forward+ game.
 
 ## What is next
 
-Nothing is started. The largest gap the crime expansion left is interiors: the
+Nothing is started. The business phase left three obvious threads: a second
+business type (the architecture takes one as a `BusinessTypeData` plus a stock
+list, and nothing in the customer, employee or dashboard code knows what a
+convenience store is), a stocker role for employees to refill shelves on their
+own, and eviction for a lease that falls far enough into arrears — the arrears
+are already counted, nothing acts on them.
+
+The largest gap the crime expansion left is interiors: the
 flat and the convenience store are the only two you can walk into, and the
 diner, the small retail unit, the precinct lobby and the warehouse floor are
 still doors with prompts on them. The store interior is built from five reusable

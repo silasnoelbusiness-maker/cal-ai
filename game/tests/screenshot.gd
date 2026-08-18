@@ -11,7 +11,12 @@ extends Node
 ##   scenario  street (default), apartment, shop, store_interior, shoplifting,
 ##             robbery, trespassing, carjacking, carjack_victim, melee, weapon,
 ##             incapacitated, three_stars, police_response, fear_crowd,
-##             crime_overlay, inventory, warehouse, car,
+##             crime_overlay, vacant_property, property_rental, empty_store,
+##             business_creation, equipment_buy, equipment_place,
+##             business_storage, stocked_shelf, pricing_screen, store_open,
+##             customers_browsing, checkout_queue, player_register,
+##             employee_cashier, business_dashboard, daily_report, player_away,
+##             driving_business, inventory, warehouse, car,
 ##             driving, theft, crowd, unseen_theft, witness, wanted, pursuit,
 ##             escaping, cleared, busted, night_chase, traffic, vehicle_types,
 ##             red_light, green_light, crossing, pedestrian_reacts,
@@ -292,6 +297,37 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"pursuit_traffic", "police_lights", "escaping_traffic", "night_traffic":
 			await _crime_scenario(main, scenario, false)
 
+		"vacant_property", "property_rental":
+			# With enough in the bank to actually sign, so the shot shows the
+			# offer rather than the shortfall warning.
+			EconomyManager.restore(4000)
+			var door := _property_door()
+			player.global_position = Vector3(-20.0, 0.5, -10.2)
+			await _wait(20)
+			if scenario == "property_rental":
+				door.interact(player)
+				await _wait(10)
+
+		"empty_store", "business_creation":
+			EconomyManager.restore(6000)
+			var door := _property_door()
+			PropertyManager.lease(door)
+			await _wait(6)
+			if scenario == "business_creation":
+				player.global_position = Vector3(-20.0, 0.5, -10.2)
+				await _wait(16)
+				door.interact(player)
+				await _wait(10)
+			else:
+				door.interact(player)
+				await _wait(20)
+
+		"equipment_buy", "equipment_place", "business_storage", "pricing_screen", \
+		"business_dashboard", "stocked_shelf", "store_open", "customers_browsing", \
+		"checkout_queue", "player_register", "employee_cashier", "daily_report", \
+		"player_away", "driving_business":
+			await _run_business_scenario(main, scenario)
+
 		"trespassing":
 			var store: ConvenienceStoreInterior = main.get_node("Interiors/ConvenienceStore")
 			(district.get_node("Interactables/MarketDoor") as Portal).interact(player)
@@ -515,6 +551,171 @@ func _occupied_car(main: Node, at: Vector3, yaw_degrees: float) -> Vehicle:
 	car.halt()
 	await _wait(6)
 	return car
+
+
+func _property_door() -> CommercialProperty:
+	return PropertyManager.by_id(&"unit_main_18")
+
+
+## Builds a player-owned shop up to the stage a shot needs, driving the real
+## systems rather than faking a picture of them: the lease is signed, the
+## equipment is bought and placed, the stock is ordered and shelved, and the
+## customers walk in on their own.
+func _run_business_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var door := _property_door()
+	EconomyManager.restore(8000)
+	PropertyManager.lease(door)
+	var business := BusinessManager.create_business("Silas Market", &"convenience_store", door)
+	BusinessManager.deposit_to_business(business, 4000)
+
+	# Inside, so the unit counts the player as present and the equipment exists.
+	door.interact(player)
+	await _wait(16)
+	var unit: RetailUnit = main.get_node("Interiors/MainStreetUnit")
+	var dashboard: Control = main.get_node("HUD/BusinessDashboard")
+
+	if scenario == "equipment_buy":
+		BusinessManager.buy_equipment(business, &"checkout_counter")
+		dashboard.open(business)
+		dashboard.show_tab(3)
+		await _wait(6)
+		return
+
+	var controller: PlacementController = main.get_node("PlacementController")
+	for id in [&"checkout_counter", &"retail_shelf", &"retail_shelf", &"storage_rack"]:
+		BusinessManager.buy_equipment(business, id)
+
+	if scenario == "equipment_place":
+		# Left mid-placement, so the shot is of the preview and its prompt.
+		player.global_position = unit.global_position + Vector3(0.0, 0.5, 3.4)
+		await _wait(10)
+		controller.begin(business, unit, &"retail_shelf")
+		await _wait(10)
+		return
+
+	controller.begin(business, unit, &"checkout_counter")
+	controller.place_at(Vector3(0.0, 0.0, 1.0), 180.0)
+	controller.begin(business, unit, &"retail_shelf")
+	controller.place_at(Vector3(-4.0, 0.0, 2.0), 90.0)
+	controller.begin(business, unit, &"retail_shelf")
+	controller.place_at(Vector3(4.0, 0.0, 2.0), 90.0)
+	controller.begin(business, unit, &"storage_rack")
+	controller.place_at(Vector3(0.0, 0.0, -4.0), 0.0)
+	await _wait(8)
+
+	BusinessManager.order_stock(business, &"bottled_water", 40)
+	BusinessManager.order_stock(business, &"soda_can", 40)
+	BusinessManager.order_stock(business, &"snack_bar", 20)
+
+	if scenario == "business_storage":
+		dashboard.open(business)
+		dashboard.show_tab(1)
+		await _wait(6)
+		return
+
+	var shelves := business.shelves()
+	business.stock_shelf(shelves[0].slot_id, &"bottled_water", 20)
+	business.stock_shelf(shelves[1].slot_id, &"soda_can", 20)
+	await _wait(8)
+
+	if scenario == "pricing_screen":
+		dashboard.open(business)
+		dashboard.show_tab(2)
+		await _wait(6)
+		return
+	if scenario == "stocked_shelf":
+		player.global_position = unit.global_position + Vector3(-2.4, 0.5, 2.0)
+		await _wait(10)
+		return
+
+	business.manual_override = BusinessInstance.Override.FORCE_OPEN
+	business.set_open(true)
+	await _wait(6)
+
+	if scenario == "store_open":
+		# Outside, looking at the sign over the door.
+		GameManager.teleport_player(
+			Transform3D(Basis(), unit.global_position + Vector3(0.0, 0.5, 11.0))
+		)
+		await _wait(16)
+		return
+
+	var spawner := unit.get_spawner()
+	var till := unit.first_checkout()
+
+	# Anything that wants trading figures needs somebody on the till: an
+	# unstaffed shop is all lost sales, which is correct and photographs badly.
+	if scenario in [
+		"employee_cashier", "player_away", "driving_business",
+		"business_dashboard", "daily_report",
+	]:
+		BusinessManager.refresh_candidates()
+		var worker: EmployeeData = BusinessManager.get_candidates()[0]
+		BusinessManager.hire(business, worker)
+		worker.shift_start_hour = 0
+		worker.shift_end_hour = 23
+
+		if scenario == "business_dashboard" or scenario == "daily_report":
+			for i in 5:
+				BusinessManager.simulate_hour_now(business, 12)
+			player.global_position = unit.global_position + Vector3(0.0, 0.5, 3.5)
+			await _wait(10)
+			dashboard.open(business)
+			dashboard.show_tab(5 if scenario == "daily_report" else 0)
+			await _wait(6)
+			return
+
+		player.global_position = unit.global_position + Vector3(0.0, 0.5, 3.5)
+		await _wait(10)
+		unit.call("_refresh_staff")
+		for i in 4:
+			spawner.spawn_customer_now()
+			await _wait(20)
+		await _wait(140)
+
+		if scenario == "employee_cashier":
+			return
+		# Out of the shop entirely, and the shop keeps trading.
+		BusinessManager.simulate_hour_now(business, 12)
+		if scenario == "driving_business":
+			var car := _find_vehicle(true)
+			GameManager.teleport_player(
+				Transform3D(Basis(), car.global_transform * Vector3(-2.1, 0.5, 0.4))
+			)
+			await _wait(10)
+			car.get_node("Door").interact(player)
+			await _wait(6)
+			Input.action_press("move_forward")
+			await _wait(90)
+			Input.action_release("move_forward")
+			return
+		GameManager.teleport_player(
+			Transform3D(Basis(), Vector3(-30.0, 0.5, 8.4))
+		)
+		await _wait(20)
+		return
+
+	# The customer shots. The queue shot deliberately leaves the till unmanned
+	# until the end: somebody serving is what stops a queue forming.
+	player.global_position = till.staff_point()
+	await _wait(10)
+	if scenario == "customers_browsing":
+		spawner.toggle_player_at_register(till)
+		for i in 3:
+			spawner.spawn_customer_now()
+			await _wait(45)
+		await _wait(120)
+		return
+
+	for i in 4:
+		spawner.spawn_customer_now()
+		await _wait(30)
+	# Long enough for them to work through a basket and line up at the counter.
+	await _wait(900)
+	if scenario == "player_register":
+		spawner.toggle_player_at_register(till)
+		await _wait(60)
 
 
 ## First *parked* vehicle matching the requested ownership. Moving traffic and

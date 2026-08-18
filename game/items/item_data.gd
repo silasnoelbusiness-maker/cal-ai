@@ -21,6 +21,17 @@ enum Category { FOOD, DRINK, MISC }
 ## Placeholder icon: a flat colour swatch until real icons exist.
 @export var icon_color: Color = Color(0.6, 0.6, 0.62)
 
+@export_group("Retail")
+## What a business pays its supplier for one unit. The gap between this and what
+## the player charges is the whole of retail: every business system in the game
+## reads these three fields rather than hard-coding a margin.
+@export var wholesale_cost: int = 0
+## The price a customer considers normal. Charging this sells reliably; charging
+## well over it does not. Defaults to `price` when left at zero.
+@export var recommended_price: int = 0
+## Relative likelihood a customer walks in wanting this. 1.0 is ordinary.
+@export var demand_weight: float = 1.0
+
 @export_group("Equipment")
 ## Whether this can be held. Equipping is a toggle, and never consumes the item.
 @export var can_equip: bool = false
@@ -77,6 +88,18 @@ func use(user: Node) -> bool:
 	if use_minutes > 0:
 		TimeManager.advance_minutes(use_minutes)
 	return true
+
+
+## What a customer thinks this is worth. Falls back to the shelf price so an item
+## that predates the retail fields still behaves sensibly.
+func get_recommended_price() -> int:
+	return recommended_price if recommended_price > 0 else price
+
+
+## What a business pays for one. Falls back to a little under half the shelf
+## price, which is the margin the catalogue is written to.
+func get_wholesale_cost() -> int:
+	return wholesale_cost if wholesale_cost > 0 else maxi(1, roundi(float(price) * 0.4))
 
 
 func get_category_name() -> String:

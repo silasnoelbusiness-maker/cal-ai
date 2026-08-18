@@ -30,6 +30,11 @@ const TONE_COLORS: Array[Color] = [
 @onready var _screen_fade: ColorRect = %ScreenFade
 @onready var _inventory_panel: Control = %InventoryPanel
 @onready var _shop_panel: Control = %ShopPanel
+@onready var _property_panel: Control = %PropertyPanel
+@onready var _business_dashboard: Control = %BusinessDashboard
+@onready var _store_panel: PanelContainer = %StorePanel
+@onready var _store_name: Label = %StoreName
+@onready var _store_status: Label = %StoreStatus
 @onready var _speed_panel: PanelContainer = %SpeedPanel
 @onready var _speed_label: Label = %SpeedLabel
 @onready var _vehicle_name: Label = %VehicleName
@@ -77,6 +82,14 @@ func _ready() -> void:
 	_inventory_panel.closed.connect(_on_screen_visibility_changed)
 	_shop_panel.opened.connect(_on_screen_visibility_changed)
 	_shop_panel.closed.connect(_on_screen_visibility_changed)
+	_property_panel.opened.connect(_on_screen_visibility_changed)
+	_property_panel.closed.connect(_on_screen_visibility_changed)
+	_business_dashboard.opened.connect(_on_screen_visibility_changed)
+	_business_dashboard.closed.connect(_on_screen_visibility_changed)
+
+	BusinessManager.business_changed.connect(_on_owned_business_changed)
+	BusinessManager.business_opened.connect(_on_owned_business_changed)
+	BusinessManager.business_closed.connect(_on_owned_business_changed)
 
 	_prompt_panel.visible = false
 	_toast_panel.modulate.a = 0.0
@@ -85,6 +98,7 @@ func _ready() -> void:
 	_wanted_label.visible = false
 	_escape_label.visible = false
 	_busted_overlay.visible = false
+	_store_panel.visible = false
 	set_process(false)
 
 	_refresh_clock()
@@ -251,6 +265,14 @@ func _update_process_need() -> void:
 # --- Screens -------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("business_menu"):
+		# One key for "show me my business", wherever the player is standing.
+		if _business_dashboard.is_open():
+			_business_dashboard.close()
+		else:
+			_business_dashboard.open(_business_in_reach())
+		get_viewport().set_input_as_handled()
+		return
 	if not event.is_action_pressed("inventory"):
 		return
 	# The bag is reachable from the shop counter too, so only the inventory
@@ -267,6 +289,15 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 		&"shop":
 			var buyer := requester if requester != null else GameManager.player
 			_shop_panel.open(context as Shop, buyer)
+		&"property":
+			_property_panel.open(context as CommercialProperty)
+		&"business":
+			var equipment := context as BusinessEquipment
+			_business_dashboard.open(
+				equipment.business if equipment != null else _business_in_reach()
+			)
+		&"shelf":
+			_business_dashboard.open_shelf(context as BusinessEquipment)
 		_:
 			push_warning("HUD has no screen for '%s'." % screen_id)
 
@@ -274,11 +305,26 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 func close_screens() -> void:
 	_inventory_panel.close()
 	_shop_panel.close()
+	_property_panel.close()
+	_business_dashboard.close()
+
+
+## The business the management key should open: the one the player is standing
+## in if they are in one, otherwise the first they founded.
+func _business_in_reach() -> BusinessInstance:
+	for node in get_tree().get_nodes_in_group(&"retail_unit"):
+		var unit := node as RetailUnit
+		if unit != null and unit.is_player_inside() and unit.get_business() != null:
+			return unit.get_business()
+	return BusinessManager.primary_business()
 
 
 ## A screen being up freezes the world, so the manager has to know.
 func _on_screen_visibility_changed() -> void:
-	GameManager.menu_open = _inventory_panel.is_open() or _shop_panel.is_open()
+	GameManager.menu_open = (
+		_inventory_panel.is_open() or _shop_panel.is_open()
+		or _property_panel.is_open() or _business_dashboard.is_open()
+	)
 
 
 func _on_item_used(item: ItemData) -> void:
@@ -339,6 +385,30 @@ func _on_hunger_changed(value: float, max_value: float) -> void:
 func _set_bar(bar: ProgressBar, value: float, max_value: float) -> void:
 	bar.max_value = max_value
 	bar.value = value
+
+
+# --- Owned business ------------------------------------------------------
+
+## A three-line reminder while the player is stood in their own shop. Everything
+## else about the business lives in the dashboard; the HUD stays the HUD.
+func _on_owned_business_changed(business: BusinessInstance) -> void:
+	var here := _business_in_reach()
+	if here == null or here != business:
+		if here == null:
+			_store_panel.visible = false
+		return
+	_store_name.text = business.business_name.to_upper()
+	var spawner_count := 0
+	var unit := RetailUnit.for_business(business, get_tree())
+	if unit != null:
+		var spawner := unit.get_spawner()
+		if spawner != null:
+			spawner_count = spawner.active_customers().size()
+	_store_status.text = "%s  ·  customers %d  ·  %s today" % [
+		business.status_text(), spawner_count,
+		"$%d" % business.revenue_today,
+	]
+	_store_panel.visible = unit != null and unit.is_player_inside()
 
 
 # --- Equipment -----------------------------------------------------------

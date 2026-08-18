@@ -1125,6 +1125,16 @@ func _venue_table() -> Array:
 			"PrecinctDoor", Vector3(24.5, 1.2, 38.6), Vector3.BACK, "Enter Precinct",
 			"message", "PRECINCT HOUSE\nStaffed once the police and wanted systems are in.",
 		],
+		# Two empty shop units, to let. The message column carries the property id
+		# so the door and its interior can find each other.
+		[
+			"MainStreetUnit", Vector3(-20.0, 1.2, -12.4), Vector3.BACK, "View Property",
+			"property", "unit_main_18",
+		],
+		[
+			"QuaysideUnit", Vector3(64.0, 1.2, -12.4), Vector3.BACK, "View Property",
+			"property", "unit_quay_40",
+		],
 	]
 
 
@@ -1145,6 +1155,8 @@ func _build_venue_doors() -> void:
 				door = _make_market_portal(point, facing)
 			"job":
 				door = _make_warehouse_station()
+			"property":
+				door = _make_commercial_property(point, facing, StringName(message))
 			_:
 				var notice := MessagePoint.new()
 				notice.message = message
@@ -1194,6 +1206,46 @@ func _make_market_portal(point: Vector3, facing: Vector3) -> Portal:
 	portal.camera_distance = 14.0
 	portal.camera_pitch = 70.0
 	return portal
+
+
+## An empty shop unit and the pavement outside it. Vacant it shows the letting
+## details; once the player holds the lease it is the door to their own shop.
+##
+## Terms live here rather than in the interior because the unit is a thing on a
+## street with an address, and the room behind it is an implementation detail.
+func _make_commercial_property(
+	point: Vector3, facing: Vector3, id: StringName
+) -> CommercialProperty:
+	var street_marker := Marker3D.new()
+	street_marker.name = "PropertyStreetExit_%s" % id
+	street_marker.position = point + facing * 1.8 - Vector3(0.0, 0.8, 0.0)
+	street_marker.add_to_group(RetailUnit.exit_group_for(id))
+	_interactables.add_child(street_marker)
+
+	var unit := CommercialProperty.new()
+	unit.property_id = id
+	unit.destination_group = RetailUnit.entry_group_for(id)
+	unit.override_camera = true
+	unit.camera_distance = 16.0
+	unit.camera_pitch = 68.0
+
+	# Two units, deliberately different: a small one the player can reach early
+	# and a larger, dearer one to move up to.
+	if id == &"unit_quay_40":
+		unit.address = "40 Quayside"
+		unit.property_type = "Retail Unit"
+		unit.size_label = "Medium"
+		unit.floor_area = 62
+		unit.rent_amount = 820
+		unit.deposit = 650
+	else:
+		unit.address = "18 Main Street"
+		unit.property_type = "Retail Unit"
+		unit.size_label = "Small"
+		unit.floor_area = 48
+		unit.rent_amount = 650
+		unit.deposit = 500
+	return unit
 
 
 func _make_warehouse_station() -> JobStation:

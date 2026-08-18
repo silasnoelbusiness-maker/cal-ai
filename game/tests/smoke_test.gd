@@ -97,6 +97,28 @@ func _run() -> void:
 	await _test_life_after_crime()
 	await _test_crime_save_load()
 
+	# Phase H: business ownership.
+	await _test_property_available()
+	await _test_rent_property()
+	await _test_create_business()
+	await _test_fund_business()
+	await _test_equipment()
+	await _test_stock()
+	_test_pricing()
+	await _test_open_store()
+	await _test_customer_purchase()
+	await _test_out_of_stock()
+	await _test_hire_employee()
+	await _test_employee_checkout()
+	await _test_business_runs_while_away()
+	await _test_no_cashier()
+	_test_daily_report()
+	_test_bad_business()
+	_test_rent_payment()
+	await _test_business_and_crime()
+	await _test_business_save_load()
+	_test_simulation_consistency()
+
 	_report()
 
 
@@ -2706,3 +2728,893 @@ func _spawn_occupied_traffic(at: Vector3, yaw_degrees: float) -> Vehicle:
 	car.halt()
 	await _settle(8)
 	return car
+
+
+# --- Phase H: business ownership -----------------------------------------
+#
+# The business tests run as one continuous story, because that is what the
+# systems are: the shop rented in the first test is the shop staffed in the
+# ninth. Each function leaves the business in the state the next one expects,
+# and `_own_business()` is how they find it.
+#
+# What is checked directly rather than played: money. Every test that moves cash
+# asserts on both sides of the transfer, because a business account that creates
+# or destroys money would be invisible from inside the shop.
+
+func _test_property_available() -> void:
+	await _prepare_crime_scene()
+	EconomyManager.restore(4000)
+	await _teleport(Vector3(-20.0, 0.5, -10.4))
+	await _settle(25)
+
+	var door := _player.interaction.get_focused()
+	_check(door is CommercialProperty, "the vacant unit has a door the player can use")
+	var unit := door as CommercialProperty
+	if unit == null:
+		return
+	_check(unit.is_vacant(), "and it is vacant to start with")
+	_check(
+		unit.get_prompt_text() == "E — View Property",
+		"the prompt offers the letting details (%s)" % unit.get_prompt_text()
+	)
+	_check(unit.rent_amount > 0 and unit.deposit > 0, "the unit has terms")
+	_check(
+		unit.move_in_cost() == unit.deposit + unit.rent_amount,
+		"moving in costs the deposit plus the first rent"
+	)
+
+	await _press_action("interact")
+	await _settle(6)
+	var panel: Control = _main.get_node("HUD/PropertyPanel")
+	_check(panel.is_open(), "interacting opens the property screen")
+	_check(GameManager.menu_open, "which freezes the world like any other screen")
+	GameManager.close_menus()
+	await _settle(6)
+
+
+## TEST 81 — renting it.
+func _test_rent_property() -> void:
+	var unit := _property()
+	EconomyManager.restore(4000)
+	await _settle(4)
+
+	var cash_before := EconomyManager.cash
+	var result := PropertyManager.lease(unit)
+	await _settle(6)
+
+	_check(result == PropertyManager.LeaseResult.OK, "the lease is signed")
+	_check(
+		EconomyManager.cash == cash_before - unit.move_in_cost(),
+		"deposit and first rent leave the player's account (now $%d)" % EconomyManager.cash
+	)
+	_check(unit.is_leased_by_player(), "the unit is leased by the player")
+	_check(not unit.is_vacant(), "and no longer vacant")
+	_check(
+		unit.next_rent_due_day == TimeManager.day_index + unit.rent_interval_days,
+		"the next rent day is set"
+	)
+	_check(
+		_said("LEASE SIGNED"),
+		"the player is told"
+	)
+
+	# Two ledger entries, not one: a deposit is returnable and rent is not.
+	var reasons: Array[String] = []
+	for entry in EconomyManager.get_history():
+		reasons.append(String(entry.get("reason", "")))
+	_check(
+		reasons.any(func(r: String) -> bool: return r.contains("deposit")),
+		"the deposit is its own ledger entry"
+	)
+	_check(
+		reasons.any(func(r: String) -> bool: return r.contains("rent")),
+		"and the rent is another"
+	)
+
+	# A leased unit is a door.
+	await _teleport(Vector3(-20.0, 0.5, -10.4))
+	await _settle(25)
+	await _press_action("interact")
+	await _settle(25)
+	_check(
+		_player.global_position.distance_to(_unit_interior().global_position) < 25.0,
+		"the door now leads into the empty unit"
+	)
+	_check(_unit_interior().is_player_inside(), "and the unit knows the player is in it")
+
+
+## TEST 82 — founding the business.
+func _test_create_business() -> void:
+	var unit := _property()
+	var business := BusinessManager.create_business(
+		"Silas Market", &"convenience_store", unit
+	)
+	await _settle(6)
+
+	_check(business != null, "the business is created")
+	if business == null:
+		return
+	_check(business.business_id != &"", "it has an id (%s)" % business.business_id)
+	_check(business.business_name == "Silas Market", "the name is kept")
+	_check(business.property_id == unit.property_id, "it is tied to the unit")
+	_check(business.cash_balance == 0, "creating it conjures no money")
+	_check(
+		BusinessManager.business_for_property(unit.property_id) == business,
+		"the unit can be asked what trades from it"
+	)
+	_check(
+		BusinessManager.get_statistic(&"businesses_founded") >= 1,
+		"the statistics count it"
+	)
+	_check(
+		not business.can_open(),
+		"an empty shop cannot open: %s" % ", ".join(business.missing_requirements())
+	)
+
+
+## TEST 83 — moving money across the boundary.
+func _test_fund_business() -> void:
+	var business := _own_business()
+	EconomyManager.restore(4000)
+	await _settle(4)
+
+	var personal_before := EconomyManager.cash
+	var business_before := business.cash_balance
+	var result := BusinessManager.deposit_to_business(business, 2500)
+	_check(result == BusinessManager.TransferResult.OK, "capital goes into the business")
+	_check(EconomyManager.cash == personal_before - 2500, "the player's cash falls")
+	_check(business.cash_balance == business_before + 2500, "the business account rises")
+	_check(
+		EconomyManager.cash + business.cash_balance == personal_before + business_before,
+		"and a transfer creates no money: the two accounts still sum to the same"
+	)
+
+	var back := BusinessManager.withdraw_from_business(business, 500)
+	_check(back == BusinessManager.TransferResult.OK, "and can be drawn back out")
+	_check(EconomyManager.cash == personal_before - 2000, "the player is up $500 again")
+	_check(business.cash_balance == 2000, "the business is down to $2000")
+
+	_check(
+		BusinessManager.withdraw_from_business(business, 99999)
+		== BusinessManager.TransferResult.NOT_ENOUGH_FUNDS,
+		"a business cannot pay out money it does not have"
+	)
+	_check(business.cash_balance == 2000, "and the balance is untouched by the attempt")
+
+
+## TESTS 84 and 85 — buying equipment and putting it down.
+func _test_equipment() -> void:
+	var business := _own_business()
+	var interior := _unit_interior()
+	var controller := _placement_controller()
+	_check(controller != null, "the placement controller is in the scene")
+
+	var cash_before := business.cash_balance
+	var counter := EquipmentCatalogue.by_id(&"checkout_counter")
+	var shelf := EquipmentCatalogue.by_id(&"retail_shelf")
+	var rack := EquipmentCatalogue.by_id(&"storage_rack")
+
+	_check(
+		BusinessManager.buy_equipment(business, &"checkout_counter") == BusinessManager.PurchaseResult.OK,
+		"a checkout counter is bought"
+	)
+	BusinessManager.buy_equipment(business, &"retail_shelf")
+	BusinessManager.buy_equipment(business, &"retail_shelf")
+	BusinessManager.buy_equipment(business, &"storage_rack")
+	var spent := counter.purchase_price + shelf.purchase_price * 2 + rack.purchase_price
+	_check(
+		business.cash_balance == cash_before - spent,
+		"the business account pays for it (-$%d)" % spent
+	)
+	_check(
+		BusinessManager.unplaced_equipment(business).size() == 4,
+		"and it arrives waiting to be placed"
+	)
+	_check(business.equipment.is_empty(), "nothing is on the floor until it is put there")
+
+	# --- Placing it ---
+	_check(controller.begin(business, interior, &"checkout_counter"), "placement mode starts")
+	_check(GameManager.placement_active, "which suppresses the punch on the left button")
+	_check(not _player.get_combat().can_attack(), "so a placement click is not an assault")
+
+	# Straight through a wall is refused.
+	_check(
+		not interior.is_valid_placement(Vector3(0.0, 0.0, 12.0), counter.placement_size),
+		"outside the unit is not a valid spot"
+	)
+	_check(
+		not interior.is_valid_placement(Vector3(0.0, 0.0, 5.2), counter.placement_size),
+		"and neither is the doorway"
+	)
+	_check(
+		interior.is_valid_placement(Vector3(0.0, 0.0, 1.0), counter.placement_size),
+		"the middle of the shop floor is"
+	)
+
+	_check(controller.place_at(Vector3(0.0, 0.0, 1.0), 180.0), "the counter goes down")
+	_check(not GameManager.placement_active, "and placement mode ends")
+	_check(business.equipment.size() == 1, "the business records it")
+	_check(
+		BusinessManager.unplaced_equipment(business).size() == 3,
+		"and it leaves the delivery pile"
+	)
+	await _settle(6)
+	_check(interior.first_checkout() != null, "the counter exists in the room")
+
+	controller.begin(business, interior, &"retail_shelf")
+	_check(controller.place_at(Vector3(-4.0, 0.0, 2.0), 0.0), "a shelf goes down beside it")
+	controller.begin(business, interior, &"retail_shelf")
+	_check(
+		not controller.place_at(Vector3(-4.0, 0.0, 2.0), 0.0),
+		"a second shelf cannot go in the same place"
+	)
+	_check(controller.place_at(Vector3(4.0, 0.0, 2.0), 0.0), "but it fits on the other side")
+	controller.begin(business, interior, &"storage_rack")
+	_check(controller.place_at(Vector3(0.0, 0.0, -4.0), 0.0), "the rack goes in the back room")
+
+	await _settle(8)
+	_check(business.equipment.size() == 4, "four pieces are on the floor")
+	_check(interior.shelf_nodes().size() == 2, "two of them are shelves the player can see")
+	_check(
+		business.storage_capacity() > BusinessCatalogue.first().base_storage_capacity,
+		"the rack raises the store room's capacity to %d" % business.storage_capacity()
+	)
+
+	# Rotation is what stops a counter facing the wall.
+	var record: PlacedEquipment = business.equipment[0]
+	_check(
+		absf(rad_to_deg(record.rotation_y) - 180.0) < 1.0,
+		"the counter kept the way it was turned (%.0f)" % rad_to_deg(record.rotation_y)
+	)
+
+
+## TESTS 86 and 87 — the supplier, the store room and the shelves.
+func _test_stock() -> void:
+	var business := _own_business()
+	var water := ItemCatalogue.by_id(&"bottled_water")
+	var soda := ItemCatalogue.by_id(&"soda_can")
+
+	var cash_before := business.cash_balance
+	var result := BusinessManager.order_stock(business, &"bottled_water", 40)
+	_check(result == BusinessManager.PurchaseResult.OK, "stock is ordered from the supplier")
+	_check(
+		business.cash_balance == cash_before - water.get_wholesale_cost() * 40,
+		"charged at wholesale, not at the shelf price"
+	)
+	_check(business.storage_of(&"bottled_water") == 40, "and it lands in the store room")
+	BusinessManager.order_stock(business, &"soda_can", 40)
+	BusinessManager.order_stock(business, &"snack_bar", 20)
+	_check(business.storage_used() == 100, "the store room holds what was ordered")
+
+	_check(
+		BusinessManager.order_stock(business, &"steel_pipe", 5)
+		== BusinessManager.PurchaseResult.NO_SUCH_ITEM,
+		"a convenience store cannot order something it does not sell"
+	)
+
+	# The store room is finite.
+	var room := business.storage_room_left()
+	BusinessManager.order_stock(business, &"bottled_water", room + 50)
+	_check(business.storage_used() <= business.storage_capacity(), "and it cannot be overfilled")
+
+	# --- Shelves ---
+	var shelves := business.shelves()
+	_check(shelves.size() == 2, "there are two shelves to stock")
+	var first := shelves[0]
+	var storage_before := business.storage_of(&"bottled_water")
+	var moved := business.stock_shelf(first.slot_id, &"bottled_water", 12)
+	_check(moved == 12, "twelve units move onto the shelf")
+	_check(
+		business.storage_of(&"bottled_water") == storage_before - 12,
+		"and out of the store room"
+	)
+	_check(first.stock_quantity == 12, "the shelf holds them")
+
+	var overfill := business.stock_shelf(first.slot_id, &"bottled_water", 50)
+	_check(
+		first.stock_quantity == first.capacity(),
+		"a shelf fills to its capacity and no further (%d)" % first.stock_quantity
+	)
+	_check(overfill == first.capacity() - 12, "only what fitted was taken out of the store room")
+
+	business.stock_shelf(shelves[1].slot_id, &"soda_can", 20)
+	_check(business.shelf_stock_of(&"soda_can") == 20, "the second shelf takes the soda")
+	_check(
+		business.total_shelf_units() == first.capacity() + 20,
+		"and the shop knows what is on display"
+	)
+
+
+## TEST 88 and 92 — what the player charges, and what it does.
+func _test_pricing() -> void:
+	var business := _own_business()
+	var soda := ItemCatalogue.by_id(&"soda_can")
+
+	business.set_price(soda, soda.get_recommended_price())
+	var fair := business.purchase_chance(soda)
+	_check(fair > 0.85, "at the usual price nearly everybody buys (%.2f)" % fair)
+	_check(
+		business.margin_of(soda) == soda.get_recommended_price() - soda.get_wholesale_cost(),
+		"the margin is the price less the wholesale cost"
+	)
+
+	business.set_price(soda, soda.get_recommended_price() * 2)
+	var steep := business.purchase_chance(soda)
+	_check(steep < 0.1, "at double the price almost nobody does (%.2f)" % steep)
+
+	business.set_price(soda, roundi(float(soda.get_recommended_price()) * 1.4))
+	var middling := business.purchase_chance(soda)
+	_check(
+		middling < fair and middling > steep,
+		"and asking a bit over sells a bit less (%.2f)" % middling
+	)
+
+	business.set_price(soda, soda.get_recommended_price())
+	_check(business.price_of(soda) == soda.get_recommended_price(), "prices are what the player set")
+
+
+## TEST 89 — opening the doors.
+func _test_open_store() -> void:
+	var business := _own_business()
+	TimeManager.set_total_minutes(TimeManager.day_index * 1440.0 + 10.0 * 60.0)
+	await _settle(6)
+
+	_check(business.can_open(), "with a till, a shelf and stock the shop is ready")
+	_check(business.missing_requirements().is_empty(), "nothing is missing")
+	business.manual_override = BusinessInstance.Override.NONE
+	business.set_open(business.should_be_open(TimeManager.hour))
+	_check(business.is_open(), "and at 10:00 it is open")
+	_check(business.status_text() == "OPEN", "the status reads OPEN")
+
+	# Outside its hours it is shut.
+	TimeManager.set_total_minutes(TimeManager.day_index * 1440.0 + 3.0 * 60.0)
+	business.set_open(business.should_be_open(TimeManager.hour))
+	_check(not business.is_open(), "at 03:00 it is not")
+
+	TimeManager.set_total_minutes(TimeManager.day_index * 1440.0 + 12.0 * 60.0)
+	business.set_open(business.should_be_open(TimeManager.hour))
+	_check(business.is_open(), "back open at midday")
+
+
+## TEST 90 — a customer, walking in and buying something.
+func _test_customer_purchase() -> void:
+	var business := _own_business()
+	var interior := _unit_interior()
+	var spawner := interior.get_spawner()
+	await _teleport(interior.global_position + Vector3(0.0, 0.5, 3.0))
+	await _settle(20)
+	_check(interior.is_player_inside(), "the player is in their own shop")
+
+	var till := interior.first_checkout()
+	spawner.toggle_player_at_register(till)
+	_check(spawner.is_player_working_register(), "the player takes the register")
+	await _teleport(till.staff_point())
+	await _settle(10)
+
+	var revenue_before := business.revenue_today
+	var stock_before := business.shelf_stock_of(&"bottled_water") + business.shelf_stock_of(&"soda_can")
+	var customer := spawner.spawn_customer_now()
+	_check(customer != null, "a customer arrives outside")
+	if customer == null:
+		return
+	_check(
+		customer.global_position.distance_to(interior.global_position) > 8.0,
+		"on the pavement rather than inside the shop"
+	)
+	_check(not customer.wanted_items().is_empty(), "and they came in for something")
+
+	# Long enough to walk in, browse a shelf, queue and be served.
+	var served := false
+	for i in 90:
+		await _settle(20)
+		if business.revenue_today > revenue_before:
+			served = true
+			break
+
+	_check(served, "the sale goes through (revenue $%d)" % business.revenue_today)
+	_check(
+		business.shelf_stock_of(&"bottled_water") + business.shelf_stock_of(&"soda_can") < stock_before,
+		"stock comes off the shelf"
+	)
+	_check(business.customer_count_today > 0, "the visit is counted")
+	_check(business.units_sold_today > 0, "and the units are counted")
+	_check(business.cash_balance > 0, "the money goes into the business account")
+
+	await _settle(240)
+	_check(
+		not is_instance_valid(customer) or customer.stage == CustomerAI.Stage.LEAVING
+		or customer.stage == CustomerAI.Stage.DONE,
+		"and the customer leaves afterwards"
+	)
+
+
+## TEST 91 — nothing on the shelf.
+func _test_out_of_stock() -> void:
+	var business := _own_business()
+	var interior := _unit_interior()
+	var spawner := interior.get_spawner()
+
+	# Strip the shelves, keeping what was on them so the shop can be refilled.
+	var kept := {}
+	for shelf in business.shelves():
+		if shelf.stock_quantity > 0:
+			kept[shelf.slot_id] = [shelf.stock_item, shelf.stock_quantity]
+			business.add_storage(shelf.stock_item, shelf.stock_quantity)
+			shelf.stock_quantity = 0
+	_check(business.total_shelf_units() == 0, "the shelves are bare")
+
+	var lost_before := business.lost_sales_today
+	var revenue_before := business.revenue_today
+	var customer := spawner.spawn_customer_now()
+	if customer != null:
+		for i in 60:
+			await _settle(20)
+			if business.lost_sales_today > lost_before:
+				break
+
+	_check(business.revenue_today == revenue_before, "nothing can be sold")
+	_check(business.lost_sales_today > lost_before, "and the lost sale is recorded")
+	for shelf in business.shelves():
+		_check(shelf.stock_quantity >= 0, "stock never goes negative")
+
+	# Put it all back.
+	for slot in kept:
+		var entry: Array = kept[slot]
+		business.stock_shelf(int(slot), entry[0], int(entry[1]))
+	_check(business.total_shelf_units() > 0, "the shelves are refilled for the next test")
+
+
+## TESTS 93 and 94 — hiring somebody, and letting them run the till.
+func _test_hire_employee() -> void:
+	var business := _own_business()
+	var interior := _unit_interior()
+
+	BusinessManager.refresh_candidates()
+	var candidates := BusinessManager.get_candidates()
+	_check(candidates.size() >= 1, "there are workers to hire")
+	var candidate := candidates[0]
+	_check(candidate.hourly_wage >= 12, "who cost real money ($%d/hour)" % candidate.hourly_wage)
+
+	_check(BusinessManager.hire(business, candidate), "one is hired")
+	_check(business.employees.size() == 1, "and joins the payroll")
+	_check(
+		business.employees[0].assigned_business == business.business_id,
+		"assigned to this business"
+	)
+	_check(
+		BusinessManager.get_statistic(&"employees_hired") >= 1, "the statistics count the hire"
+	)
+
+	# A shift that covers right now.
+	var worker := business.employees[0]
+	worker.role = EmployeeData.Role.CASHIER
+	worker.shift_start_hour = 9
+	worker.shift_end_hour = 17
+	_check(worker.is_on_shift(12), "the shift covers midday")
+	_check(not worker.is_on_shift(3), "and not the small hours")
+	_check(worker.scheduled_hours() == 8.0, "eight hours long")
+	_check(
+		business.rostered_cashier(12) == worker,
+		"so they are the cashier on duty at midday"
+	)
+
+	# They turn up.
+	await _teleport(interior.global_position + Vector3(0.0, 0.5, 3.0))
+	await _settle(20)
+	interior.call("_refresh_staff")
+	await _settle(10)
+	var cashier := interior.get_cashier()
+	_check(cashier != null, "the employee comes in to work")
+	if cashier == null:
+		return
+	for i in 40:
+		await _settle(15)
+		if cashier.is_at_station():
+			break
+	_check(cashier.is_at_station(), "and gets to the register")
+
+
+## TEST 94 continued — the employee serves the queue.
+func _test_employee_checkout() -> void:
+	var business := _own_business()
+	var interior := _unit_interior()
+	var spawner := interior.get_spawner()
+	spawner.stop_player_working()
+	_check(not spawner.is_player_working_register(), "the player is not on the till")
+
+	var revenue_before := business.revenue_today
+	spawner.spawn_customer_now()
+	spawner.spawn_customer_now()
+
+	var served := false
+	for i in 100:
+		await _settle(20)
+		if business.revenue_today > revenue_before:
+			served = true
+			break
+	_check(served, "the employee rings customers through without the player")
+
+	var worker := business.employees[0]
+	_check(worker.customers_served_today > 0, "and their day's work is counted")
+
+	# Wages are real money, charged for hours actually worked.
+	var cash_before := business.cash_balance
+	worker.hours_unpaid = 4.0
+	BusinessManager.call("_pay", business, worker)
+	var expected := worker.wage_for_hours(4.0)
+	_check(
+		business.cash_balance == cash_before - expected,
+		"four hours costs $%d out of the business account" % expected
+	)
+	_check(business.wages_today >= expected, "and lands in the day's wage bill")
+	_check(worker.hours_unpaid == 0.0, "the hours are settled")
+
+
+## TESTS 95 and 63 — the shop runs while the player is elsewhere.
+func _test_business_runs_while_away() -> void:
+	var business := _own_business()
+	var interior := _unit_interior()
+
+	# Make sure there is something to sell and somebody to sell it.
+	BusinessManager.order_stock(business, &"bottled_water", 40)
+	for shelf in business.shelves():
+		business.stock_shelf(shelf.slot_id, &"bottled_water", shelf.room_left())
+	business.manual_override = BusinessInstance.Override.FORCE_OPEN
+	business.set_open(true)
+
+	# Out of the shop and across the city.
+	await _teleport(Vector3(-40.0, 0.5, 8.4))
+	await _settle(20)
+	_check(not interior.is_player_inside(), "the player has left the shop")
+	_check(
+		BusinessManager.simulation_mode(business) == "FAR",
+		"so it is simulated rather than acted out"
+	)
+
+	var revenue_before := business.revenue_today
+	var customers_before := business.customer_count_today
+	BusinessManager.simulate_hour_now(business, 12)
+	await _settle(6)
+
+	_check(
+		business.customer_count_today > customers_before,
+		"customers still come in (%d)" % (business.customer_count_today - customers_before)
+	)
+	_check(
+		business.revenue_today > revenue_before,
+		"and still buy things (+$%d)" % (business.revenue_today - revenue_before)
+	)
+	_check(business.shelf_stock_of(&"bottled_water") < 40, "off the same shelves")
+
+
+## TEST 96 — an open shop with nobody on the till.
+func _test_no_cashier() -> void:
+	var business := _own_business()
+	var interior := _unit_interior()
+	var spawner := interior.get_spawner()
+
+	# Everybody goes home.
+	var roster := business.employees.duplicate()
+	for worker in roster:
+		business.fire(worker.employee_id)
+	await _teleport(interior.global_position + Vector3(0.0, 0.5, 3.0))
+	await _settle(20)
+	interior.call("_refresh_staff")
+	spawner.stop_player_working()
+	await _settle(20)
+
+	var revenue_before := business.revenue_today
+	var lost_before := business.lost_sales_today
+	var customer := spawner.spawn_customer_now()
+	_check(customer != null, "a customer still walks in")
+
+	# Long enough to browse and to run out of patience.
+	for i in 120:
+		await _settle(20)
+		if business.lost_sales_today > lost_before:
+			break
+
+	_check(
+		business.revenue_today == revenue_before,
+		"but nothing is sold with nobody serving (+$%d)" % (business.revenue_today - revenue_before)
+	)
+	_check(business.lost_sales_today > lost_before, "and the lost sale is on the record")
+
+	# The same with nobody there at all: the far simulation must not sell either.
+	await _teleport(Vector3(-40.0, 0.5, 8.4))
+	await _settle(20)
+	revenue_before = business.revenue_today
+	BusinessManager.simulate_hour_now(business, 12)
+	_check(
+		business.revenue_today == revenue_before,
+		"and an unstaffed shop earns nothing while the player is away either"
+	)
+	_check(business.lost_sales_today > lost_before, "those visits are lost sales too")
+
+	# Re-hire for the rest of the tests.
+	BusinessManager.refresh_candidates()
+	var candidate := BusinessManager.get_candidates()[0]
+	BusinessManager.hire(business, candidate)
+	candidate.shift_start_hour = 0
+	candidate.shift_end_hour = 23
+
+
+## TEST 97 — the day's books.
+func _test_daily_report() -> void:
+	var business := _own_business()
+
+	# A known day: reset the counters, then put one of everything through.
+	business.end_day(TimeManager.day_index)
+	business.credit(400, "Test sales", &"revenue")
+	business.debit(120, "Test stock", &"inventory")
+	business.debit(80, "Test wages", &"wages")
+	business.debit(60, "Test rent", &"rent")
+
+	_check(business.revenue_today == 400, "revenue is what came in")
+	_check(business.expenses_today() == 260, "expenses are what went out (%d)" % business.expenses_today())
+	_check(business.profit_today() == 140, "profit is the difference (%d)" % business.profit_today())
+
+	var lifetime_revenue_before := business.lifetime_revenue
+	var report := business.end_day(TimeManager.day_index)
+	_check(int(report.get("revenue", 0)) == 400, "the report states the revenue")
+	_check(int(report.get("expenses", 0)) == 260, "and the expenses")
+	_check(int(report.get("profit", 0)) == 140, "and the profit")
+	_check(
+		int(report.get("inventory", 0)) + int(report.get("wages", 0)) + int(report.get("rent", 0))
+		== int(report.get("expenses", 0)),
+		"which is the sum of its parts and not double counted"
+	)
+	_check(business.revenue_today == 0, "the day's counters reset afterwards")
+	_check(
+		business.lifetime_revenue == lifetime_revenue_before,
+		"while the lifetime totals carry on"
+	)
+	_check(business.lifetime_revenue >= 400, "and include today's takings")
+
+
+## TEST 98 — a shop can lose money.
+func _test_bad_business() -> void:
+	var business := _own_business()
+	business.end_day(TimeManager.day_index)
+
+	# Terrible prices and a full staff: exactly the mistake the brief wants to
+	# stay possible.
+	var soda := ItemCatalogue.by_id(&"soda_can")
+	business.set_price(soda, soda.get_recommended_price() * 4)
+	_check(
+		business.purchase_chance(soda) < 0.05,
+		"nobody will pay four times the going rate (%.2f)" % business.purchase_chance(soda)
+	)
+
+	business.debit(300, "Test stock", &"inventory")
+	business.debit(250, "Test wages", &"wages")
+	business.credit(90, "Test sales", &"revenue")
+	_check(business.profit_today() < 0, "a bad day loses money ($%d)" % business.profit_today())
+	_check(
+		int(business.end_day(TimeManager.day_index).get("profit", 0)) < 0,
+		"and the report says so rather than flattering it"
+	)
+	business.set_price(soda, soda.get_recommended_price())
+
+
+## TEST 81 continued — rent comes round again.
+func _test_rent_payment() -> void:
+	var business := _own_business()
+	var unit := _property()
+
+	business.credit(2000, "Test funds", &"capital")
+	var business_before := business.cash_balance
+	unit.next_rent_due_day = TimeManager.day_index
+	_check(unit.is_rent_due(), "rent falls due on its day")
+
+	PropertyManager.charge_due_rent()
+	_check(
+		business.cash_balance == business_before - unit.rent_amount,
+		"the business pays it, not the player's pocket"
+	)
+	_check(_said("RENT PAID"), "and the player is told")
+	_check(
+		unit.next_rent_due_day == TimeManager.day_index + unit.rent_interval_days,
+		"the next one is scheduled"
+	)
+
+	# A business that cannot cover it falls into arrears rather than being
+	# quietly forgiven.
+	var stashed := business.cash_balance
+	business.debit(stashed, "Test drain", &"other")
+	EconomyManager.restore(0)
+	unit.next_rent_due_day = TimeManager.day_index
+	PropertyManager.charge_due_rent()
+	_check(unit.arrears >= unit.rent_amount, "an unpaid rent becomes arrears ($%d)" % unit.arrears)
+	_check(_said("RENT OVERDUE"), "and the player is warned")
+	_check(unit.is_leased_by_player(), "but the lease is not torn up yet")
+	EconomyManager.restore(4000)
+	business.credit(2000, "Test funds", &"capital")
+
+
+## TEST 99 — crime carries on around the business.
+func _test_business_and_crime() -> void:
+	var business := _own_business()
+	var interior := _unit_interior()
+	business.manual_override = BusinessInstance.Override.FORCE_OPEN
+	business.set_open(true)
+	for shelf in business.shelves():
+		if shelf.stock_quantity < 5:
+			business.stock_shelf(shelf.slot_id, &"bottled_water", shelf.room_left())
+
+	# Out on the street, and wanted.
+	await _teleport(Vector3(-40.0, 0.5, 8.4))
+	await _settle(20)
+	WantedManager.clear_wanted("")
+	var record := CrimeManager.report_crime(
+		CrimeManager.CrimeType.STORE_ROBBERY, _player.global_position, _player, null
+	)
+	CrimeManager.mark_witnessed(record, _player)
+	CrimeManager.mark_reported(record)
+	WantedManager.on_crime_reported(record)
+	await _settle(10)
+
+	_check(WantedManager.level >= 1, "the player is wanted (%d stars)" % WantedManager.level)
+	_check(business.is_open(), "the shop is still open")
+	_check(BusinessManager.owned_count() == 1, "and still theirs")
+
+	var revenue_before := business.revenue_today
+	BusinessManager.simulate_hour_now(business, 12)
+	_check(
+		business.revenue_today > revenue_before,
+		"and still trading while the police look for its owner"
+	)
+
+	WantedManager.clear_wanted("")
+	await _settle(6)
+	_check(WantedManager.level == 0, "the chase resolves as it always did")
+	_check(business.is_open(), "with the business untouched by it")
+
+
+## TEST 100 — all of it, through a save file.
+func _test_business_save_load() -> void:
+	var slot := 97
+	var business := _own_business()
+	var unit := _property()
+	var interior := _unit_interior()
+
+	business.set_price(ItemCatalogue.by_id(&"soda_can"), 7)
+	business.opening_hour = 7
+	business.closing_hour = 21
+	business.reputation = 63.0
+	BusinessManager.order_stock(business, &"snack_bar", 10)
+
+	var saved := {
+		"name": business.business_name,
+		"cash": business.cash_balance,
+		"equipment": business.equipment.size(),
+		"storage": business.storage_used(),
+		"shelf": business.total_shelf_units(),
+		"employees": business.employees.size(),
+		"lifetime_revenue": business.lifetime_revenue,
+		"arrears": unit.arrears,
+	}
+	var slot_positions: Array = []
+	for record in business.equipment:
+		slot_positions.append([record.equipment_id, record.position, record.rotation_y])
+
+	_check(SaveManager.save_to_slot(slot), "the game saves with a business in it")
+
+	# Wreck everything a load has to put back.
+	business.business_name = "Wrong Name"
+	business.cash_balance = 1
+	business.equipment.clear()
+	business.storage.clear()
+	business.employees.clear()
+	business.prices.clear()
+	business.reputation = 5.0
+	unit.end_lease()
+	await _settle(6)
+
+	_check(SaveManager.load_from_slot(slot), "and loads it back")
+	await _settle(10)
+
+	var restored := _own_business()
+	_check(restored != null, "the business is there again")
+	if restored == null:
+		return
+	_check(restored.business_name == saved["name"], "with its name")
+	_check(restored.cash_balance == saved["cash"], "its money ($%d)" % restored.cash_balance)
+	_check(restored.equipment.size() == saved["equipment"], "its equipment")
+	_check(restored.storage_used() == saved["storage"], "its store room")
+	_check(restored.total_shelf_units() == saved["shelf"], "what is on its shelves")
+	_check(restored.employees.size() == saved["employees"], "its staff")
+	_check(restored.price_of(ItemCatalogue.by_id(&"soda_can")) == 7, "the prices it charges")
+	_check(restored.opening_hour == 7 and restored.closing_hour == 21, "its opening hours")
+	_check(roundi(restored.reputation) == 63, "its reputation")
+	_check(restored.lifetime_revenue == saved["lifetime_revenue"], "and its lifetime figures")
+
+	var employee := restored.employees[0] if not restored.employees.is_empty() else null
+	_check(employee != null and employee.hourly_wage > 0, "the employee kept their wage")
+	_check(
+		employee != null and employee.shift_end_hour == 23,
+		"and their shift (%s)" % (employee.schedule_text() if employee else "-")
+	)
+
+	var placed_back := true
+	for i in slot_positions.size():
+		if i >= restored.equipment.size():
+			placed_back = false
+			break
+		var record: PlacedEquipment = restored.equipment[i]
+		var expected: Array = slot_positions[i]
+		if record.equipment_id != expected[0] or record.position.distance_to(expected[1]) > 0.01:
+			placed_back = false
+	_check(placed_back, "every piece of equipment came back where it was put")
+
+	var leased := _property()
+	_check(leased.is_leased_by_player(), "the lease is restored")
+	_check(leased.arrears == saved["arrears"], "including what is owed on it")
+
+	await _settle(10)
+	_check(interior.first_checkout() != null, "and the room is rebuilt from the record")
+
+	# A save from before any of this must still load.
+	var path := SaveManager.get_slot_path(slot)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(JSON.stringify({
+		"version": SaveManager.SAVE_VERSION,
+		"clock": {"total_minutes": TimeManager.total_minutes},
+		"economy": {"cash": 250},
+	}))
+	file.close()
+	_check(SaveManager.load_from_slot(slot), "a save from before Phase H still loads")
+	_check(EconomyManager.cash == 250, "and applies what it does contain")
+
+	SaveManager.delete_slot(slot)
+
+
+## Near and far have to agree, or the player learns to stand in the shop.
+func _test_simulation_consistency() -> void:
+	var business := _own_business()
+	var water := ItemCatalogue.by_id(&"bottled_water")
+
+	# Same shop, same hour, same rules: the two paths should predict the same
+	# number of customers. The sales they produce differ by the dice, not by
+	# which code ran.
+	var rate := CustomerDemand.customers_per_hour(business, 12)
+	_check(rate > 0.0, "an open, stocked shop expects customers (%.1f/hour)" % rate)
+
+	business.end_day(TimeManager.day_index)
+	BusinessManager.order_stock(business, &"bottled_water", 60)
+	for shelf in business.shelves():
+		business.stock_shelf(shelf.slot_id, &"bottled_water", shelf.room_left())
+	business.set_price(water, water.get_recommended_price())
+
+	for i in 6:
+		BusinessManager.simulate_hour_now(business, 12)
+	var far_customers := business.customer_count_today
+	var far_revenue := business.revenue_today
+	_check(
+		far_customers >= int(rate * 4.0) and far_customers <= int(rate * 8.0),
+		"six simulated hours produce about six hours of customers (%d for %.1f/hour)"
+		% [far_customers, rate]
+	)
+	_check(far_revenue > 0, "and they spend money (+$%d)" % far_revenue)
+	_check(
+		float(far_revenue) / float(maxi(far_customers, 1)) < 40.0,
+		"at a believable basket size ($%.1f each)" % (float(far_revenue) / float(maxi(far_customers, 1)))
+	)
+
+
+# --- Phase H helpers -----------------------------------------------------
+
+func _property() -> CommercialProperty:
+	return PropertyManager.by_id(&"unit_main_18")
+
+
+func _unit_interior() -> RetailUnit:
+	return _main.get_node("Interiors/MainStreetUnit") as RetailUnit
+
+
+func _own_business() -> BusinessInstance:
+	return BusinessManager.business_for_property(&"unit_main_18")
+
+
+func _placement_controller() -> PlacementController:
+	return _main.get_node_or_null("PlacementController") as PlacementController

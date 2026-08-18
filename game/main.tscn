@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://world/district_01.tscn" id="2_district"]
@@ -8,7 +8,10 @@
 [ext_resource type="PackedScene" path="res://world/interiors/apartment.tscn" id="6_apartment"]
 [ext_resource type="Script" path="res://traffic/traffic_debug.gd" id="7_traffic_debug"]
 [ext_resource type="Script" path="res://crime/crime_debug.gd" id="8_crime_debug"]
+[ext_resource type="Script" path="res://business/business_debug.gd" id="11_business_debug"]
 [ext_resource type="PackedScene" path="res://world/interiors/convenience_store.tscn" id="8_store"]
+[ext_resource type="PackedScene" path="res://world/interiors/retail_unit.tscn" id="9_retail_unit"]
+[ext_resource type="Script" path="res://equipment/placement_controller.gd" id="10_placement"]
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1_main")
@@ -23,6 +26,19 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 0)
 [node name="ConvenienceStore" parent="Interiors" instance=ExtResource("8_store")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 60)
 
+[node name="MainStreetUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 140)
+property_id = &"unit_main_18"
+unit_name = "18 Main Street"
+
+[node name="QuaysideUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 220)
+property_id = &"unit_quay_40"
+unit_name = "40 Quayside"
+
+[node name="PlacementController" type="Node3D" parent="."]
+script = ExtResource("10_placement")
+
 [node name="Player" parent="." instance=ExtResource("3_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -60, 0.3, -7.5)
 
@@ -36,3 +52,6 @@ script = ExtResource("7_traffic_debug")
 
 [node name="CrimeDebug" type="CanvasLayer" parent="."]
 script = ExtResource("8_crime_debug")
+
+[node name="BusinessDebug" type="CanvasLayer" parent="."]
+script = ExtResource("11_business_debug")

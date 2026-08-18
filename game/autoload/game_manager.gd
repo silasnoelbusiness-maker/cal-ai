@@ -47,6 +47,12 @@ var cutscene_active: bool = false:
 		cutscene_active = value
 		_apply_pause()
 
+## True while the player is placing a piece of business equipment. The world
+## keeps running — placement is a mode, not a menu — so this exists to tell the
+## handful of things that share those inputs (the left button, R) to stand down
+## rather than to freeze anything.
+var placement_active: bool = false
+
 ## The currently controlled player. Registered by the player itself so that
 ## nothing has to hard-code a scene path to it.
 var player: Node3D = null

@@ -4,18 +4,18 @@
 
 [resource]
 script = ExtResource("1_item_data")
-id = &"energy_drink"
-display_name = "Energy Drink"
-description = "Keeps you upright through a double shift."
+id = &"soda_can"
+display_name = "Soda"
+description = "Cold, fizzy and mostly sugar."
 category = 1
-price = 6
+price = 5
 max_stack = 5
-icon_color = Color(0.352941, 0.717647, 0.898039, 1)
+icon_color = Color(0.780392, 0.294118, 0.278431, 1)
 wholesale_cost = 2
-recommended_price = 6
-demand_weight = 0.9
+recommended_price = 5
+demand_weight = 1.2
 consumable = true
-restores_hunger = 5.0
-restores_energy = 32.0
+restores_hunger = 6.0
+restores_energy = 12.0
 restores_health = 0.0
 use_minutes = 2

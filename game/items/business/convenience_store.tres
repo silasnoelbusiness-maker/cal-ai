@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="BusinessTypeData" load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://business/business_type_data.gd" id="1_business_type"]
+[ext_resource type="Resource" path="res://items/definitions/bottled_water.tres" id="2_water"]
+[ext_resource type="Resource" path="res://items/definitions/soda_can.tres" id="3_soda"]
+[ext_resource type="Resource" path="res://items/definitions/energy_drink.tres" id="4_energy"]
+[ext_resource type="Resource" path="res://items/definitions/snack_bar.tres" id="5_snack"]
+[ext_resource type="Resource" path="res://items/definitions/basic_meal.tres" id="6_meal"]
+
+[resource]
+script = ExtResource("1_business_type")
+type_id = &"convenience_store"
+display_name = "Convenience Store"
+description = "Drinks, snacks and ready meals sold to passing trade."
+required_roles = [1, 0]
+minimum_shelf_units = 1
+catalogue = [ExtResource("2_water"), ExtResource("3_soda"), ExtResource("4_energy"), ExtResource("5_snack"), ExtResource("6_meal")]
+default_opening_hour = 8
+default_closing_hour = 20
+base_storage_capacity = 60
+peak_customers_per_hour = 7.0
+basket_range = Vector2i(1, 3)

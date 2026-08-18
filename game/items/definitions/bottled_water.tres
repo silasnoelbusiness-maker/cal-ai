@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"bottled_water"
+display_name = "Bottled Water"
+description = "Still water in a plastic bottle. Sells all day, every day."
+category = 1
+price = 3
+max_stack = 5
+icon_color = Color(0.529412, 0.72549, 0.803922, 1)
+wholesale_cost = 1
+recommended_price = 3
+demand_weight = 1.4
+consumable = true
+restores_hunger = 3.0
+restores_energy = 3.0
+restores_health = 0.0
+use_minutes = 1

@@ -1,0 +1,103 @@
+class_name CustomerDemand
+extends RefCounted
+## What one shopper wants, and whether they will pay for it.
+##
+## Pure functions over a BusinessInstance, and the only place the rules live.
+## The customer walking the aisles and the aggregated simulation that runs while
+## the player is across town both call these, which is what stops a shop earning
+## differently depending on whether anybody is watching it.
+
+## Items this shop has on a shelf right now, weighted by how much people want
+## them. Returns null when the shelves are bare.
+static func pick_item(business: BusinessInstance, rng: RandomNumberGenerator) -> ItemData:
+	var candidates: Array[ItemData] = []
+	var weights: Array[float] = []
+	var total := 0.0
+	for item in business.catalogue():
+		if business.shelf_stock_of(item.id) <= 0:
+			continue
+		var weight := maxf(item.demand_weight, 0.01)
+		candidates.append(item)
+		weights.append(weight)
+		total += weight
+	if candidates.is_empty():
+		return null
+
+	var roll := rng.randf() * total
+	for i in candidates.size():
+		roll -= weights[i]
+		if roll <= 0.0:
+			return candidates[i]
+	return candidates[candidates.size() - 1]
+
+
+## What somebody came in for, whether or not the shop has it. Used to tell a
+## genuine lost sale from a customer who never wanted anything.
+static func pick_wanted_item(business: BusinessInstance, rng: RandomNumberGenerator) -> ItemData:
+	var stocked := pick_item(business, rng)
+	if stocked != null:
+		return stocked
+	var list := business.catalogue()
+	if list.is_empty():
+		return null
+	return list[rng.randi_range(0, list.size() - 1)]
+
+
+static func basket_size(business: BusinessInstance, rng: RandomNumberGenerator) -> int:
+	var definition := business.type_data()
+	if definition == null:
+		return 1
+	return rng.randi_range(
+		maxi(definition.basket_range.x, 1), maxi(definition.basket_range.y, 1)
+	)
+
+
+## The price test. Everything about how customers respond to what the player
+## charges is BusinessInstance.purchase_chance; this is the roll against it.
+static func will_buy(business: BusinessInstance, item: ItemData, rng: RandomNumberGenerator) -> bool:
+	return rng.randf() < business.purchase_chance(item)
+
+
+## How many people an open shop should expect this hour.
+##
+## Three things scale it: the time of day, the shop's reputation, and how much of
+## its range is actually on the shelves. A shop with one product stocked gets a
+## fraction of the trade of a full one, which is what makes restocking pay.
+static func customers_per_hour(business: BusinessInstance, hour: int) -> float:
+	var definition := business.type_data()
+	if definition == null:
+		return 0.0
+	return (
+		definition.peak_customers_per_hour
+		* time_of_day_factor(hour)
+		* business.reputation_multiplier()
+		* range_factor(business)
+	)
+
+
+## Passing trade by hour: quiet overnight, busy at lunch and after work.
+static func time_of_day_factor(hour: int) -> float:
+	if hour >= 11 and hour <= 13:
+		return 1.0
+	if hour >= 16 and hour <= 19:
+		return 0.95
+	if hour >= 8 and hour <= 21:
+		return 0.7
+	if hour >= 6 and hour <= 23:
+		return 0.35
+	return 0.12
+
+
+## Fraction of the shop's range that is buyable, softened so a shop with half
+## its lines in stock still does most of the trade.
+static func range_factor(business: BusinessInstance) -> float:
+	var list := business.catalogue()
+	if list.is_empty():
+		return 0.0
+	var stocked := 0
+	for item in list:
+		if business.shelf_stock_of(item.id) > 0:
+			stocked += 1
+	if stocked == 0:
+		return 0.0
+	return lerpf(0.45, 1.0, float(stocked) / float(list.size()))

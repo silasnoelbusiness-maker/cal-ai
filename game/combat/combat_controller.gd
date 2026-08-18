@@ -124,6 +124,9 @@ func can_attack() -> bool:
 		return false
 	if GameManager.is_paused() or GameManager.cutscene_active:
 		return false
+	# The left button is putting a shelf down, not throwing a punch.
+	if GameManager.placement_active:
+		return false
 	return _cooldown <= 0.0
 
 

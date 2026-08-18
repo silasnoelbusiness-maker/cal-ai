@@ -160,6 +160,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("camera_zoom_out"):
 		distance = clampf(distance + zoom_step, min_distance, max_distance)
 	elif event.is_action_pressed("camera_reset"):
+		# R turns the equipment while a placement is running.
+		if GameManager.placement_active:
+			return
 		reset_orientation()
 	elif event is InputEventMouseMotion and Input.is_action_pressed("camera_look"):
 		yaw_degrees -= event.relative.x * mouse_sensitivity
