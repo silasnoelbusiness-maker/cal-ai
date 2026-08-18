@@ -70,7 +70,10 @@ func _build_letting() -> void:
 	_subtitle.text = _property.address
 
 	_add_row("Property", _property.property_type)
-	_add_row("Size", "%s · %d m²" % [_property.size_label, _property.floor_area])
+	_add_row("Size", "%s · %d m²" % [_property.size_label(), _property.floor_area])
+	_add_row("Location", "%s · up to %d customers" % [
+		_property.location_label(), _property.customer_capacity
+	])
 	_add_row("Rent", "%s every %d days" % [
 		BusinessUIKit.money(_property.rent_amount), _property.rent_interval_days
 	])

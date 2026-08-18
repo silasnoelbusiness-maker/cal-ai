@@ -40,6 +40,11 @@ extends Resource
 ## Speed (m/s) at which steering authority is fully available.
 @export var full_steer_speed: float = 3.0
 
+@export_group("Value")
+## What the car is worth second hand. Only the player's own vehicles count
+## toward their net worth; a stolen one is not theirs to sell.
+@export var resale_value: int = 4500
+
 @export_group("Durability")
 @export var max_health: float = 100.0
 ## Impact speed (m/s) below which a collision does no damage at all.

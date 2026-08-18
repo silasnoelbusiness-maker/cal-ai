@@ -9,15 +9,19 @@ extends Control
 
 signal opened()
 signal closed()
+signal empire_requested()
 
-enum Page { OVERVIEW, INVENTORY, PRICING, EQUIPMENT, EMPLOYEES, FINANCES, HOURS, SHELF }
+enum Page {
+	OVERVIEW, INVENTORY, PRICING, EQUIPMENT, EMPLOYEES, MARKETING, FINANCES, HOURS, SHELF
+}
 
 const PAGE_NAMES := {
 	Page.OVERVIEW: "OVERVIEW",
 	Page.INVENTORY: "INVENTORY",
 	Page.PRICING: "PRICING",
 	Page.EQUIPMENT: "EQUIPMENT",
-	Page.EMPLOYEES: "EMPLOYEES",
+	Page.EMPLOYEES: "STAFF",
+	Page.MARKETING: "GROWTH",
 	Page.FINANCES: "FINANCES",
 	Page.HOURS: "HOURS",
 }
@@ -32,6 +36,9 @@ var _business: BusinessInstance = null
 var _page: Page = Page.OVERVIEW
 var _shelf: BusinessEquipment = null
 var _transfer_amount: int = 500
+## Set by the first press of SELL, cleared by anything else. A business is not
+## sold by one click.
+var _confirm_sale: bool = false
 
 
 func _ready() -> void:
@@ -108,6 +115,7 @@ func show_tab(page: Page) -> void:
 
 func _show_page(page: Page) -> void:
 	_page = page
+	_confirm_sale = false
 	_shelf = null if page != Page.SHELF else _shelf
 	_status.text = ""
 	_build_tabs()
@@ -133,6 +141,7 @@ func _rebuild() -> void:
 		Page.PRICING: _build_pricing()
 		Page.EQUIPMENT: _build_equipment()
 		Page.EMPLOYEES: _build_employees()
+		Page.MARKETING: _build_growth()
 		Page.FINANCES: _build_finances()
 		Page.HOURS: _build_hours()
 		Page.SHELF: _build_shelf()
@@ -162,6 +171,10 @@ func _build_overview() -> void:
 		BusinessUIKit.tone_for(_business.profit_today())
 	)
 	_pair("Reputation", "%d%%" % roundi(_business.reputation))
+	_pair("Profit margin", "%d%%" % roundi(_business.profit_margin() * 100.0))
+	_pair("Estimated value", BusinessUIKit.money(_business.estimated_value()), BusinessUIKit.ACCENT)
+	if _business.total_debt() > 0:
+		_pair("Debt", BusinessUIKit.money(-_business.total_debt()), BusinessUIKit.BAD)
 	_pair("Simulation", BusinessManager.simulation_mode(_business))
 
 	_rows.add_child(BusinessUIKit.heading("Move money"))
@@ -173,6 +186,28 @@ func _build_overview() -> void:
 	var withdraw := BusinessUIKit.button("WITHDRAW", 130.0)
 	withdraw.pressed.connect(_on_withdraw_pressed)
 	_rows.add_child(BusinessUIKit.row([amount, deposit, withdraw]))
+
+	_rows.add_child(BusinessUIKit.heading("The whole company"))
+	var empire := BusinessUIKit.button("MY COMPANY", 160.0)
+	empire.pressed.connect(func() -> void: empire_requested.emit())
+	_rows.add_child(BusinessUIKit.row([empire]))
+
+	_rows.add_child(BusinessUIKit.heading("Getting out"))
+	var shut := BusinessUIKit.button("CLOSE BUSINESS", 170.0)
+	shut.pressed.connect(_on_close_business)
+	# Selling asks twice, because it cannot be undone.
+	var sell := BusinessUIKit.button(
+		"SELL FOR %s" % BusinessUIKit.money(_business.sale_price()) if _confirm_sale
+		else "SELL BUSINESS", 210.0
+	)
+	sell.pressed.connect(_on_sell_pressed)
+	_rows.add_child(BusinessUIKit.row([shut, sell]))
+	if _confirm_sale:
+		_note(
+			"Press again to sell %s for %s. The lease ends, the staff go, and it cannot be undone."
+			% [_business.business_name, BusinessUIKit.money(_business.sale_price())],
+			BusinessUIKit.BAD
+		)
 
 
 func _on_deposit_pressed() -> void:
@@ -193,37 +228,103 @@ func _report_transfer(result: int, success: String) -> void:
 		else "That transfer is not possible.", BusinessUIKit.BAD)
 
 
+func _on_close_business() -> void:
+	BusinessManager.close_business(_business)
+	_confirm_sale = false
+	_rebuild()
+
+
+func _on_sell_pressed() -> void:
+	if not _confirm_sale:
+		_confirm_sale = true
+		_rebuild()
+		return
+	var proceeds := BusinessManager.sell_business(_business)
+	_confirm_sale = false
+	_business = BusinessManager.primary_business()
+	if _business == null:
+		close()
+		GameManager.notify("SOLD FOR $%d" % proceeds, GameManager.Tone.GOOD)
+		return
+	_rebuild()
+
+
 # --- Inventory -----------------------------------------------------------
 
 func _build_inventory() -> void:
 	_pair("Store room", "%d / %d units" % [_business.storage_used(), _business.storage_capacity()])
-	_rows.add_child(BusinessUIKit.heading("Stock"))
 
-	for item in _business.catalogue():
+	var incoming := BusinessManager.outstanding_orders(_business)
+	if not incoming.is_empty():
+		_rows.add_child(BusinessUIKit.heading("On its way (%d)" % incoming.size()))
+		for order in incoming:
+			var contents: Array[String] = []
+			for item_id in order.items:
+				var ordered := ItemCatalogue.by_id(item_id)
+				contents.append("%s x%d" % [
+					ordered.display_name if ordered != null else String(item_id),
+					int(order.items[item_id]),
+				])
+			_rows.add_child(BusinessUIKit.row([
+				BusinessUIKit.stretch_label(", ".join(contents), 14),
+				BusinessUIKit.label(order.status_text(), 12, BusinessUIKit.ACCENT),
+				BusinessUIKit.label(
+					"placed by the manager" if order.automatic else "", 12, BusinessUIKit.MUTED
+				),
+				BusinessUIKit.value_label("arriving %s" % order.arrival_text(), 13),
+			]))
+
+	# A kitchen orders ingredients and sells what it makes from them, so the two
+	# lists are not the same one.
+	if _business.serves_prepared_goods():
+		_rows.add_child(BusinessUIKit.heading("Menu"))
+		for product in _business.catalogue():
+			var possible := _business.available_units(product)
+			_rows.add_child(BusinessUIKit.row([
+				BusinessUIKit.stretch_label(product.display_name, 14),
+				BusinessUIKit.label(
+					"ingredients for %d" % possible, 13,
+					BusinessUIKit.BAD if possible <= 0 else BusinessUIKit.MUTED
+				),
+				BusinessUIKit.value_label(
+					"costs %s" % BusinessUIKit.money(_business.cost_basis(product)), 12,
+					BusinessUIKit.MUTED
+				),
+			]))
+
+	_rows.add_child(BusinessUIKit.heading("Order from the supplier"))
+
+	for item in _business.orderable():
 		var storage := _business.storage_of(item.id)
 		var shelf := _business.shelf_stock_of(item.id)
 		var warning := ""
 		var colour := BusinessUIKit.TEXT
-		if shelf == 0:
+		var held := storage if _business.serves_prepared_goods() else shelf
+		if held == 0:
 			warning = "  OUT OF STOCK"
 			colour = BusinessUIKit.BAD
-		elif shelf <= BusinessInstance.LOW_STOCK_THRESHOLD:
+		elif held <= BusinessInstance.LOW_STOCK_THRESHOLD:
 			warning = "  LOW STOCK"
 			colour = BusinessUIKit.BAD
 
 		var quantity := BusinessUIKit.spin(0, 200, 20, 5)
 		var order := BusinessUIKit.button("ORDER", 96.0)
 		order.pressed.connect(_on_order_pressed.bind(item, quantity))
-		_rows.add_child(BusinessUIKit.row([
+		var cells: Array = [
 			BusinessUIKit.stretch_label("%s%s" % [item.display_name, warning], 14, colour),
 			BusinessUIKit.label("storage %d" % storage, 13, BusinessUIKit.MUTED),
-			BusinessUIKit.label("shelf %d" % shelf, 13, BusinessUIKit.MUTED),
-			BusinessUIKit.label("cost %s" % BusinessUIKit.money(item.get_wholesale_cost()), 13, BusinessUIKit.MUTED),
-			quantity, order,
-		]))
+		]
+		if not _business.serves_prepared_goods():
+			cells.append(BusinessUIKit.label("shelf %d" % shelf, 13, BusinessUIKit.MUTED))
+		cells.append(BusinessUIKit.label(
+			"cost %s" % BusinessUIKit.money(item.get_wholesale_cost()), 13, BusinessUIKit.MUTED
+		))
+		cells.append(quantity)
+		cells.append(order)
+		_rows.add_child(BusinessUIKit.row(cells))
 
 	_note(
-		"Ordering charges the business account at wholesale. Stock arrives in the store room.",
+		"Ordering charges the account now. The supplier takes a few hours to deliver.",
 		BusinessUIKit.MUTED
 	)
 
@@ -377,12 +478,21 @@ func _build_employees() -> void:
 			worker.shift_end_hour = int(value)
 			BusinessManager.business_changed.emit(_business)
 		)
+		var role := OptionButton.new()
+		for name in EmployeeData.Role.keys():
+			role.add_item(String(name).capitalize())
+		role.selected = int(worker.role)
+		role.custom_minimum_size = Vector2(120, 30)
+		role.item_selected.connect(func(index: int) -> void:
+			worker.assign_role(index as EmployeeData.Role)
+			BusinessManager.business_changed.emit(_business)
+		)
 		var dismiss := BusinessUIKit.button("DISMISS", 100.0)
 		dismiss.pressed.connect(_on_dismiss_pressed.bind(worker))
 		_rows.add_child(BusinessUIKit.row([
-			BusinessUIKit.stretch_label(
-				"%s  ·  %s" % [worker.employee_name, worker.get_role_name()], 14
-			),
+			BusinessUIKit.stretch_label(worker.employee_name, 14),
+			role,
+			BusinessUIKit.label("skill %d" % worker.relevant_skill(), 12, BusinessUIKit.MUTED),
 			BusinessUIKit.label("$%d/h" % worker.hourly_wage, 13, BusinessUIKit.MUTED),
 			BusinessUIKit.label(
 				"served %d today" % worker.customers_served_today, 12, BusinessUIKit.MUTED
@@ -390,17 +500,93 @@ func _build_employees() -> void:
 			start, finish, dismiss,
 		]))
 
+	_build_manager_settings()
+
 	_rows.add_child(BusinessUIKit.heading("Available workers"))
 	for candidate in BusinessManager.get_candidates():
+		var wanted := OptionButton.new()
+		for name in EmployeeData.Role.keys():
+			wanted.add_item(String(name).capitalize())
+		wanted.selected = int(EmployeeData.Role.CASHIER)
+		wanted.custom_minimum_size = Vector2(120, 30)
 		var hire := BusinessUIKit.button("HIRE", 90.0)
-		hire.pressed.connect(_on_hire_pressed.bind(candidate))
+		hire.pressed.connect(_on_hire_pressed.bind(candidate, wanted))
 		_rows.add_child(BusinessUIKit.row([
 			BusinessUIKit.stretch_label(candidate.employee_name, 14),
-			BusinessUIKit.label("checkout %d" % candidate.skill_checkout, 12, BusinessUIKit.MUTED),
-			BusinessUIKit.label("stocking %d" % candidate.skill_stocking, 12, BusinessUIKit.MUTED),
-			BusinessUIKit.label("$%d/hour" % candidate.hourly_wage, 13),
-			hire,
+			BusinessUIKit.label("till %d" % candidate.skill_checkout, 12, BusinessUIKit.MUTED),
+			BusinessUIKit.label("stock %d" % candidate.skill_stocking, 12, BusinessUIKit.MUTED),
+			BusinessUIKit.label("bar %d" % candidate.skill_barista, 12, BusinessUIKit.MUTED),
+			BusinessUIKit.label("mgmt %d" % candidate.skill_management, 12, BusinessUIKit.MUTED),
+			wanted, hire,
 		]))
+
+
+## What the manager may do without being asked. Every one of these is off until
+## the player turns it on: automation that spends money nobody authorised is a
+## bug however convenient it is.
+func _build_manager_settings() -> void:
+	var boss := _business.manager()
+	_rows.add_child(BusinessUIKit.heading("Manager"))
+	if boss == null:
+		_rows.add_child(BusinessUIKit.row([
+			BusinessUIKit.stretch_label(
+				"No manager. Hire one to have the shop run itself while you are away.",
+				13, BusinessUIKit.MUTED
+			)
+		]))
+		return
+
+	_rows.add_child(BusinessUIKit.row([
+		BusinessUIKit.stretch_label("%s runs this place" % boss.employee_name, 14),
+		BusinessUIKit.label(
+			"management %d  ·  $%d/h" % [boss.skill_management, boss.hourly_wage],
+			12, BusinessUIKit.MUTED
+		),
+	]))
+
+	var open_toggle := _toggle("Open and close to the published hours", _business.auto_open)
+	open_toggle.toggled.connect(func(on: bool) -> void:
+		_business.auto_open = on
+		_business.changed.emit()
+	)
+	var restock_toggle := _toggle("Keep the shelves filled from the store room", _business.auto_restock)
+	restock_toggle.toggled.connect(func(on: bool) -> void:
+		_business.auto_restock = on
+		_business.changed.emit()
+	)
+	var order_toggle := _toggle("Reorder stock when it runs low", _business.auto_order)
+	order_toggle.toggled.connect(func(on: bool) -> void:
+		_business.auto_order = on
+		_business.changed.emit()
+	)
+	_rows.add_child(BusinessUIKit.row([open_toggle]))
+	_rows.add_child(BusinessUIKit.row([restock_toggle]))
+	_rows.add_child(BusinessUIKit.row([order_toggle]))
+
+	var budget := BusinessUIKit.spin(0, 5000, _business.auto_order_budget, 50)
+	budget.value_changed.connect(func(value: float) -> void:
+		_business.auto_order_budget = int(value)
+	)
+	var minimum := BusinessUIKit.spin(0, 200, _business.auto_order_minimum, 5)
+	minimum.value_changed.connect(func(value: float) -> void:
+		_business.auto_order_minimum = int(value)
+	)
+	var target := BusinessUIKit.spin(0, 300, _business.auto_order_target, 5)
+	target.value_changed.connect(func(value: float) -> void:
+		_business.auto_order_target = int(value)
+	)
+	_rows.add_child(BusinessUIKit.row([
+		BusinessUIKit.stretch_label("Order up to, when below, to a total of", 13, BusinessUIKit.MUTED),
+		budget, minimum, target,
+	]))
+
+
+func _toggle(text: String, pressed: bool) -> CheckBox:
+	var box := CheckBox.new()
+	box.text = text
+	box.button_pressed = pressed
+	box.add_theme_font_size_override("font_size", 13)
+	return box
 
 	var refresh := BusinessUIKit.button("NEW CANDIDATES", 170.0)
 	refresh.pressed.connect(func() -> void: BusinessManager.refresh_candidates())
@@ -408,13 +594,85 @@ func _build_employees() -> void:
 	_note("Wages are charged for the hours actually worked, when the shift ends.", BusinessUIKit.MUTED)
 
 
-func _on_hire_pressed(candidate: EmployeeData) -> void:
-	BusinessManager.hire(_business, candidate)
+func _on_hire_pressed(candidate: EmployeeData, role: OptionButton) -> void:
+	BusinessManager.hire(_business, candidate, role.selected)
 	_rebuild()
 
 
 func _on_dismiss_pressed(worker: EmployeeData) -> void:
-	_business.fire(worker.employee_id)
+	BusinessManager.fire(_business, worker.employee_id)
+	_rebuild()
+
+
+# --- Growth: marketing and upgrades --------------------------------------
+
+func _build_growth() -> void:
+	_rows.add_child(BusinessUIKit.heading("Marketing"))
+	var running := _business.active_campaigns()
+	if running.is_empty():
+		_rows.add_child(BusinessUIKit.row([
+			BusinessUIKit.stretch_label("Nothing running.", 13, BusinessUIKit.MUTED)
+		]))
+	for campaign in running:
+		_rows.add_child(BusinessUIKit.row([
+			BusinessUIKit.stretch_label(campaign.display_name, 14, BusinessUIKit.GOOD),
+			BusinessUIKit.label(
+				"+%d%% customers" % roundi(campaign.demand_bonus * 100.0), 12, BusinessUIKit.MUTED
+			),
+			BusinessUIKit.value_label(
+				"%d days left" % campaign.days_left(TimeManager.day_index), 13
+			),
+		]))
+
+	for campaign in MarketingCampaign.catalogue():
+		var start := BusinessUIKit.button("START %s" % BusinessUIKit.money(campaign.cost), 150.0)
+		start.pressed.connect(_on_campaign_pressed.bind(campaign))
+		_rows.add_child(BusinessUIKit.row([
+			BusinessUIKit.stretch_label(campaign.display_name, 14),
+			BusinessUIKit.label("%d days" % campaign.duration_days, 12, BusinessUIKit.MUTED),
+			BusinessUIKit.label(
+				"+%d%% customers" % roundi(campaign.demand_bonus * 100.0), 12, BusinessUIKit.MUTED
+			),
+			start,
+		]))
+	_note(
+		"Advertising brings people in. It does not make them buy — that is what your prices do.",
+		BusinessUIKit.MUTED
+	)
+
+	_rows.add_child(BusinessUIKit.heading("Upgrades"))
+	for upgrade in BusinessUpgrade.available_for(_business.type_id):
+		var owned := _business.has_upgrade(upgrade.upgrade_id)
+		var buy := BusinessUIKit.button(
+			"FITTED" if owned else "BUY %s" % BusinessUIKit.money(upgrade.cost), 150.0
+		)
+		buy.disabled = owned
+		buy.pressed.connect(_on_upgrade_pressed.bind(upgrade))
+		_rows.add_child(BusinessUIKit.row([
+			BusinessUIKit.stretch_label(
+				upgrade.display_name, 14,
+				BusinessUIKit.GOOD if owned else BusinessUIKit.TEXT
+			),
+			BusinessUIKit.label(upgrade.description, 12, BusinessUIKit.MUTED),
+			buy,
+		]))
+
+
+func _on_campaign_pressed(campaign: MarketingCampaign) -> void:
+	var result := BusinessManager.start_campaign(_business, campaign.campaign_id)
+	if result == BusinessManager.PurchaseResult.OK:
+		_note("%s running for %d days." % [campaign.display_name, campaign.duration_days], BusinessUIKit.GOOD)
+	else:
+		_note(BusinessManager.describe_purchase(result), BusinessUIKit.BAD)
+	_rebuild()
+
+
+func _on_upgrade_pressed(upgrade: BusinessUpgrade) -> void:
+	var result := BusinessManager.buy_upgrade(_business, upgrade.upgrade_id)
+	if result == BusinessManager.PurchaseResult.OK:
+		_note("%s fitted." % upgrade.display_name, BusinessUIKit.GOOD)
+	else:
+		_note(BusinessManager.describe_purchase(result), BusinessUIKit.BAD)
 	_rebuild()
 
 
@@ -445,6 +703,24 @@ func _build_finances() -> void:
 		BusinessUIKit.tone_for(_business.lifetime_profit())
 	)
 	_pair("Units sold", str(_business.lifetime_units_sold))
+
+	var week := _business.weekly_report()
+	if int(week["days"]) > 0:
+		_rows.add_child(BusinessUIKit.heading("This week (%d days)" % int(week["days"])))
+		_pair("Revenue", BusinessUIKit.money(int(week["revenue"])), BusinessUIKit.GOOD)
+		_pair("Cost of goods sold", BusinessUIKit.money(-int(week["cogs"])))
+		_pair("Wages", BusinessUIKit.money(-int(week["wages"])))
+		_pair("Rent", BusinessUIKit.money(-int(week["rent"])))
+		_pair("Marketing", BusinessUIKit.money(-int(week["marketing"])))
+		_pair("Utilities", BusinessUIKit.money(-int(week["utilities"])))
+		_pair("Loan payments", BusinessUIKit.money(-int(week["loans"])))
+		_pair(
+			"Net profit", BusinessUIKit.money(int(week["profit"])),
+			BusinessUIKit.tone_for(int(week["profit"]))
+		)
+		_pair("Customers", str(int(week["customers"])))
+		_pair("Average sale", "$%.2f" % float(week["average_sale"]))
+		_pair("Margin", "%d%%" % roundi(float(week["margin"]) * 100.0))
 
 	if not _business.last_report.is_empty():
 		_rows.add_child(BusinessUIKit.heading("Yesterday's report"))

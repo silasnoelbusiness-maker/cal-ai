@@ -13,7 +13,7 @@ extends Pedestrian
 
 signal finished(customer: CustomerAI)
 
-enum Stage { ARRIVING, BROWSING, QUEUEING, PAYING, LEAVING, DONE }
+enum Stage { ARRIVING, BROWSING, QUEUEING, PAYING, WAITING, LEAVING, DONE }
 
 ## How long they stand at a shelf deciding.
 @export var browse_seconds: float = 1.6
@@ -41,6 +41,11 @@ var _repaths: int = 0
 ## The item they are currently walking to a shelf to pick up.
 var _pending_item: ItemData = null
 var _own_rng := RandomNumberGenerator.new()
+## Whether this business makes what it sells. A coffee shop has nothing to
+## browse: the menu is on the wall, so they queue, order, and wait for it.
+var _prepared: bool = false
+## Seconds left of watching their drink being made.
+var _collection_wait: float = 0.0
 
 
 func setup(
@@ -54,6 +59,7 @@ func setup(
 	_exit_point = exit_point
 	_own_rng.seed = rng.randi()
 	wanders = false
+	_prepared = business.serves_prepared_goods()
 
 	# Decided on the way in, like a real shopping list: what they came for is
 	# not affected by what they find.
@@ -62,6 +68,10 @@ func setup(
 		if item != null and not _shopping_list.has(item):
 			_shopping_list.append(item)
 	_go_to(_threshold)
+
+
+func is_waiting_for_order() -> bool:
+	return stage == Stage.WAITING
 
 
 func wanted_items() -> Array[ItemData]:
@@ -79,13 +89,17 @@ func set_queue_slot(slot: int, position: Vector3) -> void:
 
 
 ## Called by whoever is on the till. Rings the basket through and sends them out.
-func serve() -> int:
+func serve(server: EmployeeData = null) -> int:
 	if stage != Stage.QUEUEING and stage != Stage.PAYING:
 		return 0
 	stage = Stage.PAYING
 	var revenue := 0
+	var wait := 0.0
 	for item in basket:
-		revenue += _business.record_sale(item, 1)
+		if _business.record_sale(item, 1) <= 0:
+			continue
+		revenue += _business.price_of(item)
+		wait += _business.preparation_seconds(item, server)
 	if revenue > 0:
 		_business.add_satisfaction(0.15 if _waited < patience_seconds * 0.4 else 0.05)
 	else:
@@ -93,6 +107,16 @@ func serve() -> int:
 		_business.record_lost_sale()
 		_business.add_satisfaction(-0.3)
 	basket.clear()
+
+	if _spawner != null:
+		_spawner.leave_queue(self)
+	# A drink has to be made. They stand aside and wait for it rather than
+	# holding up the queue, which is what a coffee shop actually looks like.
+	if wait > 0.0:
+		stage = Stage.WAITING
+		_collection_wait = wait
+		stop()
+		return revenue
 	_leave()
 	return revenue
 
@@ -113,11 +137,15 @@ func _process(delta: float) -> void:
 	match stage:
 		Stage.ARRIVING:
 			if _arrived():
-				_begin_browsing()
+				_begin_shopping()
 		Stage.BROWSING:
 			_tick_browsing()
 		Stage.QUEUEING:
 			_tick_queueing(delta)
+		Stage.WAITING:
+			_collection_wait -= delta
+			if _collection_wait <= 0.0:
+				_leave()
 		Stage.LEAVING:
 			if _arrived():
 				_finish()
@@ -127,10 +155,35 @@ func _process(delta: float) -> void:
 
 # --- Stages --------------------------------------------------------------
 
-func _begin_browsing() -> void:
+## Where the two kinds of business part company. In a shop the customer walks
+## the aisles and picks things up; at a counter they read the board and order.
+func _begin_shopping() -> void:
+	if _prepared:
+		_order_from_the_counter()
+		return
 	stage = Stage.BROWSING
 	_timer = 0.0
 	_next_shelf()
+
+
+## Everything they want that the shop can actually make and they will pay for,
+## decided at the counter rather than at a shelf.
+func _order_from_the_counter() -> void:
+	for item in _shopping_list:
+		if _business.available_units(item) <= 0:
+			_business.record_lost_sale()
+			_business.add_satisfaction(-0.2)
+			continue
+		if not CustomerDemand.will_buy(_business, item, _own_rng):
+			_business.add_satisfaction(-0.15)
+			continue
+		basket.append(item)
+	_shopping_list.clear()
+
+	if basket.is_empty():
+		_abandon("nothing they wanted")
+		return
+	_join_queue()
 
 
 ## Walks to a shelf holding the next thing on the list. Nothing on the list left

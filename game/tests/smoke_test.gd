@@ -119,6 +119,24 @@ func _run() -> void:
 	await _test_business_save_load()
 	_test_simulation_consistency()
 
+	# Phase I: the business empire.
+	await _test_second_property()
+	await _test_coffee_shop()
+	await _test_coffee_customer()
+	await _test_two_businesses_trading()
+	await _test_stocker()
+	await _test_manager()
+	await _test_delivery()
+	_test_marketing()
+	_test_upgrades()
+	_test_valuation_and_net_worth()
+	_test_loans()
+	await _test_time_skip()
+	await _test_empire_and_crime()
+	await _test_empire_save_load()
+	await _test_old_save_migration()
+	await _test_sell_business()
+
 	_report()
 
 
@@ -1672,7 +1690,10 @@ func _test_escape() -> void:
 			searching += 1
 	_check(searching > 0, "police search the last known position (%d units)" % searching)
 
-	await _settle(int(4.0 * 60.0))
+	await _wait_until(
+		func() -> bool: return WantedManager.level == 0, 12.0,
+		"the escape countdown to run out"
+	)
 	_check(WantedManager.level == 0, "the wanted level clears")
 	_check(_said("WANTED LEVEL CLEARED"), "WANTED LEVEL CLEARED is shown")
 	_check(not _main.get_node("HUD/Root/TopRight/WantedLabel").visible, "the stars go away")
@@ -2087,6 +2108,22 @@ func _check(condition: bool, description: String) -> void:
 	else:
 		print("  FAIL  ", description)
 		_failures.append(description)
+
+
+## Waits until `condition` is true, or `timeout_seconds` of real time passes.
+##
+## For anything counted in seconds rather than in physics frames — the escape
+## countdown, a delivery — because the two are not a fixed ratio: a heavier scene
+## runs more physics ticks per second of wall clock, and a test calibrated in
+## frames quietly starts failing when the world gets bigger.
+func _wait_until(condition: Callable, timeout_seconds: float, description: String) -> bool:
+	var deadline := Time.get_ticks_msec() + int(timeout_seconds * 1000.0)
+	while Time.get_ticks_msec() < deadline:
+		if bool(condition.call()):
+			return true
+		await _settle(6)
+	push_warning("Timed out waiting for %s" % description)
+	return false
 
 
 func _settle(frames: int) -> void:
@@ -2981,9 +3018,18 @@ func _test_stock() -> void:
 		business.cash_balance == cash_before - water.get_wholesale_cost() * 40,
 		"charged at wholesale, not at the shelf price"
 	)
+	# Phase I: the supplier takes a few hours. The order is real before it lands.
+	_check(business.storage_of(&"bottled_water") == 0, "and does not arrive instantly")
+	_check(
+		BusinessManager.outstanding_orders(business).size() == 1,
+		"there is an order on its way"
+	)
+	BusinessManager.deliver_now(business)
 	_check(business.storage_of(&"bottled_water") == 40, "and it lands in the store room")
+
 	BusinessManager.order_stock(business, &"soda_can", 40)
 	BusinessManager.order_stock(business, &"snack_bar", 20)
+	BusinessManager.deliver_now(business)
 	_check(business.storage_used() == 100, "the store room holds what was ordered")
 
 	_check(
@@ -2995,6 +3041,7 @@ func _test_stock() -> void:
 	# The store room is finite.
 	var room := business.storage_room_left()
 	BusinessManager.order_stock(business, &"bottled_water", room + 50)
+	BusinessManager.deliver_now(business)
 	_check(business.storage_used() <= business.storage_capacity(), "and it cannot be overfilled")
 
 	# --- Shelves ---
@@ -3257,6 +3304,7 @@ func _test_business_runs_while_away() -> void:
 
 	# Make sure there is something to sell and somebody to sell it.
 	BusinessManager.order_stock(business, &"bottled_water", 40)
+	BusinessManager.deliver_now(business)
 	for shelf in business.shelves():
 		business.stock_shelf(shelf.slot_id, &"bottled_water", shelf.room_left())
 	business.manual_override = BusinessInstance.Override.FORCE_OPEN
@@ -3483,6 +3531,7 @@ func _test_business_save_load() -> void:
 	business.closing_hour = 21
 	business.reputation = 63.0
 	BusinessManager.order_stock(business, &"snack_bar", 10)
+	BusinessManager.deliver_now(business)
 
 	var saved := {
 		"name": business.business_name,
@@ -3582,6 +3631,7 @@ func _test_simulation_consistency() -> void:
 
 	business.end_day(TimeManager.day_index)
 	BusinessManager.order_stock(business, &"bottled_water", 60)
+	BusinessManager.deliver_now(business)
 	for shelf in business.shelves():
 		business.stock_shelf(shelf.slot_id, &"bottled_water", shelf.room_left())
 	business.set_price(water, water.get_recommended_price())
@@ -3618,3 +3668,984 @@ func _own_business() -> BusinessInstance:
 
 func _placement_controller() -> PlacementController:
 	return _main.get_node_or_null("PlacementController") as PlacementController
+
+
+# --- Phase I: the business empire ----------------------------------------
+#
+# Picks up where Phase H left off: Silas Market is trading, and everything here
+# is about the second business and what changes once there is more than one.
+# The point of most of these checks is *independence* — two businesses that
+# quietly share a store room, a payroll or a set of books would look fine from
+# inside either one of them.
+
+func _test_second_property() -> void:
+	await _prepare_crime_scene()
+	EconomyManager.restore(30000)
+	await _settle(4)
+
+	var properties := PropertyManager.get_properties()
+	_check(properties.size() >= 4, "the district advertises four units (%d)" % properties.size())
+
+	var small := _property()
+	var medium := _coffee_property()
+	_check(medium != null, "42 Harbour Avenue is one of them")
+	if medium == null:
+		return
+	_check(medium.is_vacant(), "and it is vacant")
+	_check(
+		medium.rent_amount > small.rent_amount,
+		"a bigger unit costs more rent ($%d against $%d)" % [medium.rent_amount, small.rent_amount]
+	)
+	_check(
+		medium.customer_capacity > small.customer_capacity,
+		"and holds more customers (%d against %d)" % [
+			medium.customer_capacity, small.customer_capacity
+		]
+	)
+	_check(
+		medium.location_demand_modifier > small.location_demand_modifier,
+		"on a better pitch (x%.2f against x%.2f)" % [
+			medium.location_demand_modifier, small.location_demand_modifier
+		]
+	)
+	var back_street := PropertyManager.by_id(&"unit_quay_40")
+	_check(
+		back_street != null and back_street.location_demand_modifier < 1.0,
+		"and one of them is cheap for a reason"
+	)
+
+	var cash_before := EconomyManager.cash
+	_check(
+		PropertyManager.lease(medium) == PropertyManager.LeaseResult.OK,
+		"the second lease is signed"
+	)
+	_check(
+		EconomyManager.cash == cash_before - medium.move_in_cost(),
+		"and paid for out of the player's own pocket"
+	)
+	_check(small.is_leased_by_player(), "the first lease is untouched")
+	_check(medium.is_leased_by_player(), "and both are now held")
+	_check(
+		PropertyManager.leased_by_player().size() == 2, "the agent counts two tenancies"
+	)
+
+
+## TESTS 112 and 113 — a coffee shop, which is a different business rather than
+## a repainted one.
+func _test_coffee_shop() -> void:
+	var unit := _coffee_property()
+	var market := _own_business()
+	var interior := _coffee_unit()
+
+	var coffee := BusinessManager.create_business("Noel Coffee", &"coffee_shop", unit)
+	_check(coffee != null, "the coffee shop is created")
+	if coffee == null:
+		return
+	_check(BusinessManager.owned_count() == 2, "two businesses are owned")
+	_check(coffee.business_id != market.business_id, "with different ids")
+	_check(coffee.cash_balance == 0, "and its own empty account")
+	_check(market.cash_balance > 0, "the market's money is still the market's")
+	_check(coffee.serves_prepared_goods(), "a coffee shop makes what it sells")
+	_check(not market.serves_prepared_goods(), "a convenience store does not")
+
+	# What it sells, and what it holds, are different lists.
+	var menu := coffee.catalogue()
+	var supplies := coffee.orderable()
+	_check(menu.size() == 4, "there are four things on the menu (%d)" % menu.size())
+	_check(supplies.size() == 4, "and four ingredients to order (%d)" % supplies.size())
+	_check(menu[0] != supplies[0], "and they are not the same list")
+
+	BusinessManager.deposit_to_business(coffee, 6000)
+	_check(coffee.cash_balance == 6000, "the player funds it")
+
+	# --- Fitting it out ---
+	var controller := _placement_controller()
+	BusinessManager.buy_equipment(coffee, &"service_counter")
+	BusinessManager.buy_equipment(coffee, &"coffee_machine")
+	BusinessManager.buy_equipment(coffee, &"ingredient_store")
+	_check(
+		BusinessManager.buy_equipment(coffee, &"retail_shelf")
+		== BusinessManager.PurchaseResult.NOT_ALLOWED,
+		"a coffee shop cannot buy grocery shelving"
+	)
+
+	await _teleport(interior.global_position + Vector3(0.0, 0.5, 3.0))
+	await _settle(20)
+	_check(interior.is_built(), "walking in builds the room")
+	_check(interior.is_player_inside(), "and the unit knows the player is there")
+
+	controller.begin(coffee, interior, &"service_counter")
+	_check(controller.place_at(Vector3(0.0, 0.0, 1.0), 180.0), "the service counter goes down")
+	controller.begin(coffee, interior, &"coffee_machine")
+	_check(controller.place_at(Vector3(-3.0, 0.0, 1.0), 180.0), "the coffee machine beside it")
+	controller.begin(coffee, interior, &"ingredient_store")
+	_check(controller.place_at(Vector3(0.0, 0.0, -5.0), 0.0), "the ingredient store in the back")
+	await _settle(8)
+
+	_check(
+		coffee.missing_requirements().has("Ingredients"),
+		"it still cannot open: %s" % ", ".join(coffee.missing_requirements())
+	)
+
+	# --- Ingredients ---
+	for ingredient in [&"coffee_beans", &"milk_carton", &"paper_cup", &"tea_leaves"]:
+		BusinessManager.order_stock(coffee, ingredient, 30)
+	BusinessManager.deliver_now(coffee)
+	_check(coffee.storage_of(&"coffee_beans") == 30, "beans arrive in the back")
+	_check(
+		market.storage_of(&"coffee_beans") == 0,
+		"and go to the coffee shop's store room, not the market's"
+	)
+
+	var latte := ItemCatalogue.by_id(&"latte")
+	_check(coffee.available_units(latte) > 0, "there are ingredients for a latte")
+	_check(
+		coffee.cost_basis(latte) == coffee.recipe_for(latte).ingredient_cost(),
+		"and a drink costs what its ingredients cost"
+	)
+	_check(coffee.can_open(), "with a counter, a machine and ingredients it can open")
+
+	coffee.manual_override = BusinessInstance.Override.FORCE_OPEN
+	coffee.set_open(true)
+	_check(coffee.is_open(), "the coffee shop opens")
+
+
+## TEST 113 continued — somebody orders a drink, and it gets made.
+func _test_coffee_customer() -> void:
+	var coffee := _coffee_business()
+	var interior := _coffee_unit()
+	var spawner := interior.get_spawner()
+
+	# A barista, on shift now.
+	BusinessManager.refresh_candidates()
+	var barista := BusinessManager.get_candidates()[0]
+	BusinessManager.hire(coffee, barista, EmployeeData.Role.BARISTA)
+	barista.shift_start_hour = 0
+	barista.shift_end_hour = 23
+	_check(coffee.rostered_barista(TimeManager.hour) == barista, "the barista is on shift")
+	_check(
+		coffee.rostered_cashier(TimeManager.hour) == barista,
+		"and takes the orders as well as making them"
+	)
+
+	await _teleport(interior.global_position + Vector3(0.0, 0.5, 3.0))
+	await _settle(20)
+	interior.call("_refresh_staff")
+	await _settle(10)
+	var on_the_floor := interior.get_staff("Barista")
+	_check(on_the_floor != null, "the barista comes in to work")
+	for i in 80:
+		await _settle(15)
+		if on_the_floor != null and on_the_floor.is_at_station():
+			break
+	_check(on_the_floor != null and on_the_floor.is_at_station(), "and takes their post")
+
+	var beans_before := coffee.storage_of(&"coffee_beans")
+	var revenue_before := coffee.revenue_today
+	var customer := spawner.spawn_customer_now()
+	_check(customer != null, "a customer comes in")
+
+	var served := false
+	for i in 100:
+		await _settle(20)
+		if coffee.revenue_today > revenue_before:
+			served = true
+			break
+	_check(served, "the drink is sold (revenue $%d)" % coffee.revenue_today)
+	_check(
+		coffee.storage_of(&"coffee_beans") < beans_before
+		or coffee.storage_of(&"paper_cup") < 30,
+		"and the ingredients for it are used up"
+	)
+	_check(coffee.units_sold_today > 0, "the sale is counted")
+	_check(
+		BusinessManager.get_statistic(&"drinks_sold") > 0,
+		"and counted as a drink rather than as a grocery"
+	)
+	_check(
+		_own_business().revenue_today != coffee.revenue_today
+		or _own_business().revenue_today == 0,
+		"the two businesses keep separate books"
+	)
+
+
+## TESTS 114 and 85 — both open, both trading, neither borrowing from the other.
+func _test_two_businesses_trading() -> void:
+	var market := _own_business()
+	var coffee := _coffee_business()
+
+	# Somebody on each till, stock in each, both open.
+	BusinessManager.refresh_candidates()
+	if market.rostered_cashier(12) == null:
+		var till := BusinessManager.get_candidates()[0]
+		BusinessManager.hire(market, till, EmployeeData.Role.CASHIER)
+		till.shift_start_hour = 0
+		till.shift_end_hour = 23
+	BusinessManager.order_stock(market, &"bottled_water", 40)
+	BusinessManager.deliver_now(market)
+	for shelf in market.shelves():
+		market.stock_shelf(shelf.slot_id, &"bottled_water", shelf.room_left())
+	market.manual_override = BusinessInstance.Override.FORCE_OPEN
+	market.set_open(true)
+	coffee.manual_override = BusinessInstance.Override.FORCE_OPEN
+	coffee.set_open(true)
+
+	# Out of both of them.
+	await _teleport(Vector3(-40.0, 0.5, 8.4))
+	await _settle(20)
+	_check(
+		BusinessManager.simulation_mode(market) == "FAR"
+		and BusinessManager.simulation_mode(coffee) == "FAR",
+		"the player is at neither shop"
+	)
+
+	market.end_day(TimeManager.day_index)
+	coffee.end_day(TimeManager.day_index)
+	for i in 3:
+		BusinessManager.simulate_hour_now(market, 12)
+		BusinessManager.simulate_hour_now(coffee, 12)
+
+	_check(market.customer_count_today > 0, "the market gets customers (%d)" % market.customer_count_today)
+	_check(coffee.customer_count_today > 0, "the coffee shop gets its own (%d)" % coffee.customer_count_today)
+	_check(market.revenue_today > 0, "the market takes money (+$%d)" % market.revenue_today)
+	_check(coffee.revenue_today > 0, "and so does the coffee shop (+$%d)" % coffee.revenue_today)
+	_check(
+		market.revenue_today != coffee.revenue_today,
+		"and they are not the same number twice"
+	)
+	_check(
+		market.storage_of(&"coffee_beans") == 0,
+		"the market never touches the coffee shop's ingredients"
+	)
+
+	# Closing one does not close the other.
+	BusinessManager.close_business(coffee)
+	_check(not coffee.is_open(), "the coffee shop closes")
+	_check(market.is_open(), "and the market stays open")
+	coffee.manual_override = BusinessInstance.Override.FORCE_OPEN
+	coffee.set_open(true)
+
+
+## TEST 115 — a stocker moves stock, and does not invent it.
+func _test_stocker() -> void:
+	var market := _own_business()
+	var interior := _unit_interior()
+
+	# Empty the shelves, and make sure there is stock in the back to move.
+	for shelf in market.shelves():
+		if shelf.stock_quantity > 0:
+			market.add_storage(shelf.stock_item, shelf.stock_quantity)
+			shelf.stock_quantity = 0
+	BusinessManager.order_stock(market, &"bottled_water", 40)
+	BusinessManager.deliver_now(market)
+	var storage_before := market.storage_used()
+	_check(market.total_shelf_units() == 0, "the shelves are empty")
+	_check(storage_before > 0, "and the store room is not")
+
+	BusinessManager.refresh_candidates()
+	var stocker := BusinessManager.get_candidates()[0]
+	BusinessManager.hire(market, stocker, EmployeeData.Role.STOCKER)
+	stocker.shift_start_hour = 0
+	stocker.shift_end_hour = 23
+	_check(stocker.role == EmployeeData.Role.STOCKER, "a stocker is hired")
+	_check(market.rostered_stocker(TimeManager.hour) == stocker, "and is on shift")
+
+	# Away from the shop, so the hourly simulation does the work.
+	await _teleport(Vector3(-40.0, 0.5, 8.4))
+	await _settle(10)
+	BusinessManager.call("_work_the_stock_room", market, TimeManager.hour)
+
+	_check(market.total_shelf_units() > 0, "the shelves get filled (%d units)" % market.total_shelf_units())
+	_check(
+		market.storage_used() < storage_before,
+		"out of the store room (%d left, was %d)" % [market.storage_used(), storage_before]
+	)
+	_check(
+		market.total_shelf_units() + market.storage_used() == storage_before,
+		"and nothing is created on the way"
+	)
+
+
+## TESTS 116, 117 and 118 — the manager, and the ordering they do.
+func _test_manager() -> void:
+	var market := _own_business()
+
+	BusinessManager.refresh_candidates()
+	var boss := BusinessManager.get_candidates()[2]
+	var wage_before := boss.hourly_wage
+	BusinessManager.hire(market, boss, EmployeeData.Role.MANAGER)
+	_check(market.has_manager(), "a manager is hired")
+	_check(boss.is_manager(), "in the manager's job")
+	_check(
+		boss.hourly_wage >= wage_before,
+		"on manager's money ($%d/hour)" % boss.hourly_wage
+	)
+	_check(
+		boss.hourly_wage > EmployeeData.BASE_WAGE[EmployeeData.Role.CASHIER],
+		"which is more than a cashier costs"
+	)
+	_check(market.management_quality() > 0.0, "and the business knows who runs it")
+
+	# Nothing happens until the player says so.
+	_check(not market.auto_open, "automation is off until it is turned on")
+	market.auto_open = true
+	market.auto_restock = true
+	market.auto_order = true
+
+	# --- Opening up ---
+	market.manual_override = BusinessInstance.Override.FORCE_CLOSED
+	market.set_open(false)
+	TimeManager.set_total_minutes(TimeManager.day_index * 1440.0 + 11.0 * 60.0)
+	await _teleport(Vector3(-40.0, 0.5, 8.4))
+	await _settle(10)
+	BusinessManager.call("_run_manager", market, 11)
+	BusinessManager.call("_update_open_state", market, 11)
+	_check(
+		market.manual_override == BusinessInstance.Override.NONE,
+		"the manager puts the shop back on its published hours"
+	)
+	_check(market.is_open(), "and opens up")
+
+	# --- Restocking ---
+	for shelf in market.shelves():
+		if shelf.stock_quantity > 0:
+			market.add_storage(shelf.stock_item, shelf.stock_quantity)
+			shelf.stock_quantity = 0
+	BusinessManager.order_stock(market, &"soda_can", 30)
+	BusinessManager.deliver_now(market)
+	BusinessManager.call("_run_manager", market, 11)
+	_check(market.total_shelf_units() > 0, "the manager fills the shelves")
+
+	# --- Ordering ---
+	market.storage.clear()
+	market.auto_order_minimum = 20
+	market.auto_order_target = 40
+	market.auto_order_budget = 300
+	var cash_before := market.cash_balance
+	var orders_before := BusinessManager.outstanding_orders(market).size()
+	BusinessManager.call("_run_manager", market, 11)
+	var placed := BusinessManager.outstanding_orders(market)
+	_check(placed.size() > orders_before, "the manager reorders what has run out")
+	_check(market.cash_balance < cash_before, "paying for it out of the business account")
+	_check(
+		cash_before - market.cash_balance <= market.auto_order_budget,
+		"and never beyond the budget set (spent $%d of $%d)"
+		% [cash_before - market.cash_balance, market.auto_order_budget]
+	)
+	var automatic := false
+	for order in placed:
+		if order.automatic:
+			automatic = true
+	_check(automatic, "and the order is marked as theirs rather than the player's")
+
+	# Running the hour again must not reorder anything already on its way.
+	var incoming_before := {}
+	for order in BusinessManager.outstanding_orders(market):
+		for item_id in order.items:
+			incoming_before[item_id] = int(incoming_before.get(item_id, 0)) + 1
+	BusinessManager.call("_run_manager", market, 11)
+	var reordered := ""
+	for order in BusinessManager.outstanding_orders(market):
+		for item_id in order.items:
+			incoming_before[item_id] = int(incoming_before.get(item_id, 0)) - 1
+	for item_id in incoming_before:
+		if int(incoming_before[item_id]) < 0:
+			reordered = String(item_id)
+	_check(
+		reordered.is_empty(),
+		"and never reorders something already on its way (%s)" % reordered
+	)
+
+	BusinessManager.deliver_now(market)
+	_check(market.storage_used() > 0, "the automatic order arrives like any other")
+
+
+## TEST 118 — the delivery itself.
+func _test_delivery() -> void:
+	var market := _own_business()
+	market.credit(2000, "Test funds", &"capital")
+	# Clear the decks: the manager's automatic orders have been filling the back
+	# room, and this test is about one order it can watch all the way in.
+	BusinessManager.deliver_now(market)
+	market.auto_order = false
+	market.storage.clear()
+
+	var before := market.storage_of(&"snack_bar")
+	_check(
+		BusinessManager.order_stock(market, &"snack_bar", 10) == BusinessManager.PurchaseResult.OK,
+		"an order is placed"
+	)
+	var orders := BusinessManager.outstanding_orders(market)
+	_check(orders.size() >= 1, "and is outstanding")
+	var order: PurchaseOrder = orders[orders.size() - 1]
+	_check(order.status == PurchaseOrder.Status.PLACED, "starting as PLACED")
+	_check(market.storage_of(&"snack_bar") == before, "with nothing delivered yet")
+	_check(order.arrives_at > order.placed_at, "and an arrival time in the future")
+
+	# Half way there.
+	order.refresh_status(order.placed_at + (order.arrives_at - order.placed_at) * 0.6)
+	_check(order.status == PurchaseOrder.Status.IN_TRANSIT, "then IN TRANSIT")
+
+	BusinessManager.deliver_now(market)
+	_check(order.status == PurchaseOrder.Status.DELIVERED, "and finally DELIVERED")
+	_check(market.storage_of(&"snack_bar") == before + 10, "the goods arrive exactly once")
+	_check(
+		BusinessManager.outstanding_orders(market).is_empty(),
+		"and the order is off the books"
+	)
+	_check(_said("DELIVERY ARRIVED"), "the player is told")
+
+	# Delivering again must not hand the same goods over twice.
+	BusinessManager.deliver_now(market)
+	_check(market.storage_of(&"snack_bar") == before + 10, "and cannot be delivered twice")
+
+
+## TEST 119 — advertising buys attention, not money.
+func _test_marketing() -> void:
+	var market := _own_business()
+	market.credit(2000, "Test funds", &"capital")
+	market.campaigns.clear()
+
+	var baseline := CustomerDemand.customers_per_hour(market, 12)
+	_check(baseline > 0.0, "a stocked shop expects customers (%.1f/hour)" % baseline)
+	var revenue_before := market.revenue_today
+	var cash_before := market.cash_balance
+
+	var flyers := MarketingCampaign.by_id(&"flyers")
+	_check(
+		BusinessManager.start_campaign(market, &"flyers") == BusinessManager.PurchaseResult.OK,
+		"a campaign is bought"
+	)
+	_check(market.cash_balance == cash_before - flyers.cost, "and paid for")
+	_check(market.revenue_today == revenue_before, "it generates no revenue by itself")
+	_check(market.marketing_today == flyers.cost, "and is booked as marketing spend")
+
+	var boosted := CustomerDemand.customers_per_hour(market, 12)
+	_check(boosted > baseline, "but more people come in (%.1f against %.1f)" % [boosted, baseline])
+	_check(
+		absf(boosted / baseline - (1.0 + flyers.demand_bonus)) < 0.01,
+		"by the campaign's own figure"
+	)
+	_check(market.active_campaigns().size() == 1, "one campaign is running")
+
+	# It runs out on its own.
+	var expiry := market.campaigns[0].expires_on_day
+	market.campaigns[0].expires_on_day = TimeManager.day_index
+	_check(market.expire_campaigns() == 1, "and expires when its days are up")
+	_check(market.active_campaigns().is_empty(), "leaving nothing running")
+	_check(
+		absf(CustomerDemand.customers_per_hour(market, 12) - baseline) < 0.01,
+		"and the trade goes back to what it was"
+	)
+	_check(expiry > TimeManager.day_index, "the campaign had run for its stated days")
+
+
+## TEST 120 — an upgrade helps the shop that bought it and no other.
+func _test_upgrades() -> void:
+	var market := _own_business()
+	var coffee := _coffee_business()
+	market.credit(2000, "Test funds", &"capital")
+
+	var before := CustomerDemand.customers_per_hour(market, 12)
+	var coffee_before := CustomerDemand.customers_per_hour(coffee, 12)
+	_check(
+		BusinessManager.buy_upgrade(market, &"better_signage") == BusinessManager.PurchaseResult.OK,
+		"an upgrade is bought"
+	)
+	_check(market.has_upgrade(&"better_signage"), "the market has it")
+	_check(not coffee.has_upgrade(&"better_signage"), "the coffee shop does not")
+	_check(
+		CustomerDemand.customers_per_hour(market, 12) > before,
+		"it brings the market more customers"
+	)
+	_check(
+		absf(CustomerDemand.customers_per_hour(coffee, 12) - coffee_before) < 0.01,
+		"and does nothing at all for the coffee shop"
+	)
+	_check(
+		BusinessManager.buy_upgrade(market, &"better_signage") == BusinessManager.PurchaseResult.NOT_ALLOWED,
+		"and cannot be bought twice"
+	)
+
+	_check(
+		BusinessManager.buy_upgrade(market, &"second_grinder") == BusinessManager.PurchaseResult.NOT_ALLOWED,
+		"a grocer cannot buy a second coffee grinder"
+	)
+	_check(
+		BusinessManager.buy_upgrade(coffee, &"second_grinder") == BusinessManager.PurchaseResult.OK,
+		"but the coffee shop can"
+	)
+
+	var storage_before := market.storage_capacity()
+	BusinessManager.buy_upgrade(market, &"storage_expansion")
+	_check(
+		market.storage_capacity() > storage_before,
+		"a storage upgrade makes the store room bigger (%d from %d)"
+		% [market.storage_capacity(), storage_before]
+	)
+
+
+## TESTS 121 and 126 — what a business is worth, and what the player is worth.
+func _test_valuation_and_net_worth() -> void:
+	var market := _own_business()
+	var coffee := _coffee_business()
+
+	var value := market.estimated_value()
+	_check(value > 0, "a fitted, stocked shop is worth something ($%d)" % value)
+	_check(market.equipment_value() > 0, "its fittings are part of that")
+	_check(market.inventory_value() > 0, "and so is its stock")
+
+	# More money in the till is more value.
+	market.credit(3000, "Test funds", &"capital")
+	_check(
+		market.estimated_value() > value,
+		"money in the account raises it ($%d from $%d)" % [market.estimated_value(), value]
+	)
+
+	# A run of losses is worth less than a run of profits.
+	var profitable := BusinessInstance.new()
+	profitable.type_id = &"convenience_store"
+	profitable.cash_balance = 2000
+	profitable.reputation = 70.0
+	for i in 5:
+		profitable.recent_reports.append({"profit": 300})
+	var struggling := BusinessInstance.new()
+	struggling.type_id = &"convenience_store"
+	struggling.cash_balance = 2000
+	struggling.reputation = 70.0
+	for i in 5:
+		struggling.recent_reports.append({"profit": -120})
+	_check(
+		profitable.estimated_value() > struggling.estimated_value(),
+		"a profitable shop is worth more than a failing one ($%d against $%d)"
+		% [profitable.estimated_value(), struggling.estimated_value()]
+	)
+
+	# Debt comes off.
+	var indebted := BusinessInstance.new()
+	indebted.type_id = &"convenience_store"
+	indebted.cash_balance = 5000
+	var clean_value := indebted.estimated_value()
+	indebted.add_loan(Loan.create(&"t", &"b", "Test", 4000, 0.1, 200, 7))
+	_check(
+		indebted.estimated_value() < clean_value,
+		"and what a business owes comes off what it is worth"
+	)
+
+	# --- Net worth ---
+	EconomyManager.restore(5000)
+	var worth := BusinessManager.net_worth()
+	_check(worth > 0, "the player is worth something ($%d)" % worth)
+	_check(
+		worth == EconomyManager.cash + BusinessManager.vehicle_value() + BusinessManager.total_business_value(),
+		"cash plus cars plus businesses"
+	)
+	_check(BusinessManager.vehicle_value() > 0, "their own car counts (%d)" % BusinessManager.vehicle_value())
+
+	var summary := BusinessManager.portfolio_summary()
+	_check(int(summary["businesses"]) == 2, "the portfolio counts both businesses")
+	_check(
+		int(summary["business_value"]) == market.estimated_value() + coffee.estimated_value(),
+		"and adds up what they are worth"
+	)
+	_check(int(summary["net_worth"]) == worth, "and agrees about the net worth")
+
+
+## TESTS 123, 124 and 125 — borrowing, paying and settling early.
+func _test_loans() -> void:
+	var market := _own_business()
+	market.loans.clear()
+
+	var cash_before := market.cash_balance
+	var result := BusinessManager.take_loan(market, &"starter")
+	_check(result == BusinessManager.LoanResult.OK, "the bank lends")
+	_check(market.loans.size() == 1, "one loan is on the books")
+	var loan: Loan = market.loans[0]
+	_check(
+		market.cash_balance == cash_before + loan.principal,
+		"the money lands in the business account exactly once"
+	)
+	_check(
+		loan.remaining_balance == loan.principal + loan.total_interest(),
+		"what is owed includes the interest ($%d on $%d)"
+		% [loan.total_interest(), loan.principal]
+	)
+	_check(
+		loan.next_payment_day == TimeManager.day_index + loan.payment_interval_days,
+		"and the first payment is scheduled"
+	)
+	_check(market.total_debt() == loan.remaining_balance, "the business knows what it owes")
+
+	# --- A scheduled payment ---
+	var owed_before := loan.remaining_balance
+	var account_before := market.cash_balance
+	loan.next_payment_day = TimeManager.day_index
+	_check(loan.is_due(TimeManager.day_index), "the payment falls due")
+	BusinessManager.call("_collect_loan_payments")
+	_check(
+		market.cash_balance == account_before - loan.payment_amount,
+		"the payment is taken from the business"
+	)
+	_check(
+		loan.remaining_balance == owed_before - loan.payment_amount,
+		"and comes off the balance"
+	)
+	_check(
+		loan.next_payment_day > TimeManager.day_index, "the next one is scheduled"
+	)
+	_check(_said("LOAN PAYMENT"), "the player is told")
+
+	# Running the day again must not charge twice.
+	var after_one := market.cash_balance
+	BusinessManager.call("_collect_loan_payments")
+	_check(market.cash_balance == after_one, "and is not charged twice for the same week")
+
+	# --- A missed payment ---
+	var stashed := market.cash_balance
+	market.debit(stashed, "Test drain", &"other")
+	loan.next_payment_day = TimeManager.day_index
+	var owed_at_miss := loan.remaining_balance
+	BusinessManager.call("_collect_loan_payments")
+	_check(loan.missed_payments == 1, "a payment that cannot be met is missed")
+	_check(loan.remaining_balance > owed_at_miss, "and costs a little more")
+	_check(_said("PAYMENT MISSED"), "and says so")
+	_check(market.cash_balance >= 0, "the account never goes negative")
+
+	# --- Settling early ---
+	market.credit(20000, "Test funds", &"capital")
+	var paid := BusinessManager.repay_loan(market, loan.loan_id, loan.remaining_balance)
+	_check(paid > 0, "the rest can be paid off early")
+	_check(loan.remaining_balance == 0, "leaving nothing owed")
+	_check(loan.status == Loan.Status.PAID, "and the loan reads PAID")
+	_check(market.total_debt() == 0, "the business is out of debt")
+
+	var after_payoff := market.cash_balance
+	loan.next_payment_day = TimeManager.day_index
+	BusinessManager.call("_collect_loan_payments")
+	_check(market.cash_balance == after_payoff, "a settled loan takes no more payments")
+	_check(
+		BusinessManager.get_statistic(&"loan_interest_paid") > 0,
+		"and the interest paid is on the record"
+	)
+
+
+## TEST 127 — sleeping through a day the businesses trade through.
+func _test_time_skip() -> void:
+	var market := _own_business()
+	var coffee := _coffee_business()
+	market.credit(4000, "Test funds", &"capital")
+	coffee.credit(2000, "Test funds", &"capital")
+
+	# Both open all hours, stocked, staffed.
+	for business in [market, coffee]:
+		business.manual_override = BusinessInstance.Override.FORCE_OPEN
+		business.opening_hour = 0
+		business.closing_hour = 23
+	BusinessManager.order_stock(market, &"bottled_water", 60)
+	for ingredient in [&"coffee_beans", &"milk_carton", &"paper_cup"]:
+		BusinessManager.order_stock(coffee, ingredient, 40)
+	BusinessManager.deliver_now()
+	for shelf in market.shelves():
+		market.stock_shelf(shelf.slot_id, &"bottled_water", shelf.room_left())
+
+	await _teleport(Vector3(-40.0, 0.5, 8.4))
+	await _settle(10)
+	market.end_day(TimeManager.day_index)
+	coffee.end_day(TimeManager.day_index)
+
+	var market_before := market.revenue_today
+	var coffee_before := coffee.revenue_today
+	var day_before := TimeManager.day_index
+
+	# Eight hours of sleep, in one skip.
+	TimeManager.set_total_minutes(day_before * 1440.0 + 8.0 * 60.0)
+	await _settle(4)
+	TimeManager.advance_minutes(8 * 60)
+	await _settle(20)
+
+	_check(TimeManager.hour == 16, "eight hours pass (now %02d:00)" % TimeManager.hour)
+	_check(
+		market.revenue_today > market_before,
+		"the market traded through them (+$%d)" % (market.revenue_today - market_before)
+	)
+	_check(
+		coffee.revenue_today > coffee_before,
+		"and so did the coffee shop (+$%d)" % (coffee.revenue_today - coffee_before)
+	)
+	_check(
+		market.customer_count_today > 4,
+		"a day's worth of customers, not one minute's (%d)" % market.customer_count_today
+	)
+	_check(
+		market.units_sold_today > 0,
+		"and stock actually moved (%d units sold)" % market.units_sold_today
+	)
+
+
+## TEST 128 — the city keeps working around all of it.
+func _test_empire_and_crime() -> void:
+	var market := _own_business()
+	var coffee := _coffee_business()
+	await _prepare_crime_scene()
+	await _teleport(Vector3(-40.0, 0.5, 8.4))
+	await _settle(10)
+
+	market.manual_override = BusinessInstance.Override.FORCE_OPEN
+	market.set_open(true)
+	coffee.manual_override = BusinessInstance.Override.FORCE_OPEN
+	coffee.set_open(true)
+	var market_before := market.revenue_today
+	var coffee_before := coffee.revenue_today
+
+	var record := CrimeManager.report_crime(
+		CrimeManager.CrimeType.CARJACKING, _player.global_position, _player, null
+	)
+	CrimeManager.mark_witnessed(record, _player)
+	CrimeManager.mark_reported(record)
+	WantedManager.on_crime_reported(record)
+	await _settle(10)
+	_check(WantedManager.level >= 1, "the player is wanted (%d stars)" % WantedManager.level)
+
+	for i in 2:
+		BusinessManager.simulate_hour_now(market, 12)
+		BusinessManager.simulate_hour_now(coffee, 12)
+	_check(market.revenue_today > market_before, "the market keeps trading")
+	_check(coffee.revenue_today > coffee_before, "and so does the coffee shop")
+	_check(BusinessManager.owned_count() == 2, "both are still owned")
+
+	# Arrested, and the shops carry on.
+	EconomyManager.restore(2000)
+	WantedManager.request_bust()
+	await _settle(int(WantedManager.bust_hold_seconds * 60.0) + 40)
+	_check(WantedManager.level == 0, "the arrest resolves")
+	_check(market.is_open() and coffee.is_open(), "and neither shop noticed")
+	var after_bust := market.revenue_today
+	BusinessManager.simulate_hour_now(market, 12)
+	_check(market.revenue_today > after_bust, "trade continues afterwards")
+
+
+## TEST 129 — the whole empire through a save file.
+func _test_empire_save_load() -> void:
+	var slot := 96
+	var market := _own_business()
+	var coffee := _coffee_business()
+
+	BusinessManager.company_name = "Noel Holdings"
+	BusinessManager.start_campaign(market, &"social")
+	BusinessManager.order_stock(coffee, &"tea_leaves", 15)
+	market.credit(5000, "Test funds", &"capital")
+	BusinessManager.take_loan(market, &"starter")
+
+	var saved := {
+		"businesses": BusinessManager.owned_count(),
+		"market_cash": market.cash_balance,
+		"coffee_cash": coffee.cash_balance,
+		"market_staff": market.employees.size(),
+		"coffee_staff": coffee.employees.size(),
+		"upgrades": market.upgrades.size(),
+		"campaigns": market.active_campaigns().size(),
+		"orders": BusinessManager.outstanding_orders().size(),
+		"debt": market.total_debt(),
+		"coffee_beans": coffee.storage_of(&"coffee_beans"),
+		"market_shelves": market.total_shelf_units(),
+		"auto_order": market.auto_order,
+	}
+
+	_check(SaveManager.save_to_slot(slot), "the empire saves")
+
+	# Wreck it thoroughly.
+	BusinessManager.company_name = "Wrong"
+	market.cash_balance = 3
+	market.upgrades.clear()
+	market.campaigns.clear()
+	market.loans.clear()
+	coffee.storage.clear()
+	coffee.employees.clear()
+	await _settle(6)
+
+	_check(SaveManager.load_from_slot(slot), "and loads back")
+	await _settle(10)
+
+	var market_back := _own_business()
+	var coffee_back := _coffee_business()
+	_check(BusinessManager.owned_count() == saved["businesses"], "both businesses come back")
+	_check(market_back != null and coffee_back != null, "and are found by their properties")
+	if market_back == null or coffee_back == null:
+		return
+	_check(market_back.business_name == "Silas Market", "the market keeps its name")
+	_check(coffee_back.business_name == "Noel Coffee", "and the coffee shop keeps its")
+	_check(BusinessManager.company_name == "Noel Holdings", "the company keeps its name")
+	_check(market_back.cash_balance == saved["market_cash"], "each account is restored")
+	_check(coffee_back.cash_balance == saved["coffee_cash"], "separately")
+	_check(market_back.employees.size() == saved["market_staff"], "the payrolls are restored")
+	_check(coffee_back.employees.size() == saved["coffee_staff"], "one per business")
+	_check(market_back.upgrades.size() == saved["upgrades"], "the upgrades survive")
+	_check(
+		market_back.active_campaigns().size() == saved["campaigns"],
+		"the campaign is still running"
+	)
+	_check(
+		BusinessManager.outstanding_orders().size() == saved["orders"],
+		"the delivery is still on its way"
+	)
+	_check(market_back.total_debt() == saved["debt"], "and the debt is still owed")
+	_check(
+		coffee_back.storage_of(&"coffee_beans") == saved["coffee_beans"],
+		"the coffee shop's ingredients are its own"
+	)
+	_check(market_back.total_shelf_units() == saved["market_shelves"], "the shelves are as they were")
+	_check(market_back.auto_order == saved["auto_order"], "and the manager's permissions")
+
+	var manager_back := market_back.manager()
+	_check(manager_back != null, "the manager is still employed")
+	_check(
+		manager_back == null or manager_back.role == EmployeeData.Role.MANAGER,
+		"in the manager's job"
+	)
+
+	# Nothing duplicated: loading twice must not make two of anything.
+	SaveManager.load_from_slot(slot)
+	await _settle(10)
+	_check(BusinessManager.owned_count() == saved["businesses"], "loading twice makes no copies")
+	_check(
+		BusinessManager.outstanding_orders().size() == saved["orders"],
+		"and no duplicate deliveries"
+	)
+	SaveManager.delete_slot(slot)
+
+
+## TEST 95 — a save written before any of this existed.
+func _test_old_save_migration() -> void:
+	var slot := 95
+	var path := SaveManager.get_slot_path(slot)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	# A Phase H save: one business, no upgrades, no loans, no manager settings,
+	# and a property with none of the Phase I fields on it.
+	file.store_string(JSON.stringify({
+		"version": SaveManager.SAVE_VERSION,
+		"clock": {"total_minutes": TimeManager.total_minutes},
+		"economy": {"cash": 1234},
+		"entities": {
+			"business_manager": {
+				"businesses": [{
+					"id": "business_legacy", "name": "Old Market",
+					"type": "convenience_store", "property": "unit_main_18",
+					"cash": 900, "opening_hour": 8, "closing_hour": 20,
+					"reputation": 55.0,
+					"storage": {"bottled_water": 12},
+					"prices": {"bottled_water": 4},
+					"employees": [{
+						"id": "legacy_worker", "name": "Pat Legacy", "wage": 18,
+						"skill_checkout": 60, "skill_stocking": 40, "role": 0,
+						"shift_start": 9, "shift_end": 17,
+					}],
+				}],
+			},
+			"property_unit_main_18": {"status": 1, "tenant": "player"},
+		},
+	}))
+	file.close()
+
+	_check(SaveManager.load_from_slot(slot), "a Phase H save still loads")
+	await _settle(10)
+
+	var old := BusinessManager.by_id(&"business_legacy")
+	_check(old != null, "its business is there")
+	if old == null:
+		return
+	_check(old.business_name == "Old Market", "with its name")
+	_check(old.cash_balance == 900, "and its money")
+	_check(BusinessManager.owned_count() == 1, "as the only business owned")
+	_check(old.storage_of(&"bottled_water") == 12, "its stock is intact")
+	_check(old.employees.size() == 1, "and its one employee")
+
+	var worker := old.employees[0]
+	_check(worker.role == EmployeeData.Role.CASHIER, "who is still a cashier")
+	_check(worker.skill_barista == 50, "with average skill at the jobs that did not exist")
+	_check(worker.skill_management == 50, "including managing")
+
+	_check(not old.auto_open, "nothing is automated without being asked")
+	_check(old.upgrades.is_empty(), "there are no upgrades")
+	_check(old.loans.is_empty(), "and no debt")
+	_check(old.total_debt() == 0, "so nothing is owed")
+	_check(old.estimated_value() > 0, "and it can still be valued ($%d)" % old.estimated_value())
+
+	var unit := PropertyManager.by_id(&"unit_main_18")
+	_check(unit != null and unit.is_leased_by_player(), "its lease is restored")
+
+	SaveManager.delete_slot(slot)
+
+
+## TEST 122 — selling one, and the rest carrying on.
+func _test_sell_business() -> void:
+	# Rebuild the two-business state the migration test replaced.
+	await _rebuild_empire_for_sale()
+
+	var coffee := _coffee_business()
+	var market := _own_business()
+	_check(coffee != null and market != null, "two businesses to choose between")
+	if coffee == null or market == null:
+		return
+
+	var unit := coffee.property()
+	var price := coffee.sale_price()
+	var value := coffee.estimated_value()
+	_check(price > 0, "the coffee shop is worth selling ($%d)" % price)
+	_check(price < value, "a buyer wants a discount on the valuation")
+
+	var personal_before := EconomyManager.cash
+	var market_cash_before := market.cash_balance
+	var proceeds := BusinessManager.sell_business(coffee)
+
+	_check(proceeds == price, "the sale pays what it was valued at")
+	_check(
+		EconomyManager.cash == personal_before + proceeds,
+		"and the money goes to the player, not to the other business"
+	)
+	_check(market.cash_balance == market_cash_before, "the market's account is untouched")
+	_check(BusinessManager.owned_count() == 1, "one business is left")
+	_check(BusinessManager.business_for_property(&"unit_harbour_42") == null, "the unit is empty")
+	_check(unit != null and unit.is_vacant(), "and the lease has ended")
+	_check(_own_business() != null, "the market is still owned")
+	_check(_own_business().employees.size() > 0, "with its own staff still on the payroll")
+	_check(
+		BusinessManager.get_statistic(&"businesses_sold") >= 1,
+		"and the statistics count the sale"
+	)
+
+
+# --- Phase I helpers -----------------------------------------------------
+
+func _coffee_property() -> CommercialProperty:
+	return PropertyManager.by_id(&"unit_harbour_42")
+
+
+func _coffee_unit() -> RetailUnit:
+	return _main.get_node("Interiors/HarbourAvenueUnit") as RetailUnit
+
+
+func _coffee_business() -> BusinessInstance:
+	return BusinessManager.business_for_property(&"unit_harbour_42")
+
+
+## The migration test deliberately replaces the whole register with a one-business
+## save, so the sale test builds a second one back rather than depending on the
+## order the tests happen to run in.
+func _rebuild_empire_for_sale() -> void:
+	EconomyManager.restore(30000)
+	var unit := _coffee_property()
+	if unit.is_vacant():
+		PropertyManager.lease(unit)
+	var coffee := _coffee_business()
+	if coffee == null:
+		coffee = BusinessManager.create_business("Noel Coffee", &"coffee_shop", unit)
+	BusinessManager.deposit_to_business(coffee, 3000)
+	for ingredient in [&"coffee_beans", &"paper_cup"]:
+		BusinessManager.order_stock(coffee, ingredient, 20)
+	BusinessManager.deliver_now(coffee)
+
+	var market := _own_business()
+	if market != null and market.employees.is_empty():
+		BusinessManager.refresh_candidates()
+		BusinessManager.hire(market, BusinessManager.get_candidates()[0], EmployeeData.Role.CASHIER)
+	await _settle(6)

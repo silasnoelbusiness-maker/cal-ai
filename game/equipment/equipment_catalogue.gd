@@ -10,6 +10,10 @@ const ITEMS: Array[EquipmentData] = [
 	preload("res://items/equipment/checkout_counter.tres"),
 	preload("res://items/equipment/retail_shelf.tres"),
 	preload("res://items/equipment/storage_rack.tres"),
+	preload("res://items/equipment/coffee_machine.tres"),
+	preload("res://items/equipment/service_counter.tres"),
+	preload("res://items/equipment/ingredient_store.tres"),
+	preload("res://items/equipment/cafe_table.tres"),
 ]
 
 

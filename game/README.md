@@ -4,9 +4,9 @@ An original 3D open-world life & crime simulator, viewed from an elevated
 top-down camera. This directory holds a self-contained **Godot 4.3** project; it
 is unrelated to the Next.js app in the repository root.
 
-**V0.1 phases A–I are complete** (two of them were called G — the art pass and
-the crime expansion; the naming is kept here as it happened, so the business
-phase is the ninth milestone and the eighth letter). The full life/economy loop is playable end to
+**V0.1 phases A–J are complete** (two of them were called G — the art pass and
+the crime expansion; the naming is kept here as it happened, so the empire phase
+is the tenth milestone and the ninth letter). The full life/economy loop is playable end to
 end — wake up in your flat, sleep off the night, walk to the warehouse for a
 paid shift, buy food at the convenience store, eat it, head home — and the city
 around it now moves: civilian traffic on both streets, signals at the two
@@ -80,7 +80,7 @@ scene is `res://main.tscn`.
 | `R` | Reset the camera orientation |
 | `F` | Enter / exit a vehicle · carjack an occupied one |
 | `G` | Rob the till you are stood at |
-| `B` | Open the business dashboard |
+| `B` | Open the business dashboard, or the company view outside a shop |
 | Left mouse | Attack with whatever is in your hand · place equipment |
 | `R` | Rotate the equipment being placed |
 
@@ -106,16 +106,20 @@ Development keys, to be removed before release:
 | `F3` | Show / hide the crime overlay (points, response, statistics) |
 | `F4` | Put a steel pipe in the bag, for testing melee |
 | `F10` | Show / hide the business overlay |
-| `1`–`0` | Business debug commands, only while that overlay is up |
+| `1`–`0`, `Q`–`I` | Business debug commands, only while that overlay is up |
 
 `F9` was quick-load in Phase D; it is now clear-wanted, and quick-load moved to
 `F12`.
 
 ## Running a business
 
-Two vacant retail units are advertised on Main Street and at Quayside. Standing
-at the door of one offers the letting details; signing takes the deposit and the
-first rent out of your own pocket and hands you the keys.
+Four vacant retail units are advertised along Main Street, and they are not
+alike: a small one at 18 Main Street, a cheap back-street pitch at 40 Quayside,
+a medium unit at 42 Harbour Avenue and a premium one at 7 Central Plaza. Rent
+buys floor space, the number of customers who fit inside, and how much passing
+trade the address itself brings. Standing at the door of one offers the letting
+details; signing takes the deposit and the first rent out of your own pocket and
+hands you the keys.
 
     save up  ->  rent a unit  ->  found a business  ->  fund it  ->  fit it out
     ->  order stock  ->  fill the shelves  ->  set prices  ->  open  ->  serve
@@ -146,6 +150,45 @@ eat the margin. None of that is prevented.
 Everything is one screen, on `B`: an overview with the cash on both sides of the
 boundary, the stock and the supplier, the prices, the equipment (buying, placing,
 moving), the staff and their shifts, the day's finances, and the opening hours.
+Press `B` outside a shop and you get the company instead.
+
+## Building an empire
+
+There is a second business type — a **coffee shop** — and it is a different
+business rather than a repainted one. A shop sells what is on its shelves; a
+kitchen holds beans, milk and cups in the back and makes a drink when somebody
+orders one. Both go through the same queue, the same till and the same books;
+what stands between them is a recipe.
+
+| Role | Wage | What they do |
+| --- | --- | --- |
+| Cashier | $18/h | Works the queue |
+| Stocker | $19/h | Carries stock from the back room to the shelves |
+| Barista | $20/h | Takes the order and makes the drink |
+| Manager | $30/h | Opens up, keeps the shelves full and reorders — without you |
+
+A manager is the point at which a business stops needing you. They work to
+permissions you set — open and close to the published hours, restock the
+shelves, reorder stock up to a budget you choose — and nothing is on until you
+turn it on. They are also dear enough to notice on the profit line.
+
+Stock now takes two to six in-game hours to arrive from the supplier, so running
+out is a mistake with consequences. Advertising buys attention and never money:
+a campaign brings more people through the door, and if the shelves are bare they
+leave again as lost sales. Upgrades are bought per business — better signage,
+faster tills, more storage — and belong to that shop alone.
+
+The bank lends to businesses, not to people: three loans, each with its own
+rate and its own weekly payment. Miss one and it costs a little more and is
+remembered. Pay it off early and it stops.
+
+Every business is valued from what it holds, what it earns and what it owes, and
+the company view adds them up beside your cash, your cars and your debt to give
+a net worth. A business can be closed — it stops trading and the rent carries on
+— or sold, which asks twice and cannot be undone.
+
+    one shop  ->  a manager  ->  a second unit  ->  a coffee shop  ->  a loan
+    ->  two shops running while you are across the city committing a crime
 
 ## The district
 
@@ -338,7 +381,26 @@ back.
 godot --headless --path game res://tests/smoke_test.tscn
 ```
 
-It exits non-zero if any check fails. As of the business phase it runs 610
+The empire phase is tested the same way, and mostly for *independence*: two
+businesses that quietly shared a store room, a payroll or a set of books would
+look fine from inside either one of them. A second unit is leased, a coffee shop
+is founded in it, fitted with a machine and a counter, stocked with ingredients
+and staffed with a barista who walks in and makes a drink somebody ordered. Both
+shops then trade at once with separate customers, separate takings and separate
+stock; a stocker moves goods without inventing any; a manager opens up, fills
+the shelves and reorders inside a budget without ordering the same thing twice;
+a delivery goes PLACED to IN TRANSIT to DELIVERED and arrives exactly once; a
+campaign raises footfall and expires; an upgrade helps only the shop that bought
+it; a loan is drawn, paid, missed and settled early; eight hours are slept
+through and both shops trade through them; a crime and an arrest happen around
+it all; and the whole empire goes through a save file and back without
+duplicating anything. A Phase H save loads into it unchanged.
+
+```sh
+godot --headless --path game res://tests/smoke_test.tscn
+```
+
+It exits non-zero if any check fails. As of the empire phase it runs 817
 checks.
 
 A screenshot tool renders the game to a PNG without a desktop, for eyeballing
@@ -362,13 +424,23 @@ Args after `++` are `key=value` pairs, all optional: `out`, `hour`, `scenario`
 `equipment_buy`, `equipment_place`, `business_storage`, `stocked_shelf`,
 `pricing_screen`, `store_open`, `customers_browsing`, `checkout_queue`,
 `player_register`, `employee_cashier`, `business_dashboard`, `daily_report`,
-`player_away`, `driving_business`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
+`player_away`, `driving_business`, `commercial_properties`, `portfolio`,
+`market_operating`, `coffee_empty`, `coffee_placement`, `ingredient_order`,
+`coffee_customers`, `barista`, `stocker`, `manager_running`, `order_in_transit`,
+`delivery_received`, `marketing`, `upgrades`, `two_businesses`,
+`empire_finance`, `business_value`, `loans`, `net_worth`, `player_away_empire`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
 rather than faking their results. It runs under the Compatibility renderer, so
 lighting is close to but not identical to the Forward+ game.
 
 ## What is next
 
-Nothing is started. The business phase left three obvious threads: a second
+Nothing is started. The empire phase left its own threads: a third business type
+(the architecture takes one as a `BusinessTypeData`, a stock list and — if it
+cooks — a set of recipes), competitor businesses to compete for the same local
+demand, and property that can be bought rather than rented. Eviction is still
+unbuilt though the arrears are counted.
+
+The earlier phases left three more threads: a second
 business type (the architecture takes one as a `BusinessTypeData` plus a stock
 list, and nothing in the customer, employee or dashboard code knows what a
 convenience store is), a stocker role for employees to refill shelves on their

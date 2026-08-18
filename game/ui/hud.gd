@@ -32,6 +32,7 @@ const TONE_COLORS: Array[Color] = [
 @onready var _shop_panel: Control = %ShopPanel
 @onready var _property_panel: Control = %PropertyPanel
 @onready var _business_dashboard: Control = %BusinessDashboard
+@onready var _empire_dashboard: Control = %EmpireDashboard
 @onready var _store_panel: PanelContainer = %StorePanel
 @onready var _store_name: Label = %StoreName
 @onready var _store_status: Label = %StoreStatus
@@ -86,6 +87,10 @@ func _ready() -> void:
 	_property_panel.closed.connect(_on_screen_visibility_changed)
 	_business_dashboard.opened.connect(_on_screen_visibility_changed)
 	_business_dashboard.closed.connect(_on_screen_visibility_changed)
+	_business_dashboard.empire_requested.connect(_on_empire_requested)
+	_empire_dashboard.opened.connect(_on_screen_visibility_changed)
+	_empire_dashboard.closed.connect(_on_screen_visibility_changed)
+	_empire_dashboard.business_selected.connect(_on_business_selected)
 
 	BusinessManager.business_changed.connect(_on_owned_business_changed)
 	BusinessManager.business_opened.connect(_on_owned_business_changed)
@@ -266,11 +271,14 @@ func _update_process_need() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("business_menu"):
-		# One key for "show me my business", wherever the player is standing.
-		if _business_dashboard.is_open():
-			_business_dashboard.close()
-		else:
+		# One key, and it opens whichever answer the player is standing in front
+		# of: the shop they are inside, or the company as a whole.
+		if _business_dashboard.is_open() or _empire_dashboard.is_open():
+			close_screens()
+		elif _business_in_reach() != null:
 			_business_dashboard.open(_business_in_reach())
+		else:
+			_empire_dashboard.open()
 		get_viewport().set_input_as_handled()
 		return
 	if not event.is_action_pressed("inventory"):
@@ -296,6 +304,8 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 			_business_dashboard.open(
 				equipment.business if equipment != null else _business_in_reach()
 			)
+		&"empire":
+			_empire_dashboard.open()
 		&"shelf":
 			_business_dashboard.open_shelf(context as BusinessEquipment)
 		_:
@@ -307,6 +317,7 @@ func close_screens() -> void:
 	_shop_panel.close()
 	_property_panel.close()
 	_business_dashboard.close()
+	_empire_dashboard.close()
 
 
 ## The business the management key should open: the one the player is standing
@@ -316,7 +327,7 @@ func _business_in_reach() -> BusinessInstance:
 		var unit := node as RetailUnit
 		if unit != null and unit.is_player_inside() and unit.get_business() != null:
 			return unit.get_business()
-	return BusinessManager.primary_business()
+	return null
 
 
 ## A screen being up freezes the world, so the manager has to know.
@@ -324,7 +335,19 @@ func _on_screen_visibility_changed() -> void:
 	GameManager.menu_open = (
 		_inventory_panel.is_open() or _shop_panel.is_open()
 		or _property_panel.is_open() or _business_dashboard.is_open()
+		or _empire_dashboard.is_open()
 	)
+
+
+## The two dashboards hand off to each other rather than stacking.
+func _on_empire_requested() -> void:
+	_business_dashboard.close()
+	_empire_dashboard.open()
+
+
+func _on_business_selected(business: BusinessInstance) -> void:
+	_empire_dashboard.close()
+	_business_dashboard.open(business)
 
 
 func _on_item_used(item: ItemData) -> void:

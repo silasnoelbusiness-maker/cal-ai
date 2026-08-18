@@ -14,3 +14,4 @@ height = 1.4
 body_color = Color(0.435, 0.45098, 0.478431, 1)
 accent_color = Color(0.301961, 0.294118, 0.278431, 1)
 capacity = 20
+business_types_allowed = Array[StringName]([&"convenience_store"])

@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="RecipeData" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://items/recipe_data.gd" id="1_recipe"]
+[ext_resource type="Resource" path="res://items/definitions/iced_coffee.tres" id="2_product"]
+[ext_resource type="Resource" path="res://items/definitions/coffee_beans.tres" id="3_beans"]
+[ext_resource type="Resource" path="res://items/definitions/paper_cup.tres" id="4_cup"]
+
+[resource]
+script = ExtResource("1_recipe")
+product = ExtResource("2_product")
+ingredients = [ExtResource("3_beans"), ExtResource("4_cup")]
+amounts = Array[int]([1, 1])
+preparation_seconds = 7.0

@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://equipment/equipment_data.gd" id="1_equipment_data"]
+
+[resource]
+script = ExtResource("1_equipment_data")
+equipment_id = &"cafe_table"
+display_name = "Cafe Table"
+description = "Somewhere to sit. Optional, and customers like it."
+role = 3
+purchase_price = 90
+placement_size = Vector2(1.1, 1.1)
+height = 0.75
+body_color = Color(0.435294, 0.34902, 0.278431, 1)
+accent_color = Color(0.243137, 0.203922, 0.168627, 1)
+capacity = 0
+business_types_allowed = Array[StringName]([&"coffee_shop"])

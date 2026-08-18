@@ -78,17 +78,7 @@ func approach_point_from(origin: Vector3) -> Vector3:
 		Vector3(0.0, 0.0, reach_z), Vector3(0.0, 0.0, -reach_z),
 		Vector3(reach_x, 0.0, 0.0), Vector3(-reach_x, 0.0, 0.0),
 	]
-	var best := service_point()
-	var best_distance := INF
-	for offset in sides:
-		var point: Vector3 = global_transform * offset
-		if not _on_open_floor(point):
-			continue
-		var distance := origin.distance_to(point)
-		if distance < best_distance:
-			best_distance = distance
-			best = point
-	return best
+	return _best_side(origin, sides, service_point())
 
 
 ## The way in behind a counter: round one end rather than over the top of it.
@@ -96,14 +86,32 @@ func approach_point_from(origin: Vector3) -> Vector3:
 func staff_approach_from(origin: Vector3) -> Vector3:
 	var along := global_transform.basis.x.normalized() * (_definition.placement_size.x * 0.5 + 0.95)
 	var behind := staff_point()
-	var best := behind
-	var best_distance := INF
-	for point in [behind + along, behind - along]:
+	# Local offsets, because that is what _best_side puts back through the
+	# transform. Passing a *difference* of two local points instead would land
+	# both candidates on top of the counter, which is exactly where nobody can
+	# stand.
+	return _best_side(origin, [to_local(behind + along), to_local(behind - along)], behind)
+
+
+## Picks a spot to stand from a set of offsets.
+##
+## Two things matter and in this order: the spot has to be on open floor, and
+## there has to be a clear line to it. Nearest-first alone walks people into the
+## very counter they are trying to get behind, because the near side of it is
+## exactly the wrong side.
+func _best_side(origin: Vector3, offsets: Array, fallback: Vector3) -> Vector3:
+	var best := fallback
+	var best_score := INF
+	for offset in offsets:
+		var point: Vector3 = global_transform * (offset as Vector3)
 		if not _on_open_floor(point):
 			continue
 		var distance := origin.distance_to(point)
-		if distance < best_distance:
-			best_distance = distance
+		# A blocked route is not disqualifying — it may be the only way in — but
+		# it loses to any clear one.
+		var score := distance + (0.0 if _has_clear_line(origin, point) else 100.0)
+		if score < best_score:
+			best_score = score
 			best = point
 	return best
 
@@ -112,6 +120,18 @@ func _on_open_floor(point: Vector3) -> bool:
 	if unit == null or not unit.has_method("is_inside_floor"):
 		return true
 	return bool(unit.call("is_inside_floor", unit.to_local(point)))
+
+
+## Whether somebody could walk straight there without meeting a wall or a
+## counter. Waist height, on the world layer, which is what equipment and walls
+## both collide on.
+func _has_clear_line(from: Vector3, to: Vector3) -> bool:
+	var space := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(
+		from + Vector3.UP * 0.9, to + Vector3.UP * 0.9
+	)
+	query.collision_mask = 1
+	return space.intersect_ray(query).is_empty()
 
 
 # --- Appearance ----------------------------------------------------------

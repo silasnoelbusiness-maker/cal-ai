@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://equipment/equipment_data.gd" id="1_equipment_data"]
+
+[resource]
+script = ExtResource("1_equipment_data")
+equipment_id = &"ingredient_store"
+display_name = "Ingredient Store"
+description = "Cold storage and dry goods for a kitchen."
+role = 2
+purchase_price = 200
+placement_size = Vector2(1.8, 0.8)
+height = 1.8
+body_color = Color(0.615686, 0.639216, 0.658824, 1)
+accent_color = Color(0.309804, 0.32549, 0.34902, 1)
+capacity = 90
+business_types_allowed = Array[StringName]([&"coffee_shop"])

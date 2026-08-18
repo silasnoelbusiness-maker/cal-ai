@@ -1,10 +1,11 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://ui/hud.gd" id="1_hud"]
 [ext_resource type="PackedScene" path="res://ui/inventory_panel.tscn" id="2_inventory_panel"]
 [ext_resource type="PackedScene" path="res://ui/shop_panel.tscn" id="3_shop_panel"]
 [ext_resource type="PackedScene" path="res://ui/business/property_panel.tscn" id="9_property_panel"]
 [ext_resource type="PackedScene" path="res://ui/business/business_dashboard.tscn" id="10_dashboard"]
+[ext_resource type="PackedScene" path="res://ui/business/empire_dashboard.tscn" id="12_empire"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
 content_margin_left = 16.0
@@ -500,4 +501,7 @@ unique_name_in_owner = true
 unique_name_in_owner = true
 
 [node name="BusinessDashboard" parent="." instance=ExtResource("10_dashboard")]
+unique_name_in_owner = true
+
+[node name="EmpireDashboard" parent="." instance=ExtResource("12_empire")]
 unique_name_in_owner = true

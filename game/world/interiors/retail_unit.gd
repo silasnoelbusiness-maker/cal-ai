@@ -14,22 +14,32 @@ extends Node3D
 signal player_entered()
 signal player_exited()
 
-const ROOM := Rect2(-7.0, -6.0, 14.0, 12.0)
+## How big the unit is. Bigger rooms hold more equipment and more customers, and
+## are what a dearer lease buys.
+enum Size { SMALL, MEDIUM }
+
 const WALL_HEIGHT := 3.2
 const WALL_THICKNESS := 0.3
 const DOORWAY_HALF_WIDTH := 1.4
-## The partition between the shop floor and the store room.
-const PARTITION_Z := -2.4
-## Gap in the partition, as x bounds.
-const PARTITION_GAP := Vector2(1.9, 4.4)
-## Where equipment may stand: the shop floor, then the store room.
-const RETAIL_AREA := Rect2(-6.4, -1.9, 12.8, 7.4)
-const STORAGE_AREA := Rect2(-6.4, -5.6, 12.8, 3.0)
 ## The pavement stub outside the door that customers walk in from.
 const STREET_STUB_END := 15.0
+## How far behind the front wall the store-room partition sits, per size.
+const PARTITION_INSET := 3.6
 
 @export var property_id: StringName = &"unit_a"
 @export var unit_name: String = "Retail Unit"
+@export var size_class: Size = Size.SMALL
+
+## The room, derived from the size class in _ready. Everything that used to be a
+## constant is now per-instance, because two units of different sizes share this
+## script.
+var room: Rect2 = Rect2(-7.0, -6.0, 14.0, 12.0)
+var retail_area: Rect2 = Rect2(-6.4, -1.9, 12.8, 7.4)
+var storage_area: Rect2 = Rect2(-6.4, -5.6, 12.8, 3.0)
+## The partition between the shop floor and the store room.
+var partition_z: float = -2.4
+## Gap in the partition, as x bounds.
+var partition_gap: Vector2 = Vector2(1.9, 4.4)
 
 var _palette: Dictionary = {}
 var _equipment_root: Node3D = null
@@ -41,6 +51,45 @@ var _nodes_by_slot: Dictionary = {}
 var _player_inside: bool = false
 
 
+## Works out the room from the size class. One place, run before anything is
+## built, so the geometry, the placement bounds and the walkable test can never
+## disagree about how big the unit is.
+func _measure_room() -> void:
+	var size := Vector2(14.0, 12.0) if size_class == Size.SMALL else Vector2(18.0, 15.0)
+	room = Rect2(-size.x * 0.5, -size.y * 0.5, size.x, size.y)
+	partition_z = room.position.y + PARTITION_INSET
+	partition_gap = Vector2(room.end.x - 5.1, room.end.x - 2.6)
+	storage_area = Rect2(
+		room.position.x + 0.6, room.position.y + 0.4,
+		size.x - 1.2, PARTITION_INSET - 1.0
+	)
+	retail_area = Rect2(
+		room.position.x + 0.6, partition_z + 0.5,
+		size.x - 1.2, room.end.y - partition_z - 1.0
+	)
+
+
+## Puts the room up if it is not up already. Cheap to call repeatedly.
+func ensure_built() -> void:
+	if _built:
+		return
+	_built = true
+	_build_shell()
+	_build_lighting()
+	_build_signage()
+	rebuild_equipment()
+	_refresh_signage()
+
+
+func is_built() -> bool:
+	return _built
+
+
+func _on_property_leased(property: CommercialProperty) -> void:
+	if property != null and property.property_id == property_id:
+		ensure_built()
+
+
 static func entry_group_for(id: StringName) -> StringName:
 	return StringName("retail_entry_%s" % id)
 
@@ -49,13 +98,20 @@ static func exit_group_for(id: StringName) -> StringName:
 	return StringName("retail_exit_%s" % id)
 
 
+## An unlet unit is an empty lot until somebody signs for it.
+##
+## Four of these exist and most of them are never rented. Building four rooms of
+## walls, floors and lights at load cost enough frame time to be measurable, so
+## the shell is put up the first time it is needed — signing the lease, or
+## walking through the door — and never for a unit nobody takes.
+var _built: bool = false
+
+
 func _ready() -> void:
 	add_to_group(&"retail_unit")
+	_measure_room()
 	_build_palette()
-	_build_shell()
-	_build_lighting()
 	_build_markers_and_doors()
-	_build_signage()
 	_build_presence_volume()
 
 	_equipment_root = Node3D.new()
@@ -70,6 +126,7 @@ func _ready() -> void:
 	player_entered.connect(_refresh_staff)
 	player_exited.connect(_clear_visible_people)
 
+	PropertyManager.property_leased.connect(_on_property_leased)
 	BusinessManager.business_created.connect(_on_business_registered)
 	BusinessManager.business_changed.connect(_on_business_changed)
 	BusinessManager.business_opened.connect(_on_business_state_changed)
@@ -100,6 +157,8 @@ func is_player_inside() -> bool:
 
 func _bind_business() -> void:
 	_business = BusinessManager.business_for_property(property_id)
+	if _business != null:
+		ensure_built()
 	rebuild_equipment()
 	_refresh_signage()
 
@@ -202,7 +261,12 @@ func get_spawner() -> CustomerSpawner:
 
 
 func get_cashier() -> EmployeeAI:
-	return get_node_or_null("Cashier") as EmployeeAI
+	var till := get_node_or_null("Cashier") as EmployeeAI
+	return till if till != null else get_node_or_null("Barista") as EmployeeAI
+
+
+func get_staff(role_name: String) -> EmployeeAI:
+	return get_node_or_null(role_name) as EmployeeAI
 
 
 func _on_minute_passed(_hour: int, _minute: int) -> void:
@@ -213,22 +277,42 @@ func _on_minute_passed(_hour: int, _minute: int) -> void:
 ## Staff only exist as people while somebody is here to see them. Out of sight
 ## the same employee is a line in the far simulation, which is why walking out
 ## of the shop does not stop them working.
+##
+## One node per job rather than one per person: the shop needs somebody on the
+## counter, somebody on the machine and somebody on the floor, and which of the
+## payroll that is comes from the roster.
 func _refresh_staff() -> void:
-	var cashier := get_cashier()
+	var jobs := {
+		"Cashier": EmployeeData.Role.CASHIER,
+		"Barista": EmployeeData.Role.BARISTA,
+		"Stocker": EmployeeData.Role.STOCKER,
+		"Manager": EmployeeData.Role.MANAGER,
+	}
+	for node_name in jobs:
+		_refresh_one(String(node_name), int(jobs[node_name]))
+
+
+func _refresh_one(node_name: String, role: int) -> void:
+	var present := get_node_or_null(node_name) as EmployeeAI
 	if _business == null or not _player_inside:
-		if cashier != null:
-			cashier.queue_free()
+		if present != null:
+			present.queue_free()
 		return
 
-	var rostered := _business.rostered_cashier(TimeManager.hour)
+	# A manager is on duty whenever they are employed; everybody else works to
+	# the roster.
+	var rostered: EmployeeData = (
+		_business.manager() if role == EmployeeData.Role.MANAGER
+		else _business.rostered(role, TimeManager.hour)
+	)
 	if rostered == null:
-		if cashier != null:
-			cashier.end_shift()
+		if present != null:
+			present.end_shift()
 		return
-	if cashier != null:
-		if cashier.employee == rostered:
+	if present != null:
+		if present.employee == rostered:
 			return
-		cashier.queue_free()
+		present.free()
 	if first_checkout() == null:
 		return
 
@@ -238,12 +322,14 @@ func _refresh_staff() -> void:
 		return
 
 	var worker := EmployeeAI.new()
-	worker.name = "Cashier"
+	worker.name = node_name
 	add_child(worker)
 	worker.setup(rostered, self, threshold.global_position, arrival.global_position)
 	GameManager.notify(
-		"EMPLOYEE SHIFT STARTED
-%s" % rostered.employee_name.to_upper(), GameManager.Tone.INFO
+		"EMPLOYEE SHIFT STARTED\n%s  ·  %s" % [
+			rostered.employee_name.to_upper(), rostered.get_role_name()
+		],
+		GameManager.Tone.INFO
 	)
 
 
@@ -256,9 +342,10 @@ func _clear_visible_people() -> void:
 		spawner.stop_player_working()
 		for customer in spawner.active_customers():
 			customer.queue_free()
-	var cashier := get_cashier()
-	if cashier != null:
-		cashier.queue_free()
+	for node_name in ["Cashier", "Barista", "Stocker", "Manager"]:
+		var worker := get_node_or_null(node_name) as EmployeeAI
+		if worker != null:
+			worker.queue_free()
 
 
 # --- Placement -----------------------------------------------------------
@@ -271,16 +358,16 @@ func is_valid_placement(local_point: Vector3, size: Vector2) -> bool:
 	var footprint := Rect2(
 		local_point.x - half.x, local_point.z - half.y, size.x, size.y
 	)
-	if not (_contains(RETAIL_AREA, footprint) or _contains(STORAGE_AREA, footprint)):
+	if not (_contains(retail_area, footprint) or _contains(storage_area, footprint)):
 		return false
 	# The way in, and the way through to the back.
-	var front_door := Rect2(-DOORWAY_HALF_WIDTH - 0.4, ROOM.end.y - 1.6, DOORWAY_HALF_WIDTH * 2.0 + 0.8, 2.2)
+	var front_door := Rect2(-DOORWAY_HALF_WIDTH - 0.4, room.end.y - 1.6, DOORWAY_HALF_WIDTH * 2.0 + 0.8, 2.2)
 	if footprint.intersects(front_door):
 		return false
-	var partition_gap := Rect2(
-		PARTITION_GAP.x - 0.4, PARTITION_Z - 1.0, PARTITION_GAP.y - PARTITION_GAP.x + 0.8, 2.0
+	var doorway := Rect2(
+		partition_gap.x - 0.4, partition_z - 1.0, partition_gap.y - partition_gap.x + 0.8, 2.0
 	)
-	return not footprint.intersects(partition_gap)
+	return not footprint.intersects(doorway)
 
 
 ## Whether a person could stand at this spot: on the shop floor or in the store
@@ -288,7 +375,7 @@ func is_valid_placement(local_point: Vector3, size: Vector2) -> bool:
 ## somebody can actually walk up to.
 func is_inside_floor(local_point: Vector3) -> bool:
 	var point := Vector2(local_point.x, local_point.z)
-	return RETAIL_AREA.has_point(point) or STORAGE_AREA.has_point(point)
+	return retail_area.has_point(point) or storage_area.has_point(point)
 
 
 func _contains(area: Rect2, footprint: Rect2) -> bool:
@@ -327,7 +414,7 @@ func _build_shell() -> void:
 	shell.name = "Shell"
 	add_child(shell)
 
-	var footprint := ROOM.grow(WALL_THICKNESS)
+	var footprint := room.grow(WALL_THICKNESS)
 	var reach := 46.0
 	var apron := [
 		CityKit.rect_from_bounds(-reach, -reach, reach, footprint.position.y),
@@ -342,7 +429,7 @@ func _build_shell() -> void:
 	# The store room reads as a different room from above without a doorway shot.
 	CityKit.add_slab(
 		shell, "BackFloor",
-		CityKit.rect_from_bounds(ROOM.position.x, ROOM.position.y, ROOM.end.x, PARTITION_Z),
+		CityKit.rect_from_bounds(room.position.x, room.position.y, room.end.x, partition_z),
 		0.0, 0.01, _mat("back_floor"), false, false
 	)
 	# A stub of pavement outside the door: customers arrive on it and walk in,
@@ -351,23 +438,23 @@ func _build_shell() -> void:
 	# from this camera that reads as a shimmering rectangle outside the door.
 	CityKit.add_slab(
 		shell, "Pavement",
-		CityKit.rect_from_bounds(-5.0, ROOM.end.y + WALL_THICKNESS, 5.0, STREET_STUB_END),
+		CityKit.rect_from_bounds(-5.0, room.end.y + WALL_THICKNESS, 5.0, STREET_STUB_END),
 		-0.4, 0.42, _mat("pavement"), true, false
 	)
 
-	var north := ROOM.position.y
-	var south := ROOM.end.y
-	var west := ROOM.position.x
-	var east := ROOM.end.x
+	var north := room.position.y
+	var south := room.end.y
+	var west := room.position.x
+	var east := room.end.x
 
-	_add_wall(shell, "WallNorth", Rect2(west, north - WALL_THICKNESS, ROOM.size.x, WALL_THICKNESS))
+	_add_wall(shell, "WallNorth", Rect2(west, north - WALL_THICKNESS, room.size.x, WALL_THICKNESS))
 	_add_wall(
 		shell, "WallWest",
-		Rect2(west - WALL_THICKNESS, north - WALL_THICKNESS, WALL_THICKNESS, ROOM.size.y + WALL_THICKNESS * 2.0)
+		Rect2(west - WALL_THICKNESS, north - WALL_THICKNESS, WALL_THICKNESS, room.size.y + WALL_THICKNESS * 2.0)
 	)
 	_add_wall(
 		shell, "WallEast",
-		Rect2(east, north - WALL_THICKNESS, WALL_THICKNESS, ROOM.size.y + WALL_THICKNESS * 2.0)
+		Rect2(east, north - WALL_THICKNESS, WALL_THICKNESS, room.size.y + WALL_THICKNESS * 2.0)
 	)
 	_add_wall(
 		shell, "WallSouthWest",
@@ -381,11 +468,11 @@ func _build_shell() -> void:
 	# Partition, with a gap through to the store room.
 	_add_wall(
 		shell, "PartitionWest",
-		CityKit.rect_from_bounds(west, PARTITION_Z, PARTITION_GAP.x, PARTITION_Z + WALL_THICKNESS)
+		CityKit.rect_from_bounds(west, partition_z, partition_gap.x, partition_z + WALL_THICKNESS)
 	)
 	_add_wall(
 		shell, "PartitionEast",
-		CityKit.rect_from_bounds(PARTITION_GAP.y, PARTITION_Z, east, PARTITION_Z + WALL_THICKNESS)
+		CityKit.rect_from_bounds(partition_gap.y, partition_z, east, partition_z + WALL_THICKNESS)
 	)
 
 
@@ -414,7 +501,7 @@ func _build_lighting() -> void:
 func _build_markers_and_doors() -> void:
 	var entry := Marker3D.new()
 	entry.name = "EntryPoint"
-	entry.position = Vector3(0.0, 0.4, ROOM.end.y - 1.8)
+	entry.position = Vector3(0.0, 0.4, room.end.y - 1.8)
 	entry.add_to_group(entry_group_for(property_id))
 	add_child(entry)
 
@@ -428,7 +515,7 @@ func _build_markers_and_doors() -> void:
 
 	var threshold := Marker3D.new()
 	threshold.name = "Threshold"
-	threshold.position = Vector3(0.0, 0.4, ROOM.end.y - 0.6)
+	threshold.position = Vector3(0.0, 0.4, room.end.y - 0.6)
 	add_child(threshold)
 
 	var exit_door := Portal.new()
@@ -436,13 +523,13 @@ func _build_markers_and_doors() -> void:
 	exit_door.prompt_action = "Leave"
 	exit_door.destination_group = exit_group_for(property_id)
 	exit_door.override_camera = false
-	CityKit.attach_interactable(self, exit_door, Vector3(0.0, 1.0, ROOM.end.y - 0.4), 1.5)
+	CityKit.attach_interactable(self, exit_door, Vector3(0.0, 1.0, room.end.y - 0.4), 1.5)
 
 
 func _build_signage() -> void:
 	var board := Node3D.new()
 	board.name = "Sign"
-	board.position = Vector3(0.0, 2.4, ROOM.end.y + WALL_THICKNESS + 0.05)
+	board.position = Vector3(0.0, 2.4, room.end.y + WALL_THICKNESS + 0.05)
 	add_child(board)
 	CityKit.add_box(
 		board, "Board", Vector3.ZERO, Vector3(5.0, 0.9, 0.16), _mat("sign"), false, false
@@ -465,7 +552,7 @@ func _build_signage() -> void:
 
 
 func _refresh_signage() -> void:
-	if _open_material == null:
+	if not _built or _open_material == null:
 		return
 	var open := _business != null and _business.is_open()
 	_open_material.emission = Color(0.35, 0.95, 0.45) if open else Color(0.85, 0.28, 0.24)
@@ -480,12 +567,12 @@ func _build_presence_volume() -> void:
 	volume.collision_mask = 1 << 1
 	volume.monitoring = true
 	var shape := BoxShape3D.new()
-	shape.size = Vector3(ROOM.size.x + 1.0, 4.0, ROOM.size.y + 1.0)
+	shape.size = Vector3(room.size.x + 1.0, 4.0, room.size.y + 1.0)
 	var collider := CollisionShape3D.new()
 	collider.name = "Volume"
 	collider.shape = shape
 	volume.position = Vector3(
-		ROOM.position.x + ROOM.size.x * 0.5, 2.0, ROOM.position.y + ROOM.size.y * 0.5
+		room.position.x + room.size.x * 0.5, 2.0, room.position.y + room.size.y * 0.5
 	)
 	add_child(volume)
 	volume.add_child(collider)
@@ -496,6 +583,7 @@ func _build_presence_volume() -> void:
 func _on_body_entered(body: Node3D) -> void:
 	if body != GameManager.player:
 		return
+	ensure_built()
 	_player_inside = true
 	if _business != null:
 		BusinessManager.set_player_present(_business.business_id, true)

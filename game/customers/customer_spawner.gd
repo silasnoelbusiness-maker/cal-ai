@@ -10,10 +10,9 @@ extends Node3D
 signal customer_spawned(customer: CustomerAI)
 signal sale_completed(customer: CustomerAI, revenue: int)
 
-## Ceiling on how many are on the floor at once, so a busy shop stays cheap.
-@export var max_active_customers: int = 8
-## How many may be waiting before the rest turn round and walk out.
-@export var max_queue_length: int = 5
+## Hard ceiling on how many are on the floor at once, whatever the property
+## allows, so a busy shop stays cheap to run.
+@export var max_active_customers: int = 10
 ## Metres between people in the queue.
 @export var queue_spacing: float = 1.5
 ## Seconds the player takes to ring one customer through. Slower than a good
@@ -118,8 +117,20 @@ func spawn_customer_now() -> CustomerAI:
 	return _spawn_one()
 
 
+## How many will fit inside. The property decides — a small unit is a small shop
+## — and the hard ceiling above is only there to protect the frame rate.
+func capacity() -> int:
+	if _business == null:
+		return max_active_customers
+	return mini(_business.customer_capacity(), max_active_customers)
+
+
+func queue_limit() -> int:
+	return _business.queue_capacity() if _business != null else 4
+
+
 func _spawn_one() -> CustomerAI:
-	if active_customers().size() >= max_active_customers:
+	if active_customers().size() >= capacity():
 		return null
 	if _arrival == null or _threshold == null:
 		return null
@@ -171,7 +182,7 @@ func join_queue(customer: CustomerAI) -> bool:
 	var till := _checkout()
 	if till == null:
 		return false
-	if queue_length() >= max_queue_length:
+	if queue_length() >= queue_limit():
 		_business.record_lost_sale()
 		_business.add_satisfaction(-0.4)
 		return false
@@ -224,18 +235,25 @@ func _process(delta: float) -> void:
 ## How long one customer takes to serve, or zero when nobody is on the till.
 ## An employee is checked first: that is what lets the player walk away.
 func _service_seconds() -> float:
+	var seconds := 0.0
 	var cashier := _on_duty_cashier()
 	if cashier != null:
-		return cashier.checkout_seconds()
-	if is_player_working_register():
-		return player_checkout_seconds
-	return 0.0
+		seconds = cashier.checkout_seconds()
+	elif is_player_working_register():
+		seconds = player_checkout_seconds
+	else:
+		return 0.0
+	# A better till is quicker whoever is standing at it.
+	return seconds * (1.0 - _business.upgrade_magnitude(BusinessUpgrade.Effect.CHECKOUT_SPEED))
 
 
+## Whoever is behind the counter right now. A barista serves as well as makes,
+## so either node answers.
 func _on_duty_cashier() -> EmployeeData:
-	var employee := _unit.get_node_or_null("Cashier") as EmployeeAI
-	if employee != null and employee.is_at_station():
-		return employee.employee
+	for name in ["Cashier", "Barista"]:
+		var employee := _unit.get_node_or_null(name) as EmployeeAI
+		if employee != null and employee.is_at_station():
+			return employee.employee
 	return null
 
 
@@ -253,9 +271,9 @@ func _serve_next() -> void:
 	if not is_instance_valid(customer):
 		_queue.remove_at(0)
 		return
-	var revenue := customer.serve()
-
 	var cashier := _on_duty_cashier()
+	var revenue := customer.serve(cashier)
+
 	if cashier != null:
 		cashier.customers_served_today += 1
 		if revenue > 0:

@@ -45,13 +45,35 @@ var storage: Dictionary = {}
 var prices: Dictionary = {}
 var equipment: Array[PlacedEquipment] = []
 var employees: Array[EmployeeData] = []
+var upgrades: Array[StringName] = []
+var campaigns: Array[MarketingCampaign] = []
+var loans: Array[Loan] = []
+
+## What the manager is allowed to do on the player's behalf. All off until a
+## manager is hired and the player turns them on, because automation the player
+## did not ask for spending their money is a bug however useful it is.
+var auto_open: bool = false
+var auto_restock: bool = false
+var auto_order: bool = false
+## Ceiling on what one automatic order may cost.
+var auto_order_budget: int = 500
+## Reorder when the store room falls below this, up to this.
+var auto_order_minimum: int = 15
+var auto_order_target: int = 45
 
 var revenue_today: int = 0
 var inventory_spend_today: int = 0
 var wages_today: int = 0
 var rent_today: int = 0
 var equipment_spend_today: int = 0
+var marketing_today: int = 0
+var utilities_today: int = 0
+var loan_payments_today: int = 0
 var other_expense_today: int = 0
+## Wages the account could not cover. Nothing collects them yet; the number is
+## what an unpaid-staff consequence will read, and it keeps the books honest in
+## the meantime.
+var wages_owed: int = 0
 ## Cost basis of what was actually sold today. Reported as gross margin, and
 ## deliberately NOT part of expenses_today — the cash for that stock was already
 ## counted when it was ordered. Adding both is the double count the brief warns
@@ -64,6 +86,9 @@ var units_sold_today: int = 0
 var lifetime_revenue: int = 0
 var lifetime_expenses: int = 0
 var lifetime_units_sold: int = 0
+var lifetime_interest_paid: int = 0
+## The last seven daily reports, newest last. What the weekly figures add up.
+var recent_reports: Array[Dictionary] = []
 var founded_on_day: int = 0
 var last_report: Dictionary = {}
 
@@ -86,6 +111,85 @@ func catalogue() -> Array[ItemData]:
 
 func sells(item: ItemData) -> bool:
 	return item != null and catalogue().has(item)
+
+
+## What the supplier will deliver here — the same goods for a shop, ingredients
+## for a kitchen.
+func orderable() -> Array[ItemData]:
+	var definition := type_data()
+	return definition.orderable() if definition != null else [] as Array[ItemData]
+
+
+func serves_prepared_goods() -> bool:
+	var definition := type_data()
+	return definition != null and definition.serves_prepared_goods()
+
+
+func recipe_for(item: ItemData) -> RecipeData:
+	var definition := type_data()
+	return definition.recipe_for(item) if definition != null else null
+
+
+## How many of this the business could sell right now.
+##
+## The one question both kinds of business answer differently, and the only
+## place that difference lives: a shop counts what is on its shelves, a kitchen
+## counts how many it could make from what is in the back.
+func available_units(item: ItemData) -> int:
+	if item == null:
+		return 0
+	var recipe := recipe_for(item)
+	if recipe == null:
+		return shelf_stock_of(item.id)
+
+	var possible := 999
+	for i in recipe.ingredients.size():
+		var ingredient: ItemData = recipe.ingredients[i]
+		if ingredient == null:
+			continue
+		var per_unit: int = maxi(int(recipe.amounts[i]) if i < recipe.amounts.size() else 1, 1)
+		possible = mini(possible, storage_of(ingredient.id) / per_unit)
+	return maxi(possible, 0)
+
+
+## Takes the goods for a sale out of wherever they live. Returns how many it
+## could actually find.
+func take_for_sale(item: ItemData, quantity: int) -> int:
+	if item == null or quantity <= 0:
+		return 0
+	var recipe := recipe_for(item)
+	if recipe == null:
+		return take_from_shelves(item.id, quantity)
+
+	var possible := mini(quantity, available_units(item))
+	if possible <= 0:
+		return 0
+	var needed := recipe.consumption(possible)
+	for ingredient_id in needed:
+		take_storage(ingredient_id, int(needed[ingredient_id]))
+	changed.emit()
+	return possible
+
+
+## What one costs the business: the wholesale price of a shelf good, or the
+## ingredients of a made one.
+func cost_basis(item: ItemData) -> int:
+	if item == null:
+		return 0
+	var recipe := recipe_for(item)
+	return recipe.ingredient_cost() if recipe != null else item.get_wholesale_cost()
+
+
+## Seconds to make one, after the barista and any upgrade are taken into
+## account. Zero for anything sold off a shelf.
+func preparation_seconds(item: ItemData, worker: EmployeeData = null) -> float:
+	var recipe := recipe_for(item)
+	if recipe == null:
+		return 0.0
+	var seconds := recipe.preparation_seconds
+	if worker != null:
+		seconds *= worker.preparation_scale()
+	return seconds * (1.0 - upgrade_magnitude(BusinessUpgrade.Effect.PREPARATION_SPEED))
 
 
 # --- Money ---------------------------------------------------------------
@@ -120,6 +224,12 @@ func debit(amount: int, reason: String, category: StringName = &"other") -> bool
 			rent_today += amount
 		&"equipment":
 			equipment_spend_today += amount
+		&"marketing":
+			marketing_today += amount
+		&"utilities":
+			utilities_today += amount
+		&"loan":
+			loan_payments_today += amount
 		_:
 			other_expense_today += amount
 	_record(category, -amount, reason)
@@ -129,9 +239,23 @@ func debit(amount: int, reason: String, category: StringName = &"other") -> bool
 
 func expenses_today() -> int:
 	return (
-		inventory_spend_today + wages_today + rent_today
-		+ equipment_spend_today + other_expense_today
+		inventory_spend_today + wages_today + rent_today + equipment_spend_today
+		+ marketing_today + utilities_today + loan_payments_today + other_expense_today
 	)
+
+
+## Profit as a share of revenue. Undefined with no revenue, which is reported as
+## zero rather than as a divide by zero.
+func profit_margin() -> float:
+	if revenue_today <= 0:
+		return 0.0
+	return float(profit_today()) / float(revenue_today)
+
+
+func lifetime_margin() -> float:
+	if lifetime_revenue <= 0:
+		return 0.0
+	return float(lifetime_profit()) / float(lifetime_revenue)
 
 
 func profit_today() -> int:
@@ -154,7 +278,8 @@ func storage_capacity() -> int:
 	for placed in equipment:
 		if placed.is_storage():
 			total += placed.capacity()
-	return total
+	# Racking counts as much as a rack does.
+	return total + roundi(upgrade_magnitude(BusinessUpgrade.Effect.STORAGE))
 
 
 func storage_used() -> int:
@@ -362,7 +487,19 @@ func missing_requirements() -> Array[String]:
 		if count_of_role(int(role)) <= 0:
 			var label := String(EquipmentData.Role.keys()[int(role)]).capitalize()
 			missing.append(label)
-	if total_shelf_units() < definition.minimum_shelf_units:
+
+	# What "having stock" means depends on the business. A shop needs goods on a
+	# shelf where somebody can pick them up; a kitchen needs enough in the back
+	# to make at least one thing on its menu.
+	if serves_prepared_goods():
+		var can_make_something := false
+		for item in catalogue():
+			if available_units(item) > 0:
+				can_make_something = true
+				break
+		if not can_make_something:
+			missing.append("Ingredients")
+	elif total_shelf_units() < definition.minimum_shelf_units:
 		missing.append("Stocked shelf")
 	return missing
 
@@ -441,12 +578,54 @@ func employee_by_id(employee_id: StringName) -> EmployeeData:
 	return null
 
 
-## The cashier who should be behind the register at this hour, if any.
-func rostered_cashier(hour: int) -> EmployeeData:
+## Whoever should be doing a given job at this hour, if anybody.
+func rostered(role: int, hour: int) -> EmployeeData:
 	for worker in employees:
-		if worker.role == EmployeeData.Role.CASHIER and worker.is_on_shift(hour):
+		if worker.role == role and worker.is_on_shift(hour):
 			return worker
 	return null
+
+
+## Whoever is serving customers at this hour.
+##
+## A coffee shop's barista takes the order as well as making it — one person
+## behind one counter — so the two roles answer the same question here rather
+## than needing two members of staff to sell a cup of tea.
+func rostered_cashier(hour: int) -> EmployeeData:
+	var cashier := rostered(EmployeeData.Role.CASHIER, hour)
+	if cashier != null:
+		return cashier
+	if serves_prepared_goods():
+		return rostered(EmployeeData.Role.BARISTA, hour)
+	return null
+
+
+func rostered_stocker(hour: int) -> EmployeeData:
+	return rostered(EmployeeData.Role.STOCKER, hour)
+
+
+func rostered_barista(hour: int) -> EmployeeData:
+	return rostered(EmployeeData.Role.BARISTA, hour)
+
+
+## The manager, if one is employed. Managers are not rostered by the hour: they
+## are the reason the business runs when nobody is looking.
+func manager() -> EmployeeData:
+	for worker in employees:
+		if worker.is_manager():
+			return worker
+	return null
+
+
+func has_manager() -> bool:
+	return manager() != null
+
+
+## How much of the manager's automation actually works. A poor manager gets
+## most of it right; a good one gets nearly all of it.
+func management_quality() -> float:
+	var boss := manager()
+	return boss.management_quality() if boss != null else 0.0
 
 
 # --- Trading -------------------------------------------------------------
@@ -457,12 +636,12 @@ func rostered_cashier(hour: int) -> EmployeeData:
 func record_sale(item: ItemData, quantity: int) -> int:
 	if item == null or quantity <= 0:
 		return 0
-	var sold := take_from_shelves(item.id, quantity)
+	var sold := take_for_sale(item, quantity)
 	if sold <= 0:
 		return 0
 	var unit_price := price_of(item)
 	var revenue := unit_price * sold
-	cogs_today += item.get_wholesale_cost() * sold
+	cogs_today += cost_basis(item) * sold
 	units_sold_today += sold
 	lifetime_units_sold += sold
 	credit(revenue, "%s x%d" % [item.display_name, sold], &"revenue")
@@ -480,18 +659,211 @@ func record_lost_sale() -> void:
 	changed.emit()
 
 
+# --- Upgrades ------------------------------------------------------------
+
+func has_upgrade(upgrade_id: StringName) -> bool:
+	return upgrades.has(upgrade_id)
+
+
+## Records a bought upgrade. The money is BusinessManager's to move; this is the
+## business remembering it owns the thing.
+func add_upgrade(upgrade_id: StringName) -> bool:
+	if has_upgrade(upgrade_id):
+		return false
+	upgrades.append(upgrade_id)
+	changed.emit()
+	return true
+
+
+## The total effect of everything bought, by kind. Upgrades are looked up by
+## what they *do* rather than by name, so a second, better sign later adds to
+## the same number instead of needing a special case.
+func upgrade_magnitude(effect: int) -> float:
+	var total := 0.0
+	for id in upgrades:
+		var upgrade := BusinessUpgrade.by_id(id)
+		if upgrade != null and upgrade.effect == effect:
+			total += upgrade.magnitude
+	return total
+
+
+## Reputation cannot drift below whatever the fittings justify.
+func reputation_floor() -> float:
+	var floors := 0.0
+	for id in upgrades:
+		var upgrade := BusinessUpgrade.by_id(id)
+		if upgrade != null and upgrade.effect == BusinessUpgrade.Effect.REPUTATION_FLOOR:
+			floors = maxf(floors, upgrade.magnitude)
+	return floors
+
+
+# --- Marketing -----------------------------------------------------------
+
+func start_campaign(campaign: MarketingCampaign) -> void:
+	if campaign == null:
+		return
+	campaign.start(TimeManager.day_index)
+	campaigns.append(campaign)
+	changed.emit()
+
+
+func active_campaigns() -> Array[MarketingCampaign]:
+	var running: Array[MarketingCampaign] = []
+	for campaign in campaigns:
+		if campaign.is_running(TimeManager.day_index):
+			running.append(campaign)
+	return running
+
+
+## Drops anything that has run its course. Called on the day rollover, so a
+## campaign expires on the clock rather than when somebody happens to look.
+func expire_campaigns() -> int:
+	var before := campaigns.size()
+	campaigns = active_campaigns()
+	if campaigns.size() != before:
+		changed.emit()
+	return before - campaigns.size()
+
+
+## How much more trade the advertising is buying, as a multiplier.
+func marketing_bonus() -> float:
+	var bonus := 0.0
+	for campaign in active_campaigns():
+		bonus += campaign.demand_bonus
+	return bonus
+
+
+# --- Loans ---------------------------------------------------------------
+
+func add_loan(loan: Loan) -> void:
+	loans.append(loan)
+	changed.emit()
+
+
+func active_loans() -> Array[Loan]:
+	var live: Array[Loan] = []
+	for loan in loans:
+		if loan.is_active():
+			live.append(loan)
+	return live
+
+
+func total_debt() -> int:
+	var total := 0
+	for loan in active_loans():
+		total += loan.remaining_balance
+	return total
+
+
+func has_overdue_loan() -> bool:
+	for loan in active_loans():
+		if loan.missed_payments > 0:
+			return true
+	return false
+
+
+# --- Worth ---------------------------------------------------------------
+
+## What the equipment on the floor would fetch. Second hand, so half of what it
+## cost — enough that fitting a shop out is not simply money burnt.
+func equipment_value() -> int:
+	var total := 0
+	for placed in equipment:
+		var definition := placed.data()
+		if definition != null:
+			total += roundi(float(definition.purchase_price) * 0.5)
+	return total
+
+
+## Stock at what it cost, wherever it is sitting.
+func inventory_value() -> int:
+	var total := 0
+	for item_id in storage:
+		var item := ItemCatalogue.by_id(item_id)
+		if item != null:
+			total += item.get_wholesale_cost() * int(storage[item_id])
+	for placed in shelves():
+		var shelf_item := placed.item()
+		if shelf_item != null:
+			total += shelf_item.get_wholesale_cost() * placed.stock_quantity
+	return total
+
+
+## What the business is worth.
+##
+## Assets plus a multiple of what it earns, adjusted for how well it is thought
+## of, less what it owes. The earnings multiple is what makes a profitable shop
+## worth more than the sum of its shelves, and the reputation factor is what
+## makes a well-run one worth more than a neglected one with the same stock.
+func estimated_value() -> int:
+	var assets := cash_balance + equipment_value() + inventory_value()
+	# A fortnight of recent daily profit, annualised in game terms.
+	var goodwill := roundi(float(average_daily_profit()) * 14.0)
+	var standing := lerpf(0.75, 1.25, clampf(reputation / 100.0, 0.0, 1.0))
+	var value := roundi(float(assets + maxi(goodwill, 0)) * standing) - total_debt()
+	return maxi(value, 0)
+
+
+## What the player would actually be paid for it. A buyer wants a discount, and
+## the debt comes off the top.
+func sale_price() -> int:
+	return maxi(roundi(float(estimated_value()) * 0.85), 0)
+
+
+## Mean daily profit across the reports kept. Zero before the first full day, so
+## a shop opened this morning is worth its assets and nothing more.
+func average_daily_profit() -> int:
+	if recent_reports.is_empty():
+		return 0
+	var total := 0
+	for report in recent_reports:
+		total += int(report.get("profit", 0))
+	return roundi(float(total) / float(recent_reports.size()))
+
+
+## A rough tier, for display. Nothing is locked behind it.
+func level() -> int:
+	if lifetime_revenue >= 25000 and reputation >= 60.0:
+		return 3
+	return 2 if lifetime_revenue >= 6000 else 1
+
+
 # --- Reputation ----------------------------------------------------------
 
 ## Customer satisfaction feeds in as small nudges; the day's total movement is
 ## clamped so a shop drifts rather than swings.
 func add_satisfaction(delta: float) -> void:
-	reputation = clampf(reputation + clampf(delta, -1.5, 1.5), 0.0, 100.0)
+	reputation = clampf(reputation + clampf(delta, -1.5, 1.5), reputation_floor(), 100.0)
 
 
 ## Multiplier on how many customers turn up, from reputation. Kept narrow on
 ## purpose: a bad shop is quieter, not dead.
 func reputation_multiplier() -> float:
 	return lerpf(0.6, 1.35, clampf(reputation / 100.0, 0.0, 1.0))
+
+
+## The unit this trades from, or null. Looked up rather than held, so a lease
+## that ends cannot leave a business pointing at a property it no longer has.
+func property() -> CommercialProperty:
+	return PropertyManager.by_id(property_id)
+
+
+## What the address itself is worth in trade.
+func location_multiplier() -> float:
+	var unit := property()
+	return unit.location_demand_modifier if unit != null else 1.0
+
+
+## How many customers may be inside at once, and how long a queue they will
+## stand in. Both come from the property: a small unit is a small shop.
+func customer_capacity() -> int:
+	var unit := property()
+	return unit.customer_capacity if unit != null else 6
+
+
+func queue_capacity() -> int:
+	var unit := property()
+	return unit.queue_capacity if unit != null else 4
 
 
 # --- The day -------------------------------------------------------------
@@ -508,17 +880,27 @@ func end_day(day_index: int) -> Dictionary:
 		"wages": wages_today,
 		"rent": rent_today,
 		"equipment": equipment_spend_today,
+		"marketing": marketing_today,
+		"utilities": utilities_today,
+		"loans": loan_payments_today,
 		"other": other_expense_today,
 		"expenses": expenses_today(),
 		"profit": profit_today(),
+		"margin": profit_margin(),
 		"cogs": cogs_today,
 		"gross_margin": revenue_today - cogs_today,
 		"units_sold": units_sold_today,
 		"lost_sales": lost_sales_today,
 		"reputation": roundi(reputation),
 		"cash": cash_balance,
+		"value": estimated_value(),
 	}
 	last_report = report
+	recent_reports.append(report)
+	# A week of history: enough for the weekly figures and for the earnings
+	# multiple the valuation uses, and it never grows.
+	while recent_reports.size() > 7:
+		recent_reports.remove_at(0)
 	day_finished.emit(report)
 
 	revenue_today = 0
@@ -526,6 +908,9 @@ func end_day(day_index: int) -> Dictionary:
 	wages_today = 0
 	rent_today = 0
 	equipment_spend_today = 0
+	marketing_today = 0
+	utilities_today = 0
+	loan_payments_today = 0
 	other_expense_today = 0
 	cogs_today = 0
 	customer_count_today = 0
@@ -538,6 +923,29 @@ func end_day(day_index: int) -> Dictionary:
 	_low_stock_warned.clear()
 	changed.emit()
 	return report
+
+
+## The last seven days added up. Weekly is the horizon a small business actually
+## plans on: rent and loan payments both fall on that cycle.
+func weekly_report() -> Dictionary:
+	var totals := {
+		"days": recent_reports.size(), "revenue": 0, "cogs": 0, "wages": 0,
+		"rent": 0, "marketing": 0, "utilities": 0, "loans": 0, "inventory": 0,
+		"equipment": 0, "other": 0, "expenses": 0, "profit": 0, "customers": 0,
+		"units_sold": 0, "lost_sales": 0,
+	}
+	for report in recent_reports:
+		for key in totals:
+			if key == "days":
+				continue
+			totals[key] = int(totals[key]) + int(report.get(key, 0))
+	totals["margin"] = (
+		float(totals["profit"]) / float(totals["revenue"]) if int(totals["revenue"]) > 0 else 0.0
+	)
+	totals["average_sale"] = (
+		float(totals["revenue"]) / float(totals["customers"]) if int(totals["customers"]) > 0 else 0.0
+	)
+	return totals
 
 
 # --- Internals -----------------------------------------------------------
@@ -582,6 +990,16 @@ func to_dict() -> Dictionary:
 	for key in prices:
 		priced[String(key)] = int(prices[key])
 
+	var bought: Array = []
+	for id in upgrades:
+		bought.append(String(id))
+	var running: Array = []
+	for campaign in campaigns:
+		running.append(campaign.to_dict())
+	var borrowed: Array = []
+	for loan in loans:
+		borrowed.append(loan.to_dict())
+
 	return {
 		"id": String(business_id),
 		"name": business_name,
@@ -589,6 +1007,18 @@ func to_dict() -> Dictionary:
 		"owner": String(owner_id),
 		"property": String(property_id),
 		"cash": cash_balance,
+		"upgrades": bought,
+		"campaigns": running,
+		"loans": borrowed,
+		"auto_open": auto_open,
+		"auto_restock": auto_restock,
+		"auto_order": auto_order,
+		"auto_order_budget": auto_order_budget,
+		"auto_order_minimum": auto_order_minimum,
+		"auto_order_target": auto_order_target,
+		"wages_owed": wages_owed,
+		"lifetime_interest_paid": lifetime_interest_paid,
+		"recent_reports": recent_reports,
 		"opening_hour": opening_hour,
 		"closing_hour": closing_hour,
 		"override": int(manual_override),
@@ -609,6 +1039,9 @@ func to_dict() -> Dictionary:
 		"equipment_today": equipment_spend_today,
 		"other_today": other_expense_today,
 		"cogs_today": cogs_today,
+		"marketing_today": marketing_today,
+		"utilities_today": utilities_today,
+		"loans_today": loan_payments_today,
 		"customers_today": customer_count_today,
 		"lost_sales_today": lost_sales_today,
 		"units_today": units_sold_today,
@@ -649,9 +1082,34 @@ static func from_dict(state: Dictionary) -> BusinessInstance:
 	business.rent_today = int(state.get("rent_today", 0))
 	business.equipment_spend_today = int(state.get("equipment_today", 0))
 	business.other_expense_today = int(state.get("other_today", 0))
+	business.marketing_today = int(state.get("marketing_today", 0))
+	business.utilities_today = int(state.get("utilities_today", 0))
+	business.loan_payments_today = int(state.get("loans_today", 0))
 	business.cogs_today = int(state.get("cogs_today", 0))
 	business.customer_count_today = int(state.get("customers_today", 0))
 	business.lost_sales_today = int(state.get("lost_sales_today", 0))
 	business.units_sold_today = int(state.get("units_today", 0))
 	business.last_report = state.get("last_report", {})
+
+	for id in state.get("upgrades", []):
+		business.upgrades.append(StringName(id))
+	for entry in state.get("campaigns", []):
+		var campaign := MarketingCampaign.from_dict(entry)
+		if campaign != null:
+			business.campaigns.append(campaign)
+	for entry in state.get("loans", []):
+		business.loans.append(Loan.from_dict(entry))
+	for entry in state.get("recent_reports", []):
+		business.recent_reports.append(entry)
+
+	# Absent from a Phase H save, and off is the right answer for one: nothing
+	# should start spending the player's money because they loaded a game.
+	business.auto_open = bool(state.get("auto_open", false))
+	business.auto_restock = bool(state.get("auto_restock", false))
+	business.auto_order = bool(state.get("auto_order", false))
+	business.auto_order_budget = int(state.get("auto_order_budget", 500))
+	business.auto_order_minimum = int(state.get("auto_order_minimum", 15))
+	business.auto_order_target = int(state.get("auto_order_target", 45))
+	business.wages_owed = int(state.get("wages_owed", 0))
+	business.lifetime_interest_paid = int(state.get("lifetime_interest_paid", 0))
 	return business

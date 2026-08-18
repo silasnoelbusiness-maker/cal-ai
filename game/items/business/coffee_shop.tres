@@ -1,0 +1,32 @@
+[gd_resource type="Resource" script_class="BusinessTypeData" load_steps=14 format=3]
+
+[ext_resource type="Script" path="res://business/business_type_data.gd" id="1_business_type"]
+[ext_resource type="Resource" path="res://items/definitions/filter_coffee.tres" id="2_filter"]
+[ext_resource type="Resource" path="res://items/definitions/latte.tres" id="3_latte"]
+[ext_resource type="Resource" path="res://items/definitions/iced_coffee.tres" id="4_iced"]
+[ext_resource type="Resource" path="res://items/definitions/house_tea.tres" id="5_tea"]
+[ext_resource type="Resource" path="res://items/definitions/coffee_beans.tres" id="6_beans"]
+[ext_resource type="Resource" path="res://items/definitions/milk_carton.tres" id="7_milk"]
+[ext_resource type="Resource" path="res://items/definitions/paper_cup.tres" id="8_cup"]
+[ext_resource type="Resource" path="res://items/definitions/tea_leaves.tres" id="9_leaves"]
+[ext_resource type="Resource" path="res://items/recipes/filter_coffee.tres" id="10_r_filter"]
+[ext_resource type="Resource" path="res://items/recipes/latte.tres" id="11_r_latte"]
+[ext_resource type="Resource" path="res://items/recipes/iced_coffee.tres" id="12_r_iced"]
+[ext_resource type="Resource" path="res://items/recipes/house_tea.tres" id="13_r_tea"]
+
+[resource]
+script = ExtResource("1_business_type")
+type_id = &"coffee_shop"
+display_name = "Coffee Shop"
+description = "Drinks made to order, sold at a counter."
+required_roles = [1, 4]
+minimum_shelf_units = 0
+catalogue = [ExtResource("2_filter"), ExtResource("3_latte"), ExtResource("4_iced"), ExtResource("5_tea")]
+supply_catalogue = [ExtResource("6_beans"), ExtResource("7_milk"), ExtResource("8_cup"), ExtResource("9_leaves")]
+recipes = [ExtResource("10_r_filter"), ExtResource("11_r_latte"), ExtResource("12_r_iced"), ExtResource("13_r_tea")]
+daily_utilities = 35
+default_opening_hour = 7
+default_closing_hour = 18
+base_storage_capacity = 60
+peak_customers_per_hour = 8.0
+basket_range = Vector2i(1, 2)

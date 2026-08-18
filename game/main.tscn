@@ -24,17 +24,29 @@ script = ExtResource("1_main")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 0)
 
 [node name="ConvenienceStore" parent="Interiors" instance=ExtResource("8_store")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 60)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 200)
 
 [node name="MainStreetUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 140)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 400)
 property_id = &"unit_main_18"
 unit_name = "18 Main Street"
 
 [node name="QuaysideUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 220)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 600)
 property_id = &"unit_quay_40"
 unit_name = "40 Quayside"
+
+[node name="HarbourAvenueUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 800)
+property_id = &"unit_harbour_42"
+unit_name = "42 Harbour Avenue"
+size_class = 1
+
+[node name="CentralPlazaUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 1000)
+property_id = &"unit_plaza_07"
+unit_name = "7 Central Plaza"
+size_class = 1
 
 [node name="PlacementController" type="Node3D" parent="."]
 script = ExtResource("10_placement")

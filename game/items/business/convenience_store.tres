@@ -20,3 +20,4 @@ default_closing_hour = 20
 base_storage_capacity = 60
 peak_customers_per_hour = 7.0
 basket_range = Vector2i(1, 3)
+daily_utilities = 20

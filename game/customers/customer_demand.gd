@@ -14,7 +14,7 @@ static func pick_item(business: BusinessInstance, rng: RandomNumberGenerator) ->
 	var weights: Array[float] = []
 	var total := 0.0
 	for item in business.catalogue():
-		if business.shelf_stock_of(item.id) <= 0:
+		if business.available_units(item) <= 0:
 			continue
 		var weight := maxf(item.demand_weight, 0.01)
 		candidates.append(item)
@@ -60,18 +60,25 @@ static func will_buy(business: BusinessInstance, item: ItemData, rng: RandomNumb
 
 ## How many people an open shop should expect this hour.
 ##
-## Three things scale it: the time of day, the shop's reputation, and how much of
-## its range is actually on the shelves. A shop with one product stocked gets a
-## fraction of the trade of a full one, which is what makes restocking pay.
+## Everything that decides how busy a business is, in one product. The time of
+## day and the address are given; reputation, range, advertising and the fittings
+## are earned. Nothing here looks at price — that decides whether the people who
+## walk in buy anything, which is a different question and lives in
+## `BusinessInstance.purchase_chance`.
 static func customers_per_hour(business: BusinessInstance, hour: int) -> float:
 	var definition := business.type_data()
 	if definition == null:
 		return 0.0
+	var attraction := 1.0 + business.marketing_bonus() + business.upgrade_magnitude(
+		BusinessUpgrade.Effect.ATTRACTION
+	)
 	return (
 		definition.peak_customers_per_hour
 		* time_of_day_factor(hour)
 		* business.reputation_multiplier()
 		* range_factor(business)
+		* business.location_multiplier()
+		* attraction
 	)
 
 
@@ -89,14 +96,16 @@ static func time_of_day_factor(hour: int) -> float:
 
 
 ## Fraction of the shop's range that is buyable, softened so a shop with half
-## its lines in stock still does most of the trade.
+## its lines in stock still does most of the trade. "Buyable" means on a shelf in
+## a shop and makeable in a kitchen — BusinessInstance.available_units knows the
+## difference so nothing else has to.
 static func range_factor(business: BusinessInstance) -> float:
 	var list := business.catalogue()
 	if list.is_empty():
 		return 0.0
 	var stocked := 0
 	for item in list:
-		if business.shelf_stock_of(item.id) > 0:
+		if business.available_units(item) > 0:
 			stocked += 1
 	if stocked == 0:
 		return 0.0

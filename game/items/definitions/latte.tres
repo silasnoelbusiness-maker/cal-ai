@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"latte"
+display_name = "Latte"
+description = "Milky, and the one everybody orders."
+category = 1
+price = 6
+max_stack = 3
+icon_color = Color(0.78, 0.66, 0.51, 1)
+wholesale_cost = 2
+recommended_price = 6
+demand_weight = 1.5
+consumable = true
+restores_hunger = 4.0
+restores_energy = 16.0
+restores_health = 0.0
+use_minutes = 4

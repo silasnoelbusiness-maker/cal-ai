@@ -14,6 +14,15 @@ const ITEMS: Array[ItemData] = [
 	preload("res://items/definitions/bottled_water.tres"),
 	preload("res://items/definitions/soda_can.tres"),
 	preload("res://items/definitions/steel_pipe.tres"),
+	# Coffee shop: the drinks it sells, then the ingredients it holds.
+	preload("res://items/definitions/filter_coffee.tres"),
+	preload("res://items/definitions/latte.tres"),
+	preload("res://items/definitions/iced_coffee.tres"),
+	preload("res://items/definitions/house_tea.tres"),
+	preload("res://items/definitions/coffee_beans.tres"),
+	preload("res://items/definitions/milk_carton.tres"),
+	preload("res://items/definitions/paper_cup.tres"),
+	preload("res://items/definitions/tea_leaves.tres"),
 ]
 
 

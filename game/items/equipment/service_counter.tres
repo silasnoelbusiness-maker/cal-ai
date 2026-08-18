@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://equipment/equipment_data.gd" id="1_equipment_data"]
+
+[resource]
+script = ExtResource("1_equipment_data")
+equipment_id = &"service_counter"
+display_name = "Service Counter"
+description = "Where customers order and pay for their drinks."
+role = 1
+purchase_price = 350
+placement_size = Vector2(2.6, 0.9)
+height = 1.1
+body_color = Color(0.286275, 0.239216, 0.211765, 1)
+accent_color = Color(0.180392, 0.196078, 0.207843, 1)
+capacity = 0
+business_types_allowed = Array[StringName]([&"coffee_shop"])

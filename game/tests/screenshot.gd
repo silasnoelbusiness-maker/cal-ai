@@ -297,6 +297,13 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"pursuit_traffic", "police_lights", "escaping_traffic", "night_traffic":
 			await _crime_scenario(main, scenario, false)
 
+		"commercial_properties", "portfolio", "market_operating", "coffee_empty", \
+		"coffee_placement", "ingredient_order", "coffee_customers", "barista", \
+		"stocker", "manager_running", "order_in_transit", "delivery_received", \
+		"marketing", "upgrades", "two_businesses", "empire_finance", \
+		"business_value", "loans", "net_worth", "player_away_empire":
+			await _run_empire_scenario(main, scenario)
+
 		"vacant_property", "property_rental":
 			# With enough in the bank to actually sign, so the shot shows the
 			# offer rather than the shortfall warning.
@@ -551,6 +558,245 @@ func _occupied_car(main: Node, at: Vector3, yaw_degrees: float) -> Vehicle:
 	car.halt()
 	await _wait(6)
 	return car
+
+
+## Builds the two-business empire the Phase I shots are of, driving the real
+## systems: the leases are signed, the equipment is bought and placed, the stock
+## is ordered and delivered, the staff are hired, and both shops open.
+func _run_empire_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	EconomyManager.restore(60000)
+
+	if scenario == "commercial_properties":
+		# Stood in the middle of Main Street, with the units either side.
+		player.global_position = Vector3(10.0, 0.5, -8.0)
+		await _wait(16)
+		return
+
+	# --- Silas Market ---
+	var market_door := _property_door()
+	PropertyManager.lease(market_door)
+	var market := BusinessManager.create_business("Silas Market", &"convenience_store", market_door)
+	BusinessManager.deposit_to_business(market, 8000)
+	market_door.interact(player)
+	await _wait(16)
+	var market_unit: RetailUnit = main.get_node("Interiors/MainStreetUnit")
+	var controller: PlacementController = main.get_node("PlacementController")
+	var dashboard: Control = main.get_node("HUD/BusinessDashboard")
+	var empire: Control = main.get_node("HUD/EmpireDashboard")
+
+	for id in [&"checkout_counter", &"retail_shelf", &"retail_shelf", &"storage_rack"]:
+		BusinessManager.buy_equipment(market, id)
+	controller.begin(market, market_unit, &"checkout_counter")
+	controller.place_at(Vector3(0.0, 0.0, 1.0), 180.0)
+	controller.begin(market, market_unit, &"retail_shelf")
+	controller.place_at(Vector3(-4.0, 0.0, 2.0), 90.0)
+	controller.begin(market, market_unit, &"retail_shelf")
+	controller.place_at(Vector3(4.0, 0.0, 2.0), 90.0)
+	controller.begin(market, market_unit, &"storage_rack")
+	controller.place_at(Vector3(0.0, 0.0, -4.0), 0.0)
+	BusinessManager.order_stock(market, &"bottled_water", 40)
+	BusinessManager.order_stock(market, &"soda_can", 40)
+	BusinessManager.order_stock(market, &"snack_bar", 30)
+	BusinessManager.deliver_now(market)
+
+	BusinessManager.refresh_candidates()
+	var till: EmployeeData = BusinessManager.get_candidates()[1]
+	BusinessManager.hire(market, till, EmployeeData.Role.CASHIER)
+	till.shift_start_hour = 0
+	till.shift_end_hour = 23
+	market.manual_override = BusinessInstance.Override.FORCE_OPEN
+	market.set_open(true)
+	await _wait(8)
+
+	if scenario == "stocker":
+		# Shelves bare, a stocker on shift, and the player watching them work.
+		BusinessManager.refresh_candidates()
+		var hand: EmployeeData = BusinessManager.get_candidates()[2]
+		BusinessManager.hire(market, hand, EmployeeData.Role.STOCKER)
+		hand.shift_start_hour = 0
+		hand.shift_end_hour = 23
+		for shelf in market.shelves():
+			shelf.stock_quantity = 0
+		market.changed.emit()
+		player.global_position = market_unit.global_position + Vector3(3.0, 0.5, 3.0)
+		await _wait(10)
+		market_unit.call("_refresh_staff")
+		await _wait(320)
+		return
+
+	for shelf in market.shelves():
+		market.stock_shelf(shelf.slot_id, &"bottled_water" if shelf.slot_id % 2 == 0 else &"soda_can", 20)
+
+	if scenario == "market_operating":
+		var spawner := market_unit.get_spawner()
+		player.global_position = market_unit.global_position + Vector3(0.0, 0.5, 4.0)
+		await _wait(10)
+		market_unit.call("_refresh_staff")
+		for i in 3:
+			spawner.spawn_customer_now()
+			await _wait(40)
+		await _wait(200)
+		return
+
+	if scenario == "manager_running":
+		BusinessManager.refresh_candidates()
+		var boss: EmployeeData = BusinessManager.get_candidates()[2]
+		BusinessManager.hire(market, boss, EmployeeData.Role.MANAGER)
+		market.auto_open = true
+		market.auto_restock = true
+		market.auto_order = true
+		player.global_position = market_unit.global_position + Vector3(0.0, 0.5, 4.0)
+		await _wait(10)
+		market_unit.call("_refresh_staff")
+		await _wait(60)
+		dashboard.open(market)
+		dashboard.show_tab(4)
+		await _wait(6)
+		return
+
+	# --- Noel Coffee ---
+	var coffee_door := PropertyManager.by_id(&"unit_harbour_42")
+	PropertyManager.lease(coffee_door)
+	var coffee := BusinessManager.create_business("Noel Coffee", &"coffee_shop", coffee_door)
+	BusinessManager.deposit_to_business(coffee, 8000)
+	var coffee_unit: RetailUnit = main.get_node("Interiors/HarbourAvenueUnit")
+	coffee_unit.ensure_built()
+	player.global_position = coffee_unit.global_position + Vector3(0.0, 0.5, 4.0)
+	await _wait(16)
+
+	if scenario == "coffee_empty":
+		return
+
+	for id in [&"service_counter", &"coffee_machine", &"ingredient_store"]:
+		BusinessManager.buy_equipment(coffee, id)
+
+	if scenario == "coffee_placement":
+		controller.begin(coffee, coffee_unit, &"coffee_machine")
+		await _wait(10)
+		return
+
+	controller.begin(coffee, coffee_unit, &"service_counter")
+	controller.place_at(Vector3(0.0, 0.0, 1.0), 180.0)
+	controller.begin(coffee, coffee_unit, &"coffee_machine")
+	controller.place_at(Vector3(-3.4, 0.0, 1.0), 180.0)
+	controller.begin(coffee, coffee_unit, &"ingredient_store")
+	controller.place_at(Vector3(0.0, 0.0, -5.0), 0.0)
+	await _wait(8)
+
+	if scenario == "ingredient_order":
+		dashboard.open(coffee)
+		dashboard.show_tab(1)
+		await _wait(6)
+		return
+
+	if scenario == "order_in_transit":
+		for ingredient in [&"coffee_beans", &"milk_carton", &"paper_cup"]:
+			BusinessManager.order_stock(coffee, ingredient, 30)
+		dashboard.open(coffee)
+		dashboard.show_tab(1)
+		await _wait(6)
+		return
+
+	for ingredient in [&"coffee_beans", &"milk_carton", &"paper_cup", &"tea_leaves"]:
+		BusinessManager.order_stock(coffee, ingredient, 30)
+	BusinessManager.deliver_now(coffee)
+
+	if scenario == "delivery_received":
+		BusinessManager.order_stock(coffee, &"coffee_beans", 20)
+		BusinessManager.deliver_now(coffee)
+		dashboard.open(coffee)
+		dashboard.show_tab(1)
+		await _wait(6)
+		return
+
+	BusinessManager.refresh_candidates()
+	var barista: EmployeeData = BusinessManager.get_candidates()[2]
+	BusinessManager.hire(coffee, barista, EmployeeData.Role.BARISTA)
+	barista.shift_start_hour = 0
+	barista.shift_end_hour = 23
+	coffee.manual_override = BusinessInstance.Override.FORCE_OPEN
+	coffee.set_open(true)
+	await _wait(8)
+
+	match scenario:
+		"marketing":
+			dashboard.open(coffee)
+			dashboard.show_tab(5)
+			await _wait(6)
+			return
+		"upgrades":
+			BusinessManager.start_campaign(coffee, &"social")
+			dashboard.open(coffee)
+			dashboard.show_tab(5)
+			await _wait(6)
+			return
+		"business_value":
+			for i in 4:
+				BusinessManager.simulate_hour_now(market, 12)
+				BusinessManager.simulate_hour_now(coffee, 12)
+			market.end_day(TimeManager.day_index)
+			coffee.end_day(TimeManager.day_index)
+			for i in 3:
+				BusinessManager.simulate_hour_now(coffee, 12)
+			dashboard.open(coffee)
+			dashboard.show_tab(0)
+			await _wait(6)
+			return
+		"loans":
+			BusinessManager.take_loan(market, &"starter")
+			empire.open()
+			empire.show_tab(4)
+			await _wait(6)
+			return
+
+	# Everything from here wants a couple of hours of trading behind it, on a
+	# fresh day: day one is all fit-out costs and shows nothing about how the
+	# businesses actually run.
+	market.end_day(TimeManager.day_index)
+	coffee.end_day(TimeManager.day_index)
+	for i in 5:
+		BusinessManager.simulate_hour_now(market, 12)
+		BusinessManager.simulate_hour_now(coffee, 12)
+
+	match scenario:
+		"portfolio":
+			empire.open()
+			empire.show_tab(1)
+			await _wait(6)
+			return
+		"empire_finance":
+			empire.open()
+			empire.show_tab(3)
+			await _wait(6)
+			return
+		"net_worth":
+			BusinessManager.take_loan(market, &"starter")
+			empire.open()
+			empire.show_tab(0)
+			await _wait(6)
+			return
+		"player_away_empire":
+			GameManager.teleport_player(
+				Transform3D(Basis(), Vector3(-30.0, 0.5, 8.4))
+			)
+			await _wait(20)
+			for i in 2:
+				BusinessManager.simulate_hour_now(market, 13)
+				BusinessManager.simulate_hour_now(coffee, 13)
+			return
+
+	# "coffee_customers", "barista" and "two_businesses": in the coffee shop
+	# with people in it.
+	var coffee_spawner := coffee_unit.get_spawner()
+	player.global_position = coffee_unit.global_position + Vector3(2.0, 0.5, 4.0)
+	await _wait(10)
+	coffee_unit.call("_refresh_staff")
+	await _wait(60)
+	for i in 4:
+		coffee_spawner.spawn_customer_now()
+		await _wait(35)
+	await _wait(240)
 
 
 func _property_door() -> CommercialProperty:

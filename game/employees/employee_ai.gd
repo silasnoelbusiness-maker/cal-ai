@@ -1,17 +1,25 @@
 class_name EmployeeAI
 extends Pedestrian
-## The member of staff standing behind the counter.
+## A member of staff, on the floor.
 ##
-## Only exists while the player is in the shop — when they are not, the same
-## employee works as a line in the far simulation. Their job here is to walk in,
-## stand in the right place and be visibly present; the actual serving is
-## CustomerSpawner's, because a queue has to be served the same way whether an
-## employee or the player is on the till.
+## Only exists while the player is in the shop — out of sight the same employee
+## is a line in the far simulation, which is why walking out does not stop them
+## working. What they do here depends on their role: whoever is on the counter
+## stands behind it and is served by CustomerSpawner, and a stocker walks the
+## floor moving stock out of the back.
+##
+## The serving itself is deliberately not here. A queue has to be served the same
+## way whether an employee or the player is on the till, so that lives in one
+## place and this only decides where somebody stands.
 
-enum Stage { ARRIVING, TAKING_POST, WORKING, LEAVING }
+enum Stage { ARRIVING, TAKING_POST, WORKING, RESTOCKING, LEAVING }
 
 ## How close to the station counts as being at it.
 @export var station_tolerance: float = 1.3
+## Seconds a stocker spends at each end of the trip.
+@export var handling_seconds: float = 1.4
+## Units a stocker carries in one trip.
+@export var carry_units: int = 6
 
 var employee: EmployeeData = null
 var stage: Stage = Stage.ARRIVING
@@ -24,6 +32,10 @@ var _approach: Vector3 = Vector3.ZERO
 var _exit_point: Vector3 = Vector3.ZERO
 var _facing: Vector3 = Vector3.FORWARD
 var _repaths: int = 0
+## Stocker: where they are headed, and how long they stand there.
+var _carrying: bool = false
+var _handling: float = 0.0
+var _target_shelf: BusinessEquipment = null
 
 
 func setup(worker: EmployeeData, unit: RetailUnit, entry: Vector3, exit_point: Vector3) -> void:
@@ -31,15 +43,34 @@ func setup(worker: EmployeeData, unit: RetailUnit, entry: Vector3, exit_point: V
 	_unit = unit
 	_exit_point = exit_point
 	wanders = false
-	body_color = Color(0.318, 0.396, 0.502)
-	accent_color = Color(0.204, 0.259, 0.337)
+	body_color = _colour_for_role()
+	accent_color = body_color.darkened(0.35)
 	global_position = entry
 	_refresh_station()
 	_go_to(_approach)
 
 
+## Staff are told apart at a glance: the till, the machine, the floor, the boss.
+func _colour_for_role() -> Color:
+	if employee == null:
+		return Color(0.318, 0.396, 0.502)
+	match employee.role:
+		EmployeeData.Role.BARISTA:
+			return Color(0.400, 0.290, 0.220)
+		EmployeeData.Role.STOCKER:
+			return Color(0.290, 0.400, 0.310)
+		EmployeeData.Role.MANAGER:
+			return Color(0.361, 0.290, 0.451)
+		_:
+			return Color(0.318, 0.396, 0.502)
+
+
 func is_at_station() -> bool:
-	return stage == Stage.WORKING
+	return stage == Stage.WORKING or stage == Stage.RESTOCKING
+
+
+func is_stocker() -> bool:
+	return employee != null and employee.role == EmployeeData.Role.STOCKER
 
 
 ## Told to go home. They walk out rather than blinking away.
@@ -65,7 +96,7 @@ func _process(delta: float) -> void:
 				_go_to(_station)
 		Stage.TAKING_POST:
 			if _reached(_station):
-				stage = Stage.WORKING
+				stage = Stage.RESTOCKING if is_stocker() else Stage.WORKING
 				stop()
 				_face_the_shop()
 		Stage.WORKING:
@@ -76,21 +107,120 @@ func _process(delta: float) -> void:
 				_go_to(_approach)
 			else:
 				_face_the_shop()
+		Stage.RESTOCKING:
+			_tick_restocking(delta)
 		Stage.LEAVING:
 			if _reached(_exit_point):
 				queue_free()
 
 
-## Behind the till, on the staff side, looking out at the queue.
+# --- Stocking ------------------------------------------------------------
+
+## Back and forth: fetch an armful from the store room, carry it to a shelf that
+## needs it, put it out. The stock actually moves when they reach the shelf —
+## watching a stocker walk about while the shelves fill themselves elsewhere
+## would be a lie, so the hourly simulation stands down while they are visible.
+func _tick_restocking(delta: float) -> void:
+	if _handling > 0.0:
+		_handling -= delta
+		stop()
+		return
+
+	var business := _unit.get_business() if _unit != null else null
+	if business == null:
+		return
+
+	if not _carrying:
+		if _reached(_store_room_point()):
+			_carrying = true
+			_handling = handling_seconds
+			_target_shelf = _shelf_needing_stock(business)
+		return
+
+	if _target_shelf == null or not is_instance_valid(_target_shelf):
+		_target_shelf = _shelf_needing_stock(business)
+		if _target_shelf == null:
+			# Nothing to do: wait by the store room rather than pacing.
+			_carrying = false
+			_handling = handling_seconds * 2.0
+			_go_to(_store_room_point())
+			return
+		_go_to(_target_shelf.approach_point_from(global_position))
+		return
+
+	if not _reached(_target_shelf.approach_point_from(global_position)):
+		return
+
+	var wanted := _target_shelf.placed.stock_item
+	if wanted == &"" or business.storage_of(wanted) <= 0:
+		wanted = _fullest_line(business)
+	if wanted != &"":
+		business.stock_shelf(_target_shelf.slot_id(), wanted, carry_units)
+		if employee != null:
+			employee.add_experience(0.05)
+	_carrying = false
+	_handling = handling_seconds
+	_target_shelf = null
+	_go_to(_store_room_point())
+
+
+func _shelf_needing_stock(business: BusinessInstance) -> BusinessEquipment:
+	var emptiest: BusinessEquipment = null
+	var lowest := INF
+	for shelf in _unit.shelf_nodes():
+		if shelf.placed == null or shelf.placed.room_left() <= 0:
+			continue
+		var level := float(shelf.placed.stock_quantity)
+		if level < lowest:
+			lowest = level
+			emptiest = shelf
+	return emptiest if business.storage_used() > 0 else null
+
+
+func _fullest_line(business: BusinessInstance) -> StringName:
+	var best: StringName = &""
+	var most := 0
+	for item in business.catalogue():
+		var held := business.storage_of(item.id)
+		if held > most:
+			most = held
+			best = item.id
+	return best
+
+
+## Where the stock is kept: the storage unit if there is one, otherwise the back
+## of the room.
+func _store_room_point() -> Vector3:
+	if _unit == null:
+		return global_position
+	for node in _unit.equipment_nodes():
+		if node.placed != null and node.placed.is_storage():
+			return node.approach_point_from(global_position)
+	return _unit.to_global(Vector3(0.0, 0.0, _unit.storage_area.get_center().y))
+
+
+# --- Where they stand ----------------------------------------------------
+
+## Behind whatever they work at, looking out at the customers.
 func _refresh_station() -> void:
 	if _unit == null:
 		return
-	var till := _unit.first_checkout()
-	if till == null:
+	var post := _workstation()
+	if post == null:
 		return
-	_station = till.staff_point()
-	_approach = till.staff_approach_from(global_position)
-	_facing = (till.service_point() - _station).normalized()
+	_station = post.staff_point()
+	_approach = post.staff_approach_from(global_position)
+	_facing = (post.service_point() - _station).normalized()
+
+
+## The thing this role stands behind. A barista wants the machine and falls back
+## to the counter; everybody else wants the counter.
+func _workstation() -> BusinessEquipment:
+	if employee != null and employee.role == EmployeeData.Role.BARISTA:
+		for node in _unit.equipment_nodes():
+			if node.placed != null and node.placed.data() != null and node.placed.data().is_workstation():
+				return node
+	return _unit.first_checkout()
 
 
 func _face_the_shop() -> void:

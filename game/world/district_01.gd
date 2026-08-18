@@ -1135,6 +1135,14 @@ func _venue_table() -> Array:
 			"QuaysideUnit", Vector3(64.0, 1.2, -12.4), Vector3.BACK, "View Property",
 			"property", "unit_quay_40",
 		],
+		[
+			"HarbourAvenueUnit", Vector3(20.0, 1.2, -12.4), Vector3.BACK, "View Property",
+			"property", "unit_harbour_42",
+		],
+		[
+			"CentralPlazaUnit", Vector3(42.0, 1.2, -12.4), Vector3.BACK, "View Property",
+			"property", "unit_plaza_07",
+		],
 	]
 
 
@@ -1229,22 +1237,50 @@ func _make_commercial_property(
 	unit.camera_distance = 16.0
 	unit.camera_pitch = 68.0
 
-	# Two units, deliberately different: a small one the player can reach early
-	# and a larger, dearer one to move up to.
-	if id == &"unit_quay_40":
-		unit.address = "40 Quayside"
-		unit.property_type = "Retail Unit"
-		unit.size_label = "Medium"
-		unit.floor_area = 62
-		unit.rent_amount = 820
-		unit.deposit = 650
-	else:
-		unit.address = "18 Main Street"
-		unit.property_type = "Retail Unit"
-		unit.size_label = "Small"
-		unit.floor_area = 48
-		unit.rent_amount = 650
-		unit.deposit = 500
+	# Four units, deliberately unalike. Rent buys floor space and passing trade,
+	# and the cheapest pitch is cheap for a reason — which is the whole of the
+	# expansion decision until property can be bought outright.
+	match id:
+		&"unit_quay_40":
+			unit.address = "40 Quayside"
+			unit.property_type = "Retail Unit"
+			unit.size_class = CommercialProperty.SizeClass.SMALL
+			unit.floor_area = 44
+			unit.rent_amount = 480
+			unit.deposit = 400
+			unit.customer_capacity = 5
+			unit.queue_capacity = 3
+			unit.location_demand_modifier = 0.8
+		&"unit_harbour_42":
+			unit.address = "42 Harbour Avenue"
+			unit.property_type = "Retail Unit"
+			unit.size_class = CommercialProperty.SizeClass.MEDIUM
+			unit.floor_area = 76
+			unit.rent_amount = 1100
+			unit.deposit = 900
+			unit.customer_capacity = 9
+			unit.queue_capacity = 6
+			unit.location_demand_modifier = 1.1
+		&"unit_plaza_07":
+			unit.address = "7 Central Plaza"
+			unit.property_type = "Premium Retail"
+			unit.size_class = CommercialProperty.SizeClass.MEDIUM
+			unit.floor_area = 84
+			unit.rent_amount = 1800
+			unit.deposit = 1400
+			unit.customer_capacity = 12
+			unit.queue_capacity = 7
+			unit.location_demand_modifier = 1.3
+		_:
+			unit.address = "18 Main Street"
+			unit.property_type = "Retail Unit"
+			unit.size_class = CommercialProperty.SizeClass.SMALL
+			unit.floor_area = 48
+			unit.rent_amount = 650
+			unit.deposit = 500
+			unit.customer_capacity = 6
+			unit.queue_capacity = 4
+			unit.location_demand_modifier = 1.0
 	return unit
 
 

@@ -14,6 +14,8 @@ const COMMANDS := [
 	"1 money +$1000", "2 force open", "3 force closed", "4 follow hours",
 	"5 spawn customer", "6 clear customers", "7 restock shelves",
 	"8 trade an hour", "9 end the day", "0 reputation 50",
+	"Q next business", "W deliver now", "E start campaign", "R hire a manager",
+	"T take a loan", "Y pay a loan", "U advance 7 days", "I force far sim",
 ]
 
 var _label: Label = null
@@ -66,6 +68,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	match (event as InputEventKey).keycode:
+		KEY_Q: _cycle_business()
+		KEY_W: BusinessManager.deliver_now(business)
+		KEY_E: BusinessManager.start_campaign(business, &"flyers")
+		KEY_R: _hire_manager(business)
+		KEY_T: BusinessManager.take_loan(business, &"starter")
+		KEY_Y: _pay_a_loan(business)
+		KEY_U: TimeManager.advance_minutes(7 * 1440)
+		KEY_I: BusinessManager.simulate_hour_now(business)
 		KEY_1: business.credit(1000, "Debug funds", &"capital")
 		KEY_2: _override(business, BusinessInstance.Override.FORCE_OPEN)
 		KEY_3: _override(business, BusinessInstance.Override.FORCE_CLOSED)
@@ -81,8 +91,38 @@ func _unhandled_input(event: InputEvent) -> void:
 	_refresh()
 
 
+## Which business the commands act on. The overlay follows one at a time, and Q
+## steps through them, because a debug key that acts on "all of them" is not much
+## use for finding out why one of them is wrong.
+var _focus: int = 0
+
+
 func _business() -> BusinessInstance:
-	return BusinessManager.primary_business()
+	var owned := BusinessManager.get_businesses()
+	if owned.is_empty():
+		return null
+	return owned[_focus % owned.size()]
+
+
+func _cycle_business() -> void:
+	_focus += 1
+
+
+func _hire_manager(business: BusinessInstance) -> void:
+	BusinessManager.refresh_candidates()
+	var candidates := BusinessManager.get_candidates()
+	if candidates.is_empty():
+		return
+	BusinessManager.hire(business, candidates[0], EmployeeData.Role.MANAGER)
+	business.auto_open = true
+	business.auto_restock = true
+	business.auto_order = true
+
+
+func _pay_a_loan(business: BusinessInstance) -> void:
+	for loan in business.active_loans():
+		BusinessManager.repay_loan(business, loan.loan_id, loan.payment_amount)
+		return
 
 
 func _unit() -> RetailUnit:
@@ -141,9 +181,14 @@ func _refresh() -> void:
 		return
 
 	var lines: Array[String] = ["BUSINESS  (F10 hide)"]
-	lines.append("  %s   %s   %s" % [
+	var summary := BusinessManager.portfolio_summary()
+	lines.append("  %s   %d businesses   net worth $%d   debt $%d" % [
+		summary["company"], int(summary["businesses"]),
+		int(summary["net_worth"]), int(summary["debt"]),
+	])
+	lines.append("  %s   %s   %s   value $%d" % [
 		business.business_name, business.status_text(),
-		BusinessManager.simulation_mode(business),
+		BusinessManager.simulation_mode(business), business.estimated_value(),
 	])
 	lines.append("  cash $%d   rep %d%%   open %02d-%02d" % [
 		business.cash_balance, roundi(business.reputation),
@@ -165,7 +210,24 @@ func _refresh() -> void:
 				spawner.active_customers().size(), spawner.queue_length(),
 				"player" if spawner.is_player_working_register() else "-",
 			])
-	lines.append("  spawn rate %.1f/hour" % CustomerDemand.customers_per_hour(business, TimeManager.hour))
+	lines.append("  spawn rate %.1f/hour   capacity %d   marketing +%d%%" % [
+		CustomerDemand.customers_per_hour(business, TimeManager.hour),
+		business.customer_capacity(), roundi(business.marketing_bonus() * 100.0),
+	])
+	var boss := business.manager()
+	if boss != null:
+		lines.append("  manager %s   open %s  restock %s  order %s ($%d)" % [
+			boss.employee_name, business.auto_open, business.auto_restock,
+			business.auto_order, business.auto_order_budget,
+		])
+	for order in BusinessManager.outstanding_orders(business):
+		lines.append("  order %s %s arriving %s" % [
+			order.order_id, order.status_text(), order.arrival_text()
+		])
+	for loan in business.active_loans():
+		lines.append("  loan %s $%d left, $%d due day %d" % [
+			loan.display_name, loan.remaining_balance, loan.payment_amount, loan.next_payment_day
+		])
 
 	for shelf in business.shelves():
 		var item := shelf.item()

@@ -9,7 +9,9 @@ extends Resource
 
 ## What this piece of equipment is *for*. The business rules read this rather
 ## than the id, so two different shelves are both SHELF.
-enum Role { SHELF, CHECKOUT, STORAGE, FITTING }
+## Appended to rather than reordered: the saved .tres files store these as
+## numbers, and renumbering them would quietly turn every shelf into a counter.
+enum Role { SHELF, CHECKOUT, STORAGE, FITTING, BREW }
 
 @export var equipment_id: StringName = &""
 @export var display_name: String = "Equipment"
@@ -47,3 +49,9 @@ func is_checkout() -> bool:
 
 func is_storage() -> bool:
 	return role == Role.STORAGE
+
+
+## A workstation where a prepared product is made — the coffee machine, and
+## whatever a later business type cooks on.
+func is_workstation() -> bool:
+	return role == Role.BREW
