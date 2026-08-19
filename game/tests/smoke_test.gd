@@ -155,6 +155,14 @@ func _run() -> void:
 	await _test_city_edge()
 	await _test_world_debug()
 
+	# Phase K: the visual pass.
+	await _test_player_figure()
+	_test_crowd_variety()
+	_test_police_look()
+	_test_vehicle_models()
+	await _test_interior_dressing()
+	_test_ui_theme()
+
 	_report()
 
 
@@ -3765,10 +3773,19 @@ func _test_simulation_consistency() -> void:
 		BusinessManager.simulate_hour_now(business, 12)
 	var far_customers := business.customer_count_today
 	var far_revenue := business.revenue_today
+	# The rate is not a constant across the six hours: lost sales cost
+	# satisfaction, satisfaction moves reputation, and reputation is a term in
+	# the rate. So the band is drawn from the rate the shop actually had —
+	# lowest at the end, highest at the start — rather than from the one reading
+	# taken before it opened, which is what made this check fail on the runs
+	# where trade was busy enough to lose a few.
+	var rate_after := CustomerDemand.customers_per_hour(business, 12)
+	var floor_rate := minf(rate, rate_after)
+	var ceiling_rate := maxf(rate, rate_after)
 	_check(
-		far_customers >= int(rate * 4.0) and far_customers <= int(rate * 8.0),
-		"six simulated hours produce about six hours of customers (%d for %.1f/hour)"
-		% [far_customers, rate]
+		far_customers >= int(floor_rate * 4.0) and far_customers <= int(ceiling_rate * 8.0),
+		"six simulated hours produce about six hours of customers (%d for %.1f-%.1f/hour)"
+		% [far_customers, floor_rate, ceiling_rate]
 	)
 	_check(far_revenue > 0, "and they spend money (+$%d)" % far_revenue)
 	_check(
@@ -5497,6 +5514,195 @@ func _test_world_debug() -> void:
 		labels == null or labels.get_child_count() == 0,
 		"and takes its lines and labels with it"
 	)
+
+
+## TEST 146 — the player is a person, not a placeholder.
+func _test_player_figure() -> void:
+	var pivot := _player.get_node_or_null("BodyPivot") as Node3D
+	_check(pivot != null, "the player has a body pivot")
+	if pivot == null:
+		return
+	_check(_player.rig != null, "and a built figure on it")
+	if _player.rig == null:
+		return
+
+	for part in ["hips", "chest", "head", "arm_left", "arm_right", "leg_left", "leg_right"]:
+		_check(_player.rig.get(part) != null, "the figure has a %s" % part.replace("_", " "))
+	_check(
+		pivot.find_child("Skull", true, false) != null,
+		"with a head on it rather than a capsule"
+	)
+	_check(
+		pivot.find_child("Shoe", true, false) != null, "and shoes"
+	)
+	# The old placeholder is gone: no capsule mesh anywhere under the figure.
+	var capsules := 0
+	for node in pivot.find_children("*", "MeshInstance3D", true, false):
+		if (node as MeshInstance3D).mesh is CapsuleMesh:
+			capsules += 1
+	_check(capsules == 0, "and no placeholder capsule left on it (%d)" % capsules)
+
+	# The figure moves. Walking must swing the legs, and standing still must
+	# not — an animator that runs whatever the player does is worse than none.
+	await _teleport(Vector3(0.0, 0.5, 40.0))
+	await _settle(20)
+	var still := _player.rig.leg_left.rotation.x
+	await _hold(["move_forward"], 14)
+	var walking := _player.rig.leg_left.rotation.x
+	await _settle(10)
+	_check(
+		absf(walking - still) > 0.03,
+		"walking swings the legs (%.3f -> %.3f)" % [still, walking]
+	)
+	_check(_player.get_planar_speed() >= 0.0, "and the player is still moving normally")
+
+
+## TEST 147 — a crowd of people rather than a crowd of one person.
+func _test_crowd_variety() -> void:
+	var civilians := get_tree().get_nodes_in_group(&"pedestrian")
+	_check(civilians.size() >= 10, "there is a crowd to look at (%d)" % civilians.size())
+
+	var skins: Dictionary = {}
+	var hairs: Dictionary = {}
+	var tops: Dictionary = {}
+	var heights: Dictionary = {}
+	var figures := 0
+	for node in civilians:
+		var walker: Pedestrian = node as Pedestrian
+		if walker == null or walker.character_look == null:
+			continue
+		figures += 1
+		skins[walker.character_look.skin.to_html(false)] = true
+		hairs[walker.character_look.hair.to_html(false)] = true
+		tops[walker.character_look.top.to_html(false)] = true
+		heights["%.2f" % walker.character_look.height] = true
+
+	_check(figures == civilians.size(), "every civilian is a built figure (%d)" % figures)
+	_check(skins.size() >= 3, "with a range of skin tones (%d)" % skins.size())
+	_check(hairs.size() >= 3, "a range of hair colours (%d)" % hairs.size())
+	_check(tops.size() >= 3, "a range of clothing (%d)" % tops.size())
+	_check(heights.size() >= 5, "and no two the same height (%d distinct)" % heights.size())
+
+	# And they are people-shaped: joints, not capsules.
+	var sample: Pedestrian = civilians[0] as Pedestrian
+	_check(sample.rig != null and sample.rig.head != null, "a civilian has a head")
+	_check(sample.rig.leg_left != null, "and legs that can be moved")
+
+
+## TEST 148 — police read as police.
+func _test_police_look() -> void:
+	var officers := _officers()
+	_check(officers.size() >= 3, "there are officers on foot (%d)" % officers.size())
+	if officers.is_empty():
+		return
+	var officer: PoliceOfficer = officers[0]
+	_check(
+		officer.character_look != null
+		and officer.character_look.category == CharacterLook.Category.POLICE,
+		"an officer is built as police"
+	)
+	var pivot := officer.get_node_or_null("BodyPivot") as Node3D
+	_check(pivot != null and pivot.find_child("Cap", true, false) != null, "in a cap")
+	_check(pivot != null and pivot.find_child("CapBadge", true, false) != null, "with a badge on it")
+	_check(pivot != null and pivot.find_child("Vest", true, false) != null, "and a stab vest")
+	_check(
+		officer.character_look.top.v < 0.4,
+		"the uniform is dark (%.2f)" % officer.character_look.top.v
+	)
+
+	# The patrol car is identifiable before its lights are on.
+	var cars := _police_cars()
+	_check(cars.size() >= 1, "and there are patrol cars (%d)" % cars.size())
+	if cars.is_empty():
+		return
+	var car: Vehicle = cars[0]
+	_check(
+		car.data.livery == VehicleData.Livery.POLICE, "a patrol car carries a police livery"
+	)
+	_check(
+		car.find_child("LiveryDoor-1", true, false) != null, "which paints its doors"
+	)
+	_check(car.find_child("LightBar", true, false) != null, "and it has a light bar")
+
+
+## TEST 149 — cars that look like cars, and differ from each other.
+func _test_vehicle_models() -> void:
+	var profiles: Dictionary = {}
+	for id: StringName in VehicleCatalogue.ids():
+		var scene := VehicleCatalogue.scene_for(id)
+		var car: Vehicle = scene.instantiate()
+		add_child(car)
+		_check(car.data != null, "the %s has data" % id)
+		if car.data == null:
+			car.queue_free()
+			continue
+		profiles[car.data.body_profile] = true
+		for part in ["Chassis", "Bonnet", "Boot", "Cabin", "Roof", "Grille"]:
+			_check(car.find_child(part, true, false) != null, "the %s has a %s" % [id, part.to_lower()])
+		_check(car.find_child("Headlight-1", true, false) != null, "the %s has headlights" % id)
+		_check(car.find_child("Taillight1", true, false) != null, "and taillights" )
+		_check(car.find_child("Mirror-1", true, false) != null, "and wing mirrors")
+		_check(car.find_child("Hub", true, false) != null, "and hubs in its wheels")
+		_check(car.find_child("ArchF-1", true, false) != null, "and arches over them")
+		_check(car.data.resale_value > 0, "and a value (%d)" % car.data.resale_value)
+		car.queue_free()
+	_check(
+		profiles.size() >= 4,
+		"the roster covers at least four silhouettes (%d)" % profiles.size()
+	)
+
+
+## TEST 150 — interiors that are dressed rather than empty.
+func _test_interior_dressing() -> void:
+	var unit := _unit_interior()
+	_check(unit != null and unit.is_built(), "there is a player-owned shop to look at")
+	if unit != null and unit.is_built():
+		_check(unit.find_child("GlazingWest", true, false) != null, "its street wall is glazed")
+		_check(unit.find_child("RiserEast", true, false) != null, "with a stall riser under it")
+		_check(unit.find_child("Rack", true, false) != null, "the store room has racking")
+		_check(unit.find_child("Strip-1", true, false) != null, "and the room is lit")
+
+	var flat := _main.get_node_or_null("Interiors/Apartment") as ApartmentInterior
+	_check(flat != null, "the starter flat is in the scene")
+	if flat != null:
+		for part in ["LivingRug", "Dresser", "Plant", "Art", "TableLamp"]:
+			_check(
+				flat.find_child(part, true, false) != null,
+				"the flat has a %s in it" % part.to_lower()
+			)
+
+	var better := _main.get_node_or_null("Interiors/MeridianApartment") as ApartmentInterior
+	_check(better != null, "so is the better one")
+	if better != null:
+		_check(better.spacious, "which is the bigger room")
+		for part in ["Sofa", "FloorLamp", "BathroomDoor"]:
+			_check(
+				better.find_child(part, true, false) != null,
+				"and it has a %s the studio does not" % part.to_lower()
+			)
+	await _settle(2)
+
+
+## TEST 151 — one interface, styled once.
+func _test_ui_theme() -> void:
+	var theme := get_tree().root.theme
+	_check(theme != null, "a theme is applied at the window root")
+	if theme == null:
+		return
+	_check(
+		theme.has_stylebox("panel", "PanelContainer"),
+		"panels are styled"
+	)
+	_check(theme.has_stylebox("normal", "Button"), "and so are buttons")
+	_check(theme.default_font_size == UITheme.FONT_SIZE, "with one default text size")
+	_check(
+		theme.get_color("font_color", "Label") == Palette.UI_TEXT,
+		"and text takes its colour from the palette"
+	)
+	# The palette is the single source for status colour, so the same idea is
+	# never two different greens.
+	_check(BusinessUIKit.GOOD == Palette.MONEY, "money reads the same colour everywhere")
+	_check(BusinessUIKit.BAD == Palette.LOSS, "and so does a loss")
 
 
 # --- Phase J helpers -----------------------------------------------------

@@ -55,6 +55,14 @@ extends Resource
 ## high values feel like a bumper car.
 @export var impact_speed_retention: float = 0.15
 
+## Body silhouettes. Each is a different arrangement of bonnet, cabin and boot;
+## the dimensions still come from the numbers above.
+enum Profile { HATCHBACK, SALOON, VAN, SUV, COUPE, CRUISER }
+
+## Paint schemes that mean something. A livery is not a colour — it is the
+## panels that tell the player at a glance what a car is for.
+enum Livery { NONE, POLICE }
+
 @export_group("Body")
 @export var body_length: float = 4.3
 @export var body_width: float = 1.9
@@ -67,6 +75,14 @@ extends Resource
 @export var body_color: Color = Color(0.541, 0.259, 0.243)
 @export var trim_color: Color = Color(0.176, 0.184, 0.208)
 @export var glass_color: Color = Color(0.122, 0.184, 0.216)
+## Which silhouette the body builder draws. Two cars with the same numbers and
+## different profiles are the difference between a roster and one car painted
+## six colours.
+@export var body_profile: Profile = Profile.SALOON
+## How far the cabin sits back from the middle, as a fraction of the length.
+## Positive is towards the boot, which is what a long bonnet looks like.
+@export var cabin_offset: float = 0.06
+@export var livery: Livery = Livery.NONE
 
 
 func get_total_height() -> float:

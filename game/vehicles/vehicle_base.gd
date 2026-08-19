@@ -111,6 +111,11 @@ var controller: Controller = Controller.PLAYER
 @onready var _impact_zone: Area3D = $ImpactZone
 @onready var _headlights: SpotLight3D = $Headlights
 
+## The tail lamp material, brightened under braking. Held rather than looked up
+## so a brake light is two writes rather than a node search per frame.
+var _tail_material: StandardMaterial3D = null
+var _braking: bool = false
+
 var health: float = 100.0
 var _driver: Node3D = null
 ## Signed speed along the car's forward axis. Negative is reverse.
@@ -361,6 +366,7 @@ func _physics_process(delta: float) -> void:
 
 	_update_speed(throttle, handbrake, delta)
 	_update_steering(steer, handbrake, delta)
+	_update_brake_lights(throttle, handbrake)
 
 	var forward := -global_transform.basis.z
 	var speed_before := _forward_speed
@@ -639,80 +645,197 @@ func _build_body() -> void:
 	var lower_y := clearance + data.body_height * 0.5
 	var cabin_y := clearance + data.body_height + data.cabin_height * 0.5
 
-	var body_mat := CityKit.make_material(data.body_color, 0.45, 0.25)
-	var trim_mat := CityKit.make_material(data.trim_color, 0.7)
-	var glass_mat := CityKit.make_material(data.glass_color, 0.15, 0.35)
-	var head_mat := CityKit.make_emissive_material(Color(0.86, 0.84, 0.72), 1.1)
-	var tail_mat := CityKit.make_emissive_material(Color(0.55, 0.11, 0.11), 1.4)
+	var body_mat := CityKit.make_material(data.body_color, 0.38, 0.28)
+	var dark_mat := CityKit.make_material(data.body_color.darkened(0.35), 0.42, 0.22)
+	var trim_mat := CityKit.make_material(data.trim_color, 0.62)
+	var glass_mat := CityKit.make_material(data.glass_color, 0.08, 0.42)
+	var head_mat := CityKit.make_emissive_material(Color(0.98, 0.94, 0.82), 1.4)
+	var tail_mat := CityKit.make_emissive_material(Color(0.72, 0.14, 0.13), 1.6)
+	var chrome := Palette.of(&"metal_pale")
 
+	var length := data.body_length
+	var width := data.body_width
+	var shape := _profile_shape()
+
+	# --- Lower body: a main box with a tapered nose and tail ---------------
 	CityKit.add_box(
-		_body_root,
-		"Chassis",
-		Vector3(0.0, lower_y, 0.0),
-		Vector3(data.body_width, data.body_height, data.body_length),
-		body_mat,
-		false
+		_body_root, "Chassis", Vector3(0.0, lower_y, 0.0),
+		Vector3(width, data.body_height, length * 0.90), body_mat, false
 	)
-	# Greenhouse: dark glass box with a body-coloured roof panel on top, which
-	# is what actually reads as "car" from directly above.
+	# Bonnet and boot are shallower than the body, which is what stops a car
+	# reading as one long brick from the elevated camera.
 	CityKit.add_box(
-		_body_root,
-		"Cabin",
-		Vector3(0.0, cabin_y, 0.15),
-		Vector3(data.body_width * 0.86, data.cabin_height, data.body_length * 0.46),
-		glass_mat,
-		false
+		_body_root, "Bonnet",
+		Vector3(0.0, lower_y + data.body_height * float(shape["nose_rise"]), -length * 0.42),
+		Vector3(width * 0.96, data.body_height * float(shape["nose_height"]), length * 0.22),
+		body_mat, false
 	)
 	CityKit.add_box(
-		_body_root,
-		"Roof",
-		Vector3(0.0, cabin_y + data.cabin_height * 0.5, 0.3),
-		Vector3(data.body_width * 0.74, 0.09, data.body_length * 0.28),
-		body_mat,
-		false
+		_body_root, "Boot",
+		Vector3(0.0, lower_y + data.body_height * float(shape["tail_rise"]), length * 0.42),
+		Vector3(width * 0.96, data.body_height * float(shape["tail_height"]), length * 0.22),
+		body_mat, false
 	)
-	# Bumpers tell front from rear even in silhouette.
+	# A skirt below the doors, in a darker shade. Two tones down the side is the
+	# cheapest thing that stops a car looking like a painted box.
+	CityKit.add_box(
+		_body_root, "Sill", Vector3(0.0, clearance + 0.06, 0.0),
+		Vector3(width * 1.01, 0.12, length * 0.72), trim_mat, false, false
+	)
+
+	# --- Greenhouse -------------------------------------------------------
+	var cabin_z := length * data.cabin_offset
+	var cabin_len: float = length * float(shape["cabin_length"])
+	var cabin_w := width * 0.88
+	# The glass box, then a body-coloured roof on top of it and pillars at the
+	# corners: windows that read as windows rather than as a dark stripe.
+	CityKit.add_box(
+		_body_root, "Cabin", Vector3(0.0, cabin_y, cabin_z),
+		Vector3(cabin_w, data.cabin_height, cabin_len), glass_mat, false
+	)
+	CityKit.add_box(
+		_body_root, "Roof",
+		Vector3(0.0, cabin_y + data.cabin_height * 0.5, cabin_z + length * 0.02),
+		Vector3(cabin_w * 0.96, 0.10, cabin_len * float(shape["roof_length"])),
+		body_mat, false
+	)
+	for side: float in [-1.0, 1.0]:
+		# B-pillar: splits the side glass into a front and a rear window.
+		CityKit.add_box(
+			_body_root, "Pillar%d" % int(side),
+			Vector3(side * cabin_w * 0.5, cabin_y, cabin_z),
+			Vector3(0.05, data.cabin_height * 0.98, cabin_len * 0.10),
+			body_mat, false, false
+		)
+		# Wing mirror. Tiny, and it is one of the strongest "this is a car"
+		# cues there is in silhouette.
+		CityKit.add_box(
+			_body_root, "Mirror%d" % int(side),
+			Vector3(
+				side * (width * 0.5 + 0.07), cabin_y - data.cabin_height * 0.18,
+				cabin_z - cabin_len * 0.44
+			),
+			Vector3(0.14, 0.07, 0.10), dark_mat, false, false
+		)
+
+	# --- Nose and tail furniture ------------------------------------------
+	CityKit.add_box(
+		_body_root, "Grille",
+		Vector3(0.0, clearance + data.body_height * 0.42, -length * 0.5 - 0.01),
+		Vector3(width * 0.52, data.body_height * 0.34, 0.06), trim_mat, false, false
+	)
 	for pair in [["BumperFront", -1.0], ["BumperRear", 1.0]]:
 		CityKit.add_box(
-			_body_root,
-			pair[0],
-			Vector3(0.0, clearance + 0.22, (data.body_length * 0.5 - 0.1) * float(pair[1])),
-			Vector3(data.body_width * 1.02, 0.26, 0.24),
-			trim_mat,
-			false
+			_body_root, pair[0],
+			Vector3(0.0, clearance + 0.20, (length * 0.5 - 0.06) * float(pair[1])),
+			Vector3(width * 1.02, 0.24, 0.22), trim_mat, false
 		)
-	# Lights: white at the nose, red at the tail. Emissive, so the car stays
-	# readable after dark.
-	for side in [-1.0, 1.0]:
+	for side: float in [-1.0, 1.0]:
 		CityKit.add_box(
-			_body_root,
-			"Headlight%d" % int(side),
+			_body_root, "Headlight%d" % int(side),
 			Vector3(
-				side * data.body_width * 0.32,
-				clearance + data.body_height * 0.72,
-				-data.body_length * 0.5 - 0.02
+				side * width * 0.33, clearance + data.body_height * 0.74,
+				-length * 0.5 - 0.02
 			),
-			Vector3(data.body_width * 0.26, 0.16, 0.1),
-			head_mat,
-			false,
-			false
+			Vector3(width * 0.24, 0.14, 0.08), head_mat, false, false
 		)
 		CityKit.add_box(
-			_body_root,
-			"Taillight%d" % int(side),
+			_body_root, "Taillight%d" % int(side),
 			Vector3(
-				side * data.body_width * 0.32,
-				clearance + data.body_height * 0.72,
-				data.body_length * 0.5 + 0.02
+				side * width * 0.33, clearance + data.body_height * 0.74,
+				length * 0.5 + 0.02
 			),
-			Vector3(data.body_width * 0.26, 0.14, 0.1),
-			tail_mat,
-			false,
-			false
+			Vector3(width * 0.26, 0.12, 0.08), tail_mat, false, false
 		)
+	_tail_material = tail_mat
+
+	if data.livery == VehicleData.Livery.POLICE:
+		_build_police_livery(lower_y, cabin_y)
 
 	_build_occupant(cabin_y)
-	_build_wheels(trim_mat)
+	_build_wheels(trim_mat, chrome)
+
+
+## Per-profile proportions. Everything here is a fraction of the numbers on the
+## VehicleData, so a van and a coupe differ in shape without differing in units.
+func _profile_shape() -> Dictionary:
+	match data.body_profile:
+		VehicleData.Profile.VAN:
+			return {
+				"nose_rise": 0.30, "nose_height": 0.72, "tail_rise": 0.34,
+				"tail_height": 1.06, "cabin_length": 0.62, "roof_length": 1.02,
+				"arch": 0.30,
+			}
+		VehicleData.Profile.SUV:
+			return {
+				"nose_rise": 0.24, "nose_height": 0.80, "tail_rise": 0.26,
+				"tail_height": 0.92, "cabin_length": 0.52, "roof_length": 0.92,
+				"arch": 0.34,
+			}
+		VehicleData.Profile.COUPE:
+			return {
+				"nose_rise": -0.10, "nose_height": 0.56, "tail_rise": -0.06,
+				"tail_height": 0.60, "cabin_length": 0.36, "roof_length": 0.66,
+				"arch": 0.26,
+			}
+		VehicleData.Profile.HATCHBACK:
+			return {
+				"nose_rise": 0.04, "nose_height": 0.66, "tail_rise": 0.16,
+				"tail_height": 0.90, "cabin_length": 0.48, "roof_length": 0.86,
+				"arch": 0.28,
+			}
+		VehicleData.Profile.CRUISER:
+			return {
+				"nose_rise": 0.02, "nose_height": 0.70, "tail_rise": 0.04,
+				"tail_height": 0.72, "cabin_length": 0.46, "roof_length": 0.78,
+				"arch": 0.28,
+			}
+		_:
+			return {
+				"nose_rise": 0.02, "nose_height": 0.68, "tail_rise": 0.04,
+				"tail_height": 0.70, "cabin_length": 0.44, "roof_length": 0.76,
+				"arch": 0.28,
+			}
+
+
+## Tail lamps glow harder while the car is slowing. Two lines, and it is what
+## makes a queue of traffic at a red light read as traffic stopping rather than
+## as cars that happen to be still.
+func _update_brake_lights(throttle: float, handbrake: bool) -> void:
+	if _tail_material == null:
+		return
+	var braking := handbrake or (throttle < -0.05 and _forward_speed > 0.4)
+	if braking == _braking:
+		return
+	_braking = braking
+	_tail_material.emission_energy_multiplier = 4.2 if braking else 1.6
+
+
+## Police paint: white door panels down each side and a dark bonnet, which is
+## what makes a patrol car identifiable from directly above before its lights
+## are even on.
+func _build_police_livery(lower_y: float, cabin_y: float) -> void:
+	var white := Palette.of(&"metal_pale")
+	var dark := CityKit.make_material(Color(0.114, 0.129, 0.176), 0.45, 0.20)
+	var length := data.body_length
+	var width := data.body_width
+
+	for side: float in [-1.0, 1.0]:
+		CityKit.add_box(
+			_body_root, "LiveryDoor%d" % int(side),
+			Vector3(side * (width * 0.5 + 0.01), lower_y + data.body_height * 0.06, 0.0),
+			Vector3(0.03, data.body_height * 0.62, length * 0.44), white, false, false
+		)
+	CityKit.add_box(
+		_body_root, "LiveryBonnet",
+		Vector3(0.0, lower_y + data.body_height * 0.52, -length * 0.30),
+		Vector3(width * 0.62, 0.03, length * 0.26), dark, false, false
+	)
+	CityKit.add_box(
+		_body_root, "LiveryRoof",
+		Vector3(0.0, cabin_y + data.cabin_height * 0.5 + 0.06, data.cabin_offset * length),
+		Vector3(width * 0.60, 0.03, length * 0.16), white, false, false
+	)
 
 
 ## A head and shoulders behind the glass. Without it an occupied car and a
@@ -741,7 +864,7 @@ func _refresh_occupant() -> void:
 		figure.visible = driver_state == DriverState.SEATED
 
 
-func _build_wheels(wheel_mat: StandardMaterial3D) -> void:
+func _build_wheels(wheel_mat: StandardMaterial3D, hub_mat: StandardMaterial3D) -> void:
 	_front_wheels.clear()
 	var axle_z := data.body_length * 0.32
 	var track := data.body_width * 0.5 - data.wheel_width * 0.35
@@ -766,6 +889,25 @@ func _build_wheels(wheel_mat: StandardMaterial3D) -> void:
 
 			CityKit.add_cylinder(
 				spin, "Tyre", Vector3.ZERO, data.wheel_radius, data.wheel_width, wheel_mat, false
+			)
+			# A pale hub inside the tyre. From above it is the only part of a
+			# wheel the camera sees, and it is what stops wheels reading as
+			# black smudges under the body.
+			CityKit.add_cylinder(
+				spin, "Hub", Vector3(0.0, side * data.wheel_width * 0.30, 0.0),
+				data.wheel_radius * 0.54, data.wheel_width * 0.42, hub_mat, false
+			)
+			# An arch over the wheel, in body colour, so the wheel sits in the
+			# bodywork instead of beside it.
+			CityKit.add_box(
+				_body_root, "Arch%s%d" % ["F" if front else "R", int(side)],
+				Vector3(
+					side * (data.body_width * 0.5 - 0.02),
+					data.ground_clearance + data.wheel_radius * 0.92,
+					(-axle_z if front else axle_z)
+				),
+				Vector3(0.10, data.wheel_radius * 0.55, data.wheel_radius * 2.5),
+				CityKit.make_material(data.body_color.darkened(0.45), 0.5), false, false
 			)
 
 			if front:

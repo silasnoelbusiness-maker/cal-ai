@@ -639,23 +639,20 @@ func _add_building(
 	else:
 		top = _add_pitched_roof(holder, node_name, rect, height, roof_style, roof_material)
 
-	# Lit window bands, so the skyline still reads after dark. Cheap: one thin
-	# box per floor band rather than per window.
-	var band_y := 4.9
-	var bands := 0
-	while band_y < height - 1.6 and bands < 6:
-		CityKit.add_slab(
-			holder,
-			"Windows%d" % bands,
-			rect.grow(0.14),
-			band_y,
-			0.75,
-			_mat("windows"),
-			false,
-			false
-		)
-		band_y += 3.6
-		bands += 1
+	# Punched windows on a grid rather than a continuous lit stripe. The lit
+	# material is still shared and still faded by the day/night cycle, so the
+	# skyline reads after dark for the same cost — but by day a facade now has
+	# windows in it instead of a band of dark paint.
+	BuildingKit.add_window_grid(
+		holder, node_name, rect, 4.2, height - 1.2,
+		_mat("windows"), _mat("plinth"), 3.4, 1.5, 1.8
+	)
+
+	# The roof the camera actually looks at.
+	if roof_style == "flat":
+		var roof_rng := RandomNumberGenerator.new()
+		roof_rng.seed = hash(node_name) + 7
+		BuildingKit.add_roof_kit(holder, node_name, rect, top, roof_rng)
 
 
 ## A cornice and vertical bays on the long faces of a flat-roofed block.
@@ -1209,6 +1206,9 @@ func _build_venue_doors() -> void:
 				door = _make_warehouse_station()
 			"property":
 				door = _make_commercial_property(point, facing, StringName(message))
+				(door as CommercialProperty).sign_yaw = rad_to_deg(
+					atan2(facing.x, facing.z)
+				)
 			_:
 				var notice := MessagePoint.new()
 				notice.message = message

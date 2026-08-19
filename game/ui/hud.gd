@@ -71,6 +71,9 @@ func _ready() -> void:
 	GameManager.state_changed.connect(_on_game_state_changed)
 	GameManager.player_registered.connect(_bind_player)
 	GameManager.player_unregistered.connect(_unbind_player)
+	# One theme for every Control in the game, set at the window root so each
+	# screen inherits it instead of styling itself.
+	get_tree().root.theme = UITheme.get_theme()
 	GameManager.screen_requested.connect(_on_screen_requested)
 	GameManager.menus_close_requested.connect(close_screens)
 	GameManager.player_teleported.connect(_on_player_teleported)
@@ -105,6 +108,7 @@ func _ready() -> void:
 	BusinessManager.business_opened.connect(_on_owned_business_changed)
 	BusinessManager.business_closed.connect(_on_owned_business_changed)
 
+	_style_hud()
 	_prompt_panel.visible = false
 	_toast_panel.modulate.a = 0.0
 	_pause_overlay.visible = false
@@ -335,6 +339,50 @@ func _unhandled_input(event: InputEvent) -> void:
 	else:
 		_inventory_panel.open(GameManager.player)
 	get_viewport().set_input_as_handled()
+
+
+## The HUD's own look. Kept here rather than in the scene so the whole
+## interface — panels, prompts, needs — is styled from the one palette, and a
+## colour change is a single edit instead of eight scene properties.
+func _style_hud() -> void:
+	var backdrop := UITheme.slab(Palette.UI_BACKDROP, Color(1, 1, 1, 0.10), 8, 10)
+	_prompt_panel.add_theme_stylebox_override("panel", backdrop)
+	_toast_panel.add_theme_stylebox_override("panel", backdrop)
+	var store_panel: PanelContainer = %StorePanel
+	store_panel.add_theme_stylebox_override(
+		"panel", UITheme.slab(Palette.UI_BACKDROP, Color(1, 1, 1, 0.10), 8, 10)
+	)
+
+	# Needs bars: a dark track and a fill in the colour of the need, so the
+	# three are told apart by hue rather than by reading the labels.
+	for pair in [
+		[_health_bar, Palette.DANGER], [_energy_bar, Palette.CALM],
+		[_hunger_bar, Palette.WARNING],
+	]:
+		_style_bar(pair[0] as ProgressBar, pair[1] as Color)
+	_style_bar(_vehicle_health_bar, Palette.MONEY)
+
+	%CashLabel.add_theme_color_override("font_color", Palette.MONEY)
+	%WantedLabel.add_theme_color_override("font_color", Palette.WARNING)
+	%EscapeLabel.add_theme_color_override("font_color", Palette.DANGER)
+	%DestinationLabel.add_theme_color_override("font_color", Palette.CALM)
+	%DayLabel.add_theme_color_override("font_color", Palette.UI_MUTED)
+	%TimeLabel.add_theme_color_override("font_color", Palette.UI_TEXT)
+
+
+func _style_bar(bar: ProgressBar, colour: Color) -> void:
+	if bar == null:
+		return
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(0.043, 0.051, 0.075, 0.85)
+	track.set_corner_radius_all(5)
+	track.set_border_width_all(1)
+	track.border_color = Color(1, 1, 1, 0.08)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = colour
+	fill.set_corner_radius_all(5)
+	bar.add_theme_stylebox_override("background", track)
+	bar.add_theme_stylebox_override("fill", fill)
 
 
 func _on_screen_requested(screen_id: StringName, context: Node, requester: Node) -> void:

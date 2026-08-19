@@ -59,18 +59,23 @@ func _mat(key: String) -> StandardMaterial3D:
 
 
 func _build_palette() -> void:
+	# The better flat is dressed warmer and softer than the studio — same
+	# fittings, nicer finishes, which is what the extra rent buys.
 	_palette = {
-		"surround": CityKit.make_material(Color(0.086, 0.094, 0.110)),
-		"floor": CityKit.make_material(Color(0.361, 0.286, 0.216)),
-		"rug": CityKit.make_material(Color(0.290, 0.325, 0.376)),
-		"wall": CityKit.make_material(Color(0.612, 0.588, 0.545)),
-		"trim": CityKit.make_material(Color(0.325, 0.318, 0.302)),
-		"bed": CityKit.make_material(Color(0.416, 0.475, 0.549)),
-		"linen": CityKit.make_material(Color(0.796, 0.788, 0.741)),
-		"wood": CityKit.make_material(Color(0.400, 0.278, 0.176)),
-		"counter": CityKit.make_material(Color(0.478, 0.494, 0.514)),
-		"appliance": CityKit.make_material(Color(0.643, 0.659, 0.678), 0.5, 0.4),
-		"door": CityKit.make_material(Color(0.247, 0.192, 0.145)),
+		"surround": CityKit.make_material(Color(0.075, 0.082, 0.098)),
+		"floor": Palette.of(&"wood_floor" if spacious else &"lino_grey"),
+		"rug": Palette.tinted(
+			&"carpet_warm",
+			Color(0.392, 0.302, 0.259) if spacious else Color(0.325, 0.353, 0.404)
+		),
+		"wall": Palette.of(&"wall_warm" if spacious else &"wall_paint"),
+		"trim": Palette.of(&"wood_dark"),
+		"bed": Palette.tinted(&"cloth", Color(0.365, 0.427, 0.510)),
+		"linen": Palette.tinted(&"cloth", Color(0.851, 0.843, 0.808)),
+		"wood": Palette.of(&"wood_dark"),
+		"counter": Palette.of(&"counter_top"),
+		"appliance": Palette.of(&"metal_pale"),
+		"door": Palette.of(&"wood_dark"),
 	}
 
 
@@ -222,21 +227,93 @@ func _build_furniture() -> void:
 	CityKit.add_box(
 		holder, "Chair", Vector3(-1.2, 0.45, 0.0), Vector3(0.5, 0.9, 0.5), _mat("wood")
 	)
+	_build_living_area()
+
+
+## What turns a room with a bed in it into somewhere somebody lives: a sofa
+## facing a rug, a lamp beside it, a chest of drawers, plants and something on
+## the wall. All from the shared prop library, so the two flats are the same
+## furniture arranged differently rather than two hand-built rooms.
+func _build_living_area() -> void:
+	var holder := Node3D.new()
+	holder.name = "Living"
+	add_child(holder)
+
+	var bounds := room()
+	var west := bounds.position.x
+	var east := bounds.end.x
+	var north := bounds.position.y
+	var south := bounds.end.y
+
+	if spacious:
+		PropKit.rug(
+			holder, "LivingRug", Vector3(east - 3.6, 0.0, south - 3.4),
+			Vector2(3.6, 2.6), Color(0.416, 0.325, 0.278)
+		)
+		PropKit.sofa(holder, "Sofa", Vector3(east - 3.6, 0.0, south - 2.0), 180.0)
+		PropKit.lamp(holder, "FloorLamp", Vector3(east - 1.4, 0.0, south - 2.2))
+		PropKit.dresser(holder, "Dresser", Vector3(west + 1.0, 0.0, south - 2.4), 90.0)
+		PropKit.pot_plant(holder, "Plant", Vector3(east - 1.2, 0.0, north + 1.2), 1.15)
+		PropKit.pot_plant(holder, "PlantSmall", Vector3(west + 0.9, 0.0, north + 3.4), 0.85)
+		PropKit.wall_art(
+			holder, "Art", Vector3(0.0, 1.85, north + 0.06), Vector2(1.5, 1.0),
+			Color(0.396, 0.451, 0.510)
+		)
+		PropKit.wall_art(
+			holder, "ArtSmall", Vector3(east - 0.08, 1.80, south - 4.4), Vector2(0.9, 1.2),
+			Color(0.545, 0.435, 0.361), 90.0
+		)
+		# A bathroom door on the back wall. No room behind it, but a flat with
+		# no bathroom door at all reads as a bedsit however big it is.
+		CityKit.add_box(
+			holder, "BathroomDoor", Vector3(west + 2.2, 1.05, north + 0.10),
+			Vector3(0.90, 2.10, 0.08), _mat("door"), false, false
+		)
+	else:
+		PropKit.rug(
+			holder, "LivingRug", Vector3(1.2, 0.0, 1.6), Vector2(2.6, 1.9),
+			Color(0.325, 0.353, 0.404)
+		)
+		PropKit.lamp(holder, "TableLamp", Vector3(-3.6, 0.78, -2.4), false)
+		PropKit.dresser(holder, "Dresser", Vector3(west + 0.8, 0.0, 0.6), 90.0)
+		PropKit.pot_plant(holder, "Plant", Vector3(east - 0.9, 0.0, north + 0.9), 0.9)
+		PropKit.wall_art(
+			holder, "Art", Vector3(-1.4, 1.80, north + 0.06), Vector2(1.1, 0.8),
+			Color(0.451, 0.412, 0.353)
+		)
 
 
 func _build_lighting() -> void:
 	# Interiors are lit independently of the day/night cycle, so the flat stays
 	# usable at 03:00 without the sun reaching in.
-	for spot in [Vector3(-2.5, 2.5, -1.0), Vector3(2.5, 2.5, 1.5)]:
+	var bounds := room()
+	var spots := (
+		[Vector3(-3.5, 2.5, -2.0), Vector3(3.0, 2.5, 2.5), Vector3(0.0, 2.5, 0.0)] if spacious
+		else [Vector3(-2.5, 2.5, -1.0), Vector3(2.5, 2.5, 1.5)]
+	)
+	for spot in spots:
 		var light := OmniLight3D.new()
 		light.name = "CeilingLight"
 		light.position = spot
-		light.light_color = Color(1.0, 0.925, 0.82)
-		light.light_energy = 3.4
-		light.omni_range = 11.0
+		light.light_color = Color(1.0, 0.937, 0.847)
+		light.light_energy = 2.4
+		light.omni_range = 12.0
 		light.omni_attenuation = 1.0
 		light.shadow_enabled = false
 		add_child(light)
+
+	# Fittings for those lights to come from: a warm panel tight against the top
+	# of each side wall, which is what makes a flat glow at night from above.
+	var strip := Palette.glow(Color(0.996, 0.925, 0.808), 0.5)
+	for side: float in [-1.0, 1.0]:
+		CityKit.add_box(
+			self, "LightStrip%d" % int(side),
+			Vector3(
+				side * (bounds.size.x * 0.5 - 0.16), WALL_HEIGHT - 0.26,
+				bounds.get_center().y
+			),
+			Vector3(0.10, 0.07, bounds.size.y * 0.80), strip, false, false
+		)
 
 
 func _build_markers_and_doors() -> void:

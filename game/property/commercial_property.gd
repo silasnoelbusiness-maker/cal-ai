@@ -30,6 +30,11 @@ enum SizeClass { SMALL, MEDIUM }
 ## address's.
 @export var district_id: StringName = &"harbour_row"
 @export var address: String = "1 Main Street"
+## Which way the shopfront faces, in degrees. Set by whichever district places
+## the door, because only it knows which wall the unit is in.
+@export var sign_yaw: float = 0.0
+## The colour of the sign board behind the business name.
+@export var sign_colour: Color = Color(0.157, 0.196, 0.278)
 @export var property_type: String = "Retail Unit"
 @export var size_class: SizeClass = SizeClass.SMALL
 ## Square metres. Shown to the player, and the basis of the size label.
@@ -103,14 +108,29 @@ func _rebuild_sign() -> void:
 
 	var board := Node3D.new()
 	board.name = "Signage"
-	board.position = Vector3(0.0, 1.5, 0.35)
+	board.position = Vector3(0.0, 2.35, 0.35)
+	# The door knows which way the shop faces; the sign has to face the same
+	# way, or a shop on a north-facing wall advertises itself to the bricks.
+	board.rotation_degrees.y = sign_yaw
 	add_child(board)
+
+	# A board behind the letters. A name floating on a wall reads as a debug
+	# label; the same name on a panel reads as a shop.
+	CityKit.add_box(
+		board, "Panel", Vector3(0.0, 0.0, -0.06), Vector3(4.6, 1.15, 0.10),
+		Palette.tinted(&"panel_navy", sign_colour), false, false
+	)
+	CityKit.add_box(
+		board, "PanelTrim", Vector3(0.0, -0.60, -0.06), Vector3(4.7, 0.09, 0.13),
+		Palette.of(&"metal_pale"), false, false
+	)
 
 	var name_plate := Label3D.new()
 	name_plate.name = "Name"
 	name_plate.text = business.business_name.to_upper()
 	name_plate.font_size = 96
-	name_plate.pixel_size = 0.006
+	name_plate.pixel_size = 0.0055
+	name_plate.position = Vector3(0.0, 0.16, 0.0)
 	name_plate.modulate = Color(0.96, 0.94, 0.88)
 	name_plate.outline_size = 18
 	name_plate.billboard = BaseMaterial3D.BILLBOARD_DISABLED
@@ -120,9 +140,9 @@ func _rebuild_sign() -> void:
 	var state := Label3D.new()
 	state.name = "State"
 	state.text = "OPEN" if business.is_open() else "CLOSED"
-	state.font_size = 64
-	state.pixel_size = 0.006
-	state.position = Vector3(0.0, -0.45, 0.0)
+	state.font_size = 56
+	state.pixel_size = 0.0055
+	state.position = Vector3(0.0, -0.30, 0.0)
 	state.modulate = Color(0.35, 0.95, 0.45) if business.is_open() else Color(0.85, 0.35, 0.30)
 	state.outline_size = 14
 	state.billboard = BaseMaterial3D.BILLBOARD_DISABLED

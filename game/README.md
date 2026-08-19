@@ -4,7 +4,14 @@ An original 3D open-world life, business & crime simulator, viewed from an
 elevated top-down camera. This directory holds a self-contained **Godot 4.3**
 project; it is unrelated to the Next.js app in the repository root.
 
-**V0.1 phases A–J are complete** — eleven milestones, because two of them were
+**Art direction:** stylized, clean and readable — low-to-mid poly urban
+simulation, strong silhouettes, clear colour separation and a night look worth
+looking at. Not photorealism, and not a graybox either. Everything is still
+generated from primitives at load; what changed in the visual pass is that the
+primitives are now assembled into people, cars, facades and rooms rather than
+standing in for them.
+
+**V0.1 phases A–K are complete** — eleven milestones, because two of them were
 called G (the art pass and the crime expansion) and the naming is kept here as
 it happened. The full life/economy loop is playable end to end — wake up in your
 flat, sleep off the night, walk to the warehouse for a paid shift, buy food at
@@ -118,6 +125,9 @@ Development keys, to be removed before release:
 | `F11` | Show / hide the world overlay (district, populations, graphs, FPS) |
 | `1`–`6`, `0` | World debug view layers, only while that overlay is up |
 
+Every overlay is hidden by default and draws nothing until it is switched on, so
+none of them intrudes on ordinary play or on a screenshot.
+
 `F9` was quick-load in Phase D; it is now clear-wanted, and quick-load moved to
 `F12`.
 
@@ -210,7 +220,9 @@ by Center Boulevard, giving two junctions with crosswalks. It holds 12 buildings
 park with a fountain, a paved plaza, hedges and benches, kerbside parking bays
 and an off-street lot, 44 street lights, tree-lined verges, overhead cable runs
 on timber poles, patched asphalt, driveway aprons, and a set of signals at each
-junction. Its perimeter wall now has a gap in it where Center Boulevard leaves
+junction. It is deliberately the older, looser half of the city: lower, wider
+apart, more brick and timber, more open ground — and the flat roofs carry plant,
+ducting, a water tank and an aerial, because from this camera a roof is a facade. Its perimeter wall now has a gap in it where Center Boulevard leaves
 to the north.
 
 ### Central District
@@ -220,8 +232,13 @@ Street, Kingston Road, Riverside Drive) crossed by three north–south ones (Pla
 Street, Center Boulevard, Exchange Street), with a pair of narrow service roads
 behind the outer blocks. Thirteen blocks run to twenty-two metres with the
 setbacks halved, so the streets read as canyons from the elevated camera rather
-than as open ground with boxes on it; the ground floors are glazed with canopies
-where a block has shops in it, and lit window bands come on together at dusk.
+than as open ground with boxes on it. Facades carry punched window grids that
+light up together at dusk; the ground floors are parades of shopfronts —
+glazing, mullions, a stall riser, a sign band with the shop's name on it and an
+awning over the pavement — so a Central street reads as a high street rather
+than as glazing with nothing behind it. Kerbs carry benches, bins, planters,
+meters, bike racks, hydrants and street-name signs; there is a shelter on the
+boulevard and outdoor tables along the plaza edge.
 
 Central Plaza sits in the middle of it — paving, benches, planters, a monument,
 and bollards that keep cars out of it while pedestrians walk straight through.
@@ -270,6 +287,44 @@ cost of one distance check each per quarter second. That is wider than a
 district is across, so nobody freezes anywhere you can see them — you are always
 in a full crowd, and the other district costs almost nothing until you drive
 into it.
+
+## How it is drawn
+
+Four small libraries carry the look, and every district, interior and screen is
+assembled from them:
+
+* **`art/palette.gd`** — the material library and the colour language. One
+  cached `StandardMaterial3D` per name, so a street of a hundred benches binds
+  one material; and one set of meanings (`MONEY`, `LOSS`, `DANGER`, `POLICE_BLUE`)
+  shared by the world, the HUD, the map and the dashboards.
+* **`art/character_kit.gd`** — one humanoid builder for everybody in the game.
+  A `CharacterLook` (skin, hair, build, height, clothing, category) goes in; a
+  rig of hips, chest, head, two arms and two legs comes out. `character_animator.gd`
+  then drives those joints from a phase counter — walk, run, idle, work, carry —
+  which is what a crowd of forty can afford and an imported skeleton per
+  pedestrian is not.
+* **`art/building_kit.gd`** — punched window grids, shopfronts (glazing,
+  mullions, stall riser, sign band, awning) and roof kits (plant, ducts, tank,
+  mast). A district still lays out rectangles; the kit turns them into
+  buildings.
+* **`art/prop_kit.gd`** — the reusable things: benches, bins, planters,
+  bollards, hydrants, signs, meters, bike racks, a shelter; chillers, goods
+  rows, crate stacks, cafe tables, espresso machines, menu boards; sofas, lamps,
+  kitchen runs, dressers, rugs, plants and framed art.
+
+`ui/theme/ui_theme.gd` does the same job for the interface: one `Theme` built in
+code and applied at the window root, so every panel, button, tab and bar in the
+game inherits one look instead of styling itself.
+
+Detail has to be paid for. The city builds about 4,600 mesh instances, and the
+single biggest saving is that every window on a building goes into two
+`MultiMesh`es rather than into two nodes each — a facade of eight bays and four
+floors on four sides is 256 windows, and twenty-five buildings of them would
+otherwise be six thousand draw calls for geometry that never moves and shares
+one material. Everything else follows the same rule: shared cached materials, no
+shadow casting on crowd figures or window panes, emissive panels instead of
+lights wherever a light would only be seen and not needed, and props chosen to
+be many and cheap rather than few and expensive.
 
 ## The map
 
@@ -320,6 +375,9 @@ ui/           hud, inventory_panel, shop_panel
 npc/          nav_graph, npc_walker, pedestrian, police_officer, police_driver
 traffic/      road_network, traffic_light, traffic_driver, traffic_manager,
               traffic_debug
+art/          palette, character_look, character_kit, character_animator,
+              building_kit, prop_kit
+ui/theme/     ui_theme
 vehicles/     vehicle_base, vehicle_data, vehicle_door, vehicle_catalogue
               + cars/*.tres  (compact, sedan, hatchback, van, suv, coupe)
 world/        world_manager, district_data, district_01, district_02,
@@ -529,11 +587,27 @@ dropping them out of the world, the gateway is walled along its verges, there is
 ground under both car parks, and every layer of the world debug view draws and
 clears without taking the game with it.
 
+The visual pass is tested for the things a swap of art can quietly break. The
+player is checked to be a built figure with hips, chest, head, arms and legs, to
+have a head and shoes on it, to have no placeholder capsule left anywhere under
+it, and to swing its legs when it walks and not when it stands. The crowd is
+checked to be built figures with a range of skin tones, hair colours, clothing
+and heights — a crowd of clones passes a count and fails the eye. An officer is
+checked to be built as police, in a cap with a badge and a stab vest, in a dark
+uniform, and the patrol car to carry a livery and a light bar. Every car in the
+roster is instanced and checked for a chassis, bonnet, boot, cabin, roof, grille,
+headlights, taillights, mirrors, wheel hubs and arches, and the roster as a whole
+for at least four distinct silhouettes. The shop is checked to have glazing, a
+stall riser, racking in the store room and lighting; both flats for the furniture
+that makes them lived-in. And the interface is checked to be themed once, at the
+window root, with money and losses reading the same colour there as everywhere
+else.
+
 ```sh
 godot --headless --path game res://tests/smoke_test.tscn
 ```
 
-It exits non-zero if any check fails. As of the city expansion it runs 991
+It exits non-zero if any check fails. As of the visual pass it runs 1,125
 checks.
 
 A screenshot tool renders the game to a PNG without a desktop, for eyeballing
@@ -567,13 +641,25 @@ Args after `++` are `key=value` pairs, all optional: `out`, `hour`, `scenario`
 `central_pedestrians`, `city_map`, `map_filters`, `map_route`,
 `central_property`, `large_interior`, `better_apartment`, `courier_delivery`,
 `vehicle_roster`, `harbour_business`, `central_business`, `city_empire`,
-`cross_district_chase`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
+`cross_district_chase`, `characters`, `police_officer`, `police_close`,
+`business_exterior`, `hero`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
 rather than faking their results. It runs under the Compatibility renderer, so
 lighting is close to but not identical to the Forward+ game.
 
 ## What is next
 
-Nothing is started. The city expansion left its own threads. Population is still
+Nothing is started. The visual pass left its own threads. The characters and
+cars are assembled primitives, which has a ceiling: going further — real
+cloth, faces, curved bodywork, wheels that are not cylinders — means modelled
+meshes rather than more code, and the kits are shaped so that swapping one part
+for a mesh does not disturb the rest. Animation is procedural and has no upper
+body work beyond a lean and an arm lift; a proper AnimationTree would buy
+gestures, but only once there are rigs to drive. Interiors are roofless by
+necessity and so cannot have ceiling fittings, which is why the light strips run
+along the wall tops. And there is no main menu yet for the title to sit in — the
+UI theme is ready for one.
+
+The city expansion left its own threads. Population is still
 built at load rather than streamed: both districts spawn their pedestrians and
 parked cars up front, and only traffic follows the player. That is affordable at
 two districts and will not be at four, so the next world phase wants activation

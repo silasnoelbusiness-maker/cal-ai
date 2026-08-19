@@ -44,8 +44,10 @@ func setup(worker: EmployeeData, unit: RetailUnit, entry: Vector3, exit_point: V
 	_unit = unit
 	_exit_point = exit_point
 	wanders = false
-	body_color = _colour_for_role()
-	accent_color = body_color.darkened(0.35)
+	# Restyled rather than tinted: staff are built before they are told which
+	# role they are working, and a barista and a stocker are different uniforms
+	# rather than the same figure in a different colour.
+	restyle(_colour_for_role(), Color(0.918, 0.906, 0.878), CharacterLook.Category.RETAIL)
 	global_position = entry
 	_refresh_station()
 	_go_to(_approach)
@@ -250,3 +252,21 @@ func _reached(point: Vector3) -> bool:
 		return true
 	walk_to(point)
 	return false
+
+
+## What a member of staff looks like they are doing. The base walker decides
+## from speed alone, which is right while they are crossing the shop and wrong
+## the moment they reach the till: somebody stood at a counter should be leaning
+## over it with their hands in front of them, not standing to attention.
+func animation_state() -> CharacterAnimator.State:
+	match stage:
+		Stage.WORKING:
+			return CharacterAnimator.State.WORK
+		Stage.RESTOCKING:
+			# Carrying stock to a shelf, or reaching up to fill it.
+			return (
+				CharacterAnimator.State.CARRY if _handling > 0.0
+				else super.animation_state()
+			)
+		_:
+			return super.animation_state()

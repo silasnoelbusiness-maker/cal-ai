@@ -33,10 +33,28 @@ const ARRIVE_DISTANCE := 0.9
 @export var direct_walk_limit: float = 30.0
 
 @export_group("Appearance")
+## Clothing colour. Kept as the export it always was so everything that dressed
+## a walker before still does — it is now the colour of the figure's top rather
+## than of a capsule.
 @export var body_color: Color = Color(0.478, 0.494, 0.541)
 @export var accent_color: Color = Color(0.290, 0.310, 0.361)
 @export var body_height: float = 1.75
 @export var body_radius: float = 0.36
+## Which kind of person this is. Decides the uniform, and nothing else — an
+## officer and a shopper are the same figure in different clothes.
+@export var look_category: CharacterLook.Category = CharacterLook.Category.CIVILIAN
+## Crowd members do not cast shadows; the figures the eye follows do.
+@export var casts_shadow: bool = false
+## Seeds the look, so a given walker is the same person every run. Left at zero
+## it is seeded from the node name.
+@export var appearance_seed: int = 0
+
+## The figure's joints, for anything that wants to hang something off a hand or
+## read where the head is.
+var rig: CharacterKit.Rig = null
+var character_look: CharacterLook = null
+
+var _animator: CharacterAnimator = null
 
 ## The turnable part of the figure. Comes from the scene for NPCs that have one,
 ## and is built here for the ones created in code — a shop's cashier, or the
@@ -70,10 +88,10 @@ func _ready() -> void:
 	_build_body()
 
 
-## Placeholder figure: a capsule with a shoulder block that shows which way it
-## is facing, which is the only thing the witness cone and the player need to
-## read from above. Built from exports so a civilian and an officer differ by
-## two colours rather than two scenes.
+## A stylized humanoid, built from the walker's own colours.
+##
+## The collision is still a capsule — a person-shaped collider would catch on
+## kerbs and doorframes for no gain — so what changed is only what you see.
 func _build_body() -> void:
 	var shape := CapsuleShape3D.new()
 	shape.radius = body_radius
@@ -84,28 +102,83 @@ func _build_body() -> void:
 	collider.position = Vector3(0.0, body_height * 0.5, 0.0)
 	add_child(collider)
 
-	var torso := CityKit.make_material(body_color, 0.8)
-	var accent := CityKit.make_material(accent_color, 0.7)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = appearance_seed if appearance_seed != 0 else hash(name)
+	character_look = CharacterLook.random(rng, look_category)
+	# Height varies around the exported figure height rather than being set to
+	# it: a crowd where everybody is exactly 1.75m reads as clones, and the
+	# collision capsule is unchanged either way, so nothing about how they walk
+	# or what they bump into moves with it.
+	character_look.height = body_height * rng.randf_range(0.93, 1.07)
+	# The exported colours win, so every caller that dressed a walker before
+	# still decides what it wears.
+	character_look.top = body_color
+	character_look.accent = accent_color
+	if look_category == CharacterLook.Category.POLICE:
+		character_look.accent = Color(0.914, 0.792, 0.290)
 
-	var mesh := MeshInstance3D.new()
-	mesh.name = "Torso"
-	var capsule := CapsuleMesh.new()
-	capsule.radius = body_radius
-	capsule.height = body_height
-	mesh.mesh = capsule
-	mesh.material_override = torso
-	mesh.position = Vector3(0.0, body_height * 0.5, 0.0)
-	body_pivot.add_child(mesh)
+	rig = CharacterKit.build(body_pivot, character_look, casts_shadow)
+	CharacterKit.add_uniform(rig, character_look)
 
-	CityKit.add_box(
-		body_pivot,
-		"Facing",
-		Vector3(0.0, body_height * 0.74, body_radius * 0.85),
-		Vector3(body_radius * 0.9, 0.16, 0.18),
-		accent,
-		false,
-		false
-	)
+	_animator = CharacterAnimator.new()
+	_animator.name = "Animator"
+	add_child(_animator)
+	_animator.setup(rig)
+
+
+## Re-dresses a figure that is already in the tree.
+##
+## Needed because some NPCs learn what they are only after they are added — a
+## shop's staff are created and then told which role they are working. Rebuilds
+## rather than tinting: a change of role can change the uniform, not just the
+## colour.
+func restyle(top: Color, accent: Color, category: CharacterLook.Category) -> void:
+	body_color = top
+	accent_color = accent
+	look_category = category
+	if body_pivot == null:
+		return
+	for child in body_pivot.get_children():
+		child.queue_free()
+	if _animator != null:
+		_animator.queue_free()
+		_animator = null
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = appearance_seed if appearance_seed != 0 else hash(name)
+	character_look = CharacterLook.random(rng, category)
+	character_look.height = body_height * rng.randf_range(0.93, 1.07)
+	character_look.top = top
+	character_look.accent = accent
+	rig = CharacterKit.build(body_pivot, character_look, casts_shadow)
+	CharacterKit.add_uniform(rig, character_look)
+	_animator = CharacterAnimator.new()
+	_animator.name = "Animator"
+	add_child(_animator)
+	_animator.setup(rig)
+
+
+## What the figure should be doing. Overridden by anything with a better idea —
+## a cashier at a till, an officer in a pursuit.
+func animation_state() -> CharacterAnimator.State:
+	if _speed > run_speed * 0.7:
+		return CharacterAnimator.State.RUN
+	if _speed > 0.35:
+		return CharacterAnimator.State.WALK
+	return CharacterAnimator.State.IDLE
+
+
+## Forces a pose that movement alone cannot express.
+func set_pose(state: CharacterAnimator.State) -> void:
+	if _animator != null:
+		_animator.set_state(state)
+
+
+func _refresh_animation() -> void:
+	if _animator == null:
+		return
+	_animator.set_speed(_speed)
+	_animator.set_state(animation_state())
 
 
 func has_path() -> bool:
@@ -193,6 +266,7 @@ func _physics_process(delta: float) -> void:
 	velocity.z = planar.z
 
 	_face(planar, delta)
+	_refresh_animation()
 	move_and_slide()
 	if _pending_shove != Vector3.ZERO:
 		move_and_collide(_pending_shove)

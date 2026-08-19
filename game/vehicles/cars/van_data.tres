@@ -34,3 +34,5 @@ body_color = Color(0.831373, 0.839216, 0.847059, 1)
 trim_color = Color(0.207843, 0.215686, 0.239216, 1)
 glass_color = Color(0.121569, 0.184314, 0.215686, 1)
 resale_value = 7200
+body_profile = 2
+cabin_offset = -0.12

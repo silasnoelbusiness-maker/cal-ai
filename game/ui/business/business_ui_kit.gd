@@ -7,11 +7,13 @@ extends RefCounted
 ## keeps the styling in one place so the property screen and the dashboard look
 ## like the same program.
 
-const TEXT := Color(0.898, 0.925, 0.961)
-const MUTED := Color(0.612, 0.647, 0.702)
-const GOOD := Color(0.596, 0.918, 0.639)
-const BAD := Color(0.965, 0.549, 0.502)
-const ACCENT := Color(0.478, 0.694, 0.961)
+## Drawn from the shared palette, so a profit figure here is the same green as
+## a profit figure on the map and on the HUD.
+const TEXT := Palette.UI_TEXT
+const MUTED := Palette.UI_MUTED
+const GOOD := Palette.MONEY
+const BAD := Palette.LOSS
+const ACCENT := Palette.UI_ACCENT
 
 
 static func panel_style(background: Color, border: Color, radius: int = 6) -> StyleBoxFlat:
@@ -25,7 +27,19 @@ static func panel_style(background: Color, border: Color, radius: int = 6) -> St
 
 
 static func row_style() -> StyleBoxFlat:
-	return panel_style(Color(0.106, 0.122, 0.157, 0.9), Color(1, 1, 1, 0.12))
+	return panel_style(Color(0.098, 0.114, 0.149, 0.92), Color(1, 1, 1, 0.10), 8)
+
+
+## A status chip: OPEN, CLOSED, LOW STOCK. Colour carries the meaning, so the
+## same state never appears in two different colours across two screens.
+static func status_chip(text: String, colour: Color) -> PanelContainer:
+	var frame := PanelContainer.new()
+	frame.add_theme_stylebox_override("panel", UITheme.pill(colour))
+	frame.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var text_node := label(text, 12, colour)
+	text_node.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	frame.add_child(text_node)
+	return frame
 
 
 static func label(text: String, size: int = 14, colour: Color = TEXT) -> Label:

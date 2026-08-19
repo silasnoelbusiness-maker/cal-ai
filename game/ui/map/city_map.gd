@@ -94,13 +94,35 @@ func _to_world(point: Vector2) -> Vector3:
 
 func _draw_map() -> void:
 	_measure()
-	_canvas.draw_rect(Rect2(Vector2.ZERO, _canvas.size), Color(0.086, 0.098, 0.118))
+	# A drawn map, not a debug view: a dark ground, a grid at a hundred metres
+	# so distances are readable, then the city on top of it.
+	_canvas.draw_rect(Rect2(Vector2.ZERO, _canvas.size), Color(0.055, 0.063, 0.086))
+	_draw_grid()
 
 	_draw_districts()
 	_draw_streets()
 	_draw_route()
 	_draw_markers()
 	_draw_player()
+
+
+## A faint hundred-metre grid under everything. It gives the map a sense of
+## scale and stops the empty parts of the city reading as a void.
+func _draw_grid() -> void:
+	var colour := Color(1, 1, 1, 0.045)
+	var step := 100.0
+	var start_x := ceilf(_bounds.position.x / step) * step
+	var x := start_x
+	while x < _bounds.end.x:
+		var at := _to_map(Vector3(x, 0.0, 0.0)).x
+		_canvas.draw_line(Vector2(at, 0.0), Vector2(at, _canvas.size.y), colour, 1.0)
+		x += step
+	var start_z := ceilf(_bounds.position.y / step) * step
+	var z := start_z
+	while z < _bounds.end.y:
+		var at := _to_map(Vector3(0.0, 0.0, z)).y
+		_canvas.draw_line(Vector2(0.0, at), Vector2(_canvas.size.x, at), colour, 1.0)
+		z += step
 
 
 ## District outlines and their names, so the player can see the shape of the
@@ -114,12 +136,26 @@ func _draw_districts() -> void:
 			Vector3(district.world_bounds.end.x, 0.0, district.world_bounds.end.y)
 		)
 		var rect := Rect2(top_left, bottom_right - top_left)
-		_canvas.draw_rect(rect, Color(0.129, 0.145, 0.176), true)
-		_canvas.draw_rect(rect, Color(1, 1, 1, 0.10), false, 1.0)
+		var here := WorldManager.player_district() == district
+		# The district the player is in is lifted a shade, so "where am I" is
+		# answered before they find the arrow.
+		_canvas.draw_rect(rect, Color(0.129, 0.149, 0.192) if here else Color(0.098, 0.114, 0.145), true)
+		_canvas.draw_rect(
+			rect, Palette.UI_ACCENT * Color(1, 1, 1, 0.55) if here else Color(1, 1, 1, 0.10),
+			false, 2.0 if here else 1.0
+		)
+		# Name in a tab at the top-left of the district, rather than floating
+		# text on the fill.
+		var font := ThemeDB.fallback_font
+		var name_text := district.display_name.to_upper()
+		var size := font.get_string_size(name_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 13)
+		var tab := Rect2(top_left + Vector2(8.0, 8.0), size + Vector2(16.0, 10.0))
+		_canvas.draw_rect(tab, Color(0.043, 0.051, 0.075, 0.85), true)
+		_canvas.draw_rect(tab, Color(1, 1, 1, 0.10), false, 1.0)
 		_canvas.draw_string(
-			ThemeDB.fallback_font, top_left + Vector2(10.0, 22.0),
-			district.display_name.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 14,
-			Color(0.612, 0.647, 0.702)
+			font, tab.position + Vector2(8.0, 15.0), name_text,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 13,
+			Palette.UI_TEXT if here else Palette.UI_MUTED
 		)
 
 
@@ -129,11 +165,17 @@ func _draw_streets() -> void:
 	var network := get_tree().get_first_node_in_group(&"road_network") as RoadNetwork
 	if network == null:
 		return
-	var colour := Color(0.298, 0.318, 0.361)
-	for i in network.node_count():
-		var from := _to_map(network.node_position(i))
-		for j in network.successors(i):
-			_canvas.draw_line(from, _to_map(network.node_position(j)), colour, 2.4)
+	# Two passes: a wide dark casing and a narrower pale carriageway on top, so
+	# the roads read as drawn streets rather than as a wireframe.
+	for pass_index in 2:
+		var colour := (
+			Color(0.043, 0.055, 0.078) if pass_index == 0 else Color(0.435, 0.463, 0.522)
+		)
+		var width := 5.0 if pass_index == 0 else 2.4
+		for i in network.node_count():
+			var from := _to_map(network.node_position(i))
+			for j in network.successors(i):
+				_canvas.draw_line(from, _to_map(network.node_position(j)), colour, width)
 
 
 func _draw_route() -> void:
@@ -143,7 +185,13 @@ func _draw_route() -> void:
 	var points := PackedVector2Array()
 	for point in route:
 		points.append(_to_map(point))
-	_canvas.draw_polyline(points, Color(0.478, 0.792, 0.961, 0.9), 3.0)
+	# A dark casing under the route as well, so it stays legible where it runs
+	# along a road rather than across open ground.
+	_canvas.draw_polyline(points, Color(0.043, 0.078, 0.114, 0.9), 7.0)
+	_canvas.draw_polyline(points, Palette.UI_ACCENT, 3.5)
+	# A ring at the far end: the destination, marked as the end of the line.
+	if points.size() > 1:
+		_canvas.draw_arc(points[points.size() - 1], 11.0, 0.0, TAU, 28, Palette.UI_ACCENT, 2.0)
 
 
 ## Every marker gets a dot. Names are fitted around each other rather than drawn
@@ -168,11 +216,18 @@ func _draw_markers() -> void:
 	for marker in _markers:
 		var at := _to_map(marker.position)
 		var colour := MapMarker.category_colour(marker.category)
-		_canvas.draw_circle(at, MARKER_RADIUS + 2.0, Color(0.043, 0.051, 0.063, 0.9))
+		# A dark disc, the colour on top of it, and a paler ring: a pin that
+		# stays readable over both a road and the district fill.
+		_canvas.draw_circle(at, MARKER_RADIUS + 3.0, Color(0.031, 0.039, 0.055, 0.92))
 		_canvas.draw_circle(at, MARKER_RADIUS, colour)
+		_canvas.draw_arc(at, MARKER_RADIUS, 0.0, TAU, 20, colour.lightened(0.35), 1.5)
+		# A glyph in the middle, so a category is told apart at a glance rather
+		# than by matching colours against the filter row.
+		_draw_glyph(at, marker.category, colour)
 		if marker == _selected:
-			_canvas.draw_arc(at, MARKER_RADIUS + 5.0, 0.0, TAU, 24, Color.WHITE, 2.0)
-		taken.append(Rect2(at - Vector2(8.0, 8.0), Vector2(16.0, 16.0)))
+			_canvas.draw_arc(at, MARKER_RADIUS + 6.0, 0.0, TAU, 28, Color.WHITE, 2.0)
+			_canvas.draw_arc(at, MARKER_RADIUS + 10.0, 0.0, TAU, 28, Color(1, 1, 1, 0.35), 1.0)
+		taken.append(Rect2(at - Vector2(9.0, 9.0), Vector2(18.0, 18.0)))
 
 	for marker in order:
 		var at := _to_map(marker.position)
@@ -204,6 +259,39 @@ func _draw_markers() -> void:
 			break
 		if not placed:
 			continue
+
+
+## A tiny shape inside a marker saying what kind of place it is. Drawn rather
+## than textured: seven glyphs of two or three primitives each cost nothing and
+## need no atlas.
+func _draw_glyph(at: Vector2, category: int, colour: Color) -> void:
+	var ink := Color(0.031, 0.039, 0.055)
+	match category:
+		MapMarker.Category.HOME:
+			_canvas.draw_colored_polygon(
+				PackedVector2Array([
+					at + Vector2(0.0, -3.4), at + Vector2(3.4, 0.0), at + Vector2(-3.4, 0.0)
+				]), ink
+			)
+			_canvas.draw_rect(Rect2(at + Vector2(-2.2, 0.0), Vector2(4.4, 3.0)), ink)
+		MapMarker.Category.OWNED_BUSINESS:
+			_canvas.draw_rect(Rect2(at + Vector2(-3.0, -1.0), Vector2(6.0, 4.0)), ink)
+			_canvas.draw_rect(Rect2(at + Vector2(-3.4, -3.0), Vector2(6.8, 1.6)), ink)
+		MapMarker.Category.AVAILABLE_PROPERTY:
+			_canvas.draw_rect(Rect2(at + Vector2(-3.0, -3.0), Vector2(6.0, 6.0)), ink, false, 1.4)
+		MapMarker.Category.JOB:
+			_canvas.draw_rect(Rect2(at + Vector2(-3.2, -1.4), Vector2(6.4, 4.4)), ink)
+			_canvas.draw_rect(Rect2(at + Vector2(-1.4, -3.2), Vector2(2.8, 1.6)), ink)
+		MapMarker.Category.POLICE:
+			_canvas.draw_rect(Rect2(at + Vector2(-1.1, -3.4), Vector2(2.2, 6.8)), ink)
+			_canvas.draw_rect(Rect2(at + Vector2(-3.4, -1.1), Vector2(6.8, 2.2)), ink)
+		MapMarker.Category.LANDMARK:
+			_canvas.draw_circle(at, 2.6, ink)
+			_canvas.draw_circle(at, 1.2, colour)
+		_:
+			# Shops: a bag.
+			_canvas.draw_rect(Rect2(at + Vector2(-2.6, -1.4), Vector2(5.2, 4.6)), ink)
+			_canvas.draw_arc(at + Vector2(0.0, -1.4), 1.7, PI, TAU, 12, ink, 1.2)
 
 
 ## Which names get the space when two want it. The one the player has selected,

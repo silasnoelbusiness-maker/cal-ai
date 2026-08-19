@@ -13,20 +13,20 @@ signal daylight_changed(amount: float)
 
 @export var environment_path: NodePath
 @export_group("Sun")
-@export var day_energy: float = 1.0
-@export var night_energy: float = 0.18
-@export var day_color: Color = Color(1.0, 0.97, 0.9)
+@export var day_energy: float = 1.25
+@export var night_energy: float = 0.14
+@export var day_color: Color = Color(1.0, 0.965, 0.898)
 @export var golden_color: Color = Color(1.0, 0.72, 0.45)
-@export var night_color: Color = Color(0.55, 0.66, 0.95)
+@export var night_color: Color = Color(0.435, 0.541, 0.878)
 @export_group("Sky")
 @export var day_sky_energy: float = 1.0
-@export var night_sky_energy: float = 0.16
+@export var night_sky_energy: float = 0.10
 ## Dropping the daytime figure buys shadow contrast, but it was taken too far at
 ## first: 0.35 against a night value of 0.3 left almost no day/night difference
 ## in the fill light, and late afternoon — when the sun is low and the fill is
 ## doing most of the work — went nearly black. The two now sit clearly apart.
-@export var day_ambient_energy: float = 0.44
-@export var night_ambient_energy: float = 0.26
+@export var day_ambient_energy: float = 0.52
+@export var night_ambient_energy: float = 0.24
 @export_group("Street Lights")
 ## Street lights switch on once the sun drops below this height (-1..1).
 @export var street_light_threshold: float = 0.08

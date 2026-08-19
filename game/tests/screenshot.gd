@@ -302,6 +302,14 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"pursuit_traffic", "police_lights", "escaping_traffic", "night_traffic":
 			await _crime_scenario(main, scenario, false)
 
+		"police_officer", "police_close", "business_exterior", "hero":
+			await _phase_k_scenario(main, scenario)
+
+		"characters":
+			# The five people the game draws, lined up at reading distance:
+			# player, civilian, office worker, retail worker, officer.
+			await _character_lineup(main)
+
 		"city_overview", "harbour_row", "central_district", "district_road", \
 		"central_street", "central_plaza", "traffic_crossing", "central_pedestrians", \
 		"city_map", "map_filters", "map_route", "central_property", \
@@ -812,6 +820,121 @@ func _run_empire_scenario(main: Node, scenario: String) -> void:
 		coffee_spawner.spawn_customer_now()
 		await _wait(35)
 	await _wait(240)
+
+
+# --- Phase K: the presentation shots ---------------------------------------
+
+## The shots the visual pass exists for. Each drives the real systems: the
+## officer is a real PoliceOfficer, the light bar is the pursuit light bar, and
+## the shop exterior is the sign the business actually puts up.
+func _phase_k_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+
+	match scenario:
+		"police_officer":
+			# One officer on an empty pavement, close enough to read the
+			# uniform, the vest and the cap badge.
+			for npc in get_tree().get_nodes_in_group(&"pedestrian"):
+				if npc is Node3D:
+					npc.global_position = Vector3(400.0, 0.0, 400.0)
+				npc.process_mode = Node.PROCESS_MODE_DISABLED
+			_traffic_manager().set_active(false)
+			_traffic_manager().clear()
+			await _wait(6)
+			var officers: Array = get_tree().get_nodes_in_group(&"police").filter(
+				func(u: Node) -> bool: return u is PoliceOfficer
+			)
+			var spot := Vector3(-12.0, 0.4, District01.MAIN_ST_Z - 9.4)
+			for i in officers.size():
+				var unit: Node3D = officers[i]
+				unit.process_mode = Node.PROCESS_MODE_INHERIT
+				unit.global_position = spot + Vector3(2.6 * float(i), 0.0, 0.0)
+				if unit.has_method("wait_for"):
+					unit.call("wait_for", 600.0)
+			player.global_position = spot + Vector3(-2.8, 0.1, 0.0)
+			await _wait(30)
+			for i in officers.size():
+				(officers[i] as Node3D).get_node("BodyPivot").rotation.y = PI
+			player.get_node("BodyPivot").rotation.y = PI
+			await _wait(20)
+
+		"police_close":
+			# A patrol car with its bar lit, which means putting a real unit on
+			# a real call rather than turning the lights on by hand.
+			await _crime_scenario(main, "pursuit", false)
+			var cars: Array = get_tree().get_nodes_in_group(&"police_car")
+			if not cars.is_empty():
+				player.global_position = (
+					(cars[0] as Node3D).global_position + Vector3(0.0, 0.5, 6.5)
+				)
+			await _wait(40)
+
+		"business_exterior":
+			# Stood outside a shop the player owns, with the sign lit and the
+			# street alive around it.
+			EconomyManager.restore(40000)
+			_open_shop_at(main, &"unit_main_18", "Interiors/MainStreetUnit", "Silas Market")
+			await _wait(10)
+			player.global_position = Vector3(-20.0, 0.5, -9.4)
+			await _wait(60)
+
+		"hero":
+			# The store-page shot: the boulevard junction from the corner, with
+			# traffic running, the crowd out and the afternoon sun low enough to
+			# throw shadows down the street.
+			_traffic_manager().set_active(true)
+			_traffic_manager().prime()
+			player.global_position = Vector3(-9.6, 0.5, 14.0)
+			await _wait(360)
+
+
+# --- Phase K: the people --------------------------------------------------
+
+## Five figures side by side on an empty stretch of pavement. Built through the
+## real NpcWalker so what the shot shows is what the crowd is made of.
+func _character_lineup(main: Node) -> void:
+	var player: Node3D = GameManager.player
+	# Clear the street, so the only people in frame are the ones being shown.
+	for npc in get_tree().get_nodes_in_group(&"pedestrian") + get_tree().get_nodes_in_group(&"police"):
+		if npc is Node3D:
+			npc.global_position = Vector3(400.0, 0.0, 400.0)
+		npc.process_mode = Node.PROCESS_MODE_DISABLED
+	_traffic_manager().set_active(false)
+	_traffic_manager().clear()
+	await _wait(6)
+
+	var line_z := District01.MAIN_ST_Z - 9.4
+	player.global_position = Vector3(-12.0, 0.5, line_z)
+	await _wait(6)
+
+	var kinds := [
+		[CharacterLook.Category.CIVILIAN, Color(0.545, 0.373, 0.345)],
+		[CharacterLook.Category.OFFICE, Color(0.208, 0.231, 0.290)],
+		[CharacterLook.Category.RETAIL, Color(0.278, 0.435, 0.478)],
+		[CharacterLook.Category.POLICE, Color(0.129, 0.169, 0.239)],
+	]
+	for i in kinds.size():
+		var figure: Pedestrian = load("res://npc/pedestrian.tscn").instantiate()
+		figure.name = "Lineup%d" % i
+		figure.appearance_seed = 4100 + i * 37
+		figure.look_category = kinds[i][0]
+		figure.body_color = kinds[i][1]
+		figure.accent_color = (
+			Color(0.914, 0.792, 0.290) if kinds[i][0] == CharacterLook.Category.POLICE
+			else Color(0.902, 0.902, 0.886)
+		)
+		figure.casts_shadow = true
+		figure.wanders = false
+		main.add_child(figure)
+		figure.global_position = Vector3(-9.0 + float(i) * 2.6, 0.4, line_z)
+		figure.wait_for(600.0)
+	await _wait(30)
+	# Everybody turned to face the camera rather than wherever they spawned.
+	for i in kinds.size():
+		var figure: Node3D = main.get_node("Lineup%d" % i)
+		figure.get_node("BodyPivot").rotation.y = PI
+	player.get_node("BodyPivot").rotation.y = PI
+	await _wait(20)
 
 
 # --- Phase J: the wider city ---------------------------------------------

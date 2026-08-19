@@ -42,6 +42,9 @@ var partition_z: float = -2.4
 var partition_gap: Vector2 = Vector2(1.9, 4.4)
 
 var _palette: Dictionary = {}
+## Which dressing the shell currently wears, so a change of trade can be
+## noticed. Empty until the room is first built.
+var _style_built: StringName = &""
 var _equipment_root: Node3D = null
 var _sign_label: Node3D = null
 var _open_light: MeshInstance3D = null
@@ -74,11 +77,16 @@ func ensure_built() -> void:
 	if _built:
 		return
 	_built = true
+	# The palette depends on what trades here, and what trades here is only
+	# known once a business has been bound — so it is chosen now rather than at
+	# _ready, or a leased cafe would be dressed as a vacant unit for ever.
+	_build_palette()
 	_build_shell()
 	_build_lighting()
 	_build_signage()
 	rebuild_equipment()
 	_refresh_signage()
+	_style_built = _style_id()
 
 
 func is_built() -> bool:
@@ -159,8 +167,29 @@ func _bind_business() -> void:
 	_business = BusinessManager.business_for_property(property_id)
 	if _business != null:
 		ensure_built()
+	# A unit is usually leased before the business that will trade from it
+	# exists, so the shell gets built as a vacant one and then never changes.
+	# Re-dressing on a style change is what makes a cafe look like a cafe rather
+	# than like the empty unit it was let as.
+	_redress_if_style_changed()
 	rebuild_equipment()
 	_refresh_signage()
+
+
+func _redress_if_style_changed() -> void:
+	if not _built or _style_built == _style_id():
+		return
+	for node_name in ["Shell", "Lighting", "Signage"]:
+		var node := get_node_or_null(node_name)
+		if node != null:
+			node.name = "%sOld" % node_name
+			node.queue_free()
+	_build_palette()
+	_build_shell()
+	_build_lighting()
+	_build_signage()
+	_refresh_signage()
+	_style_built = _style_id()
 
 
 func _on_business_registered(_business: BusinessInstance) -> void:
@@ -402,16 +431,47 @@ func _mat(key: String) -> StandardMaterial3D:
 	return _palette[key]
 
 
+## Which way a unit is dressed. A shop and a cafe are the same room with
+## different floors, walls and light, which is exactly what separates them in
+## real life — and it means one interior serves both without a second scene.
+func _style_id() -> StringName:
+	if _business == null:
+		return &"vacant"
+	return _business.type_id
+
+
 func _build_palette() -> void:
+	var style := _style_id()
+	var floor_mat := Palette.of(&"tile_floor")
+	var wall_mat := Palette.of(&"wall_paint")
+	var trim_mat := Palette.of(&"metal_mid")
+	match style:
+		&"coffee_shop":
+			floor_mat = Palette.of(&"wood_floor")
+			wall_mat = Palette.of(&"wall_warm")
+			trim_mat = Palette.of(&"wood_dark")
+		&"convenience_store":
+			floor_mat = Palette.of(&"tile_checker")
+			wall_mat = Palette.of(&"wall_paint")
+			trim_mat = Palette.of(&"metal_mid")
+		_:
+			# Vacant: bare but finished. An empty unit is a rental, not a
+			# debug room, so it gets a real floor and a real skirting.
+			floor_mat = Palette.of(&"lino_grey")
+			wall_mat = Palette.of(&"wall_paint")
+			trim_mat = Palette.of(&"concrete_dark")
+
 	_palette = {
-		"surround": CityKit.make_material(Color(0.086, 0.094, 0.110)),
-		"floor": CityKit.make_material(Color(0.604, 0.600, 0.588)),
-		"back_floor": CityKit.make_material(Color(0.400, 0.404, 0.408)),
-		"wall": CityKit.make_material(Color(0.816, 0.804, 0.769)),
-		"trim": CityKit.make_material(Color(0.325, 0.318, 0.302)),
-		"door": CityKit.make_material(Color(0.247, 0.192, 0.145)),
-		"pavement": CityKit.make_material(Color(0.678, 0.675, 0.663)),
-		"sign": CityKit.make_material(Color(0.161, 0.176, 0.208)),
+		"surround": CityKit.make_material(Color(0.075, 0.082, 0.098)),
+		"floor": floor_mat,
+		"back_floor": Palette.of(&"concrete"),
+		"wall": wall_mat,
+		"trim": trim_mat,
+		"door": Palette.of(&"wood_dark"),
+		"pavement": Palette.of(&"sidewalk"),
+		"sign": Palette.of(&"panel_navy"),
+		"glass": Palette.of(&"glass_shop"),
+		"metal": Palette.of(&"metal_pale"),
 	}
 
 
@@ -471,6 +531,10 @@ func _build_shell() -> void:
 		CityKit.rect_from_bounds(DOORWAY_HALF_WIDTH, south, east, south + WALL_THICKNESS)
 	)
 
+	_build_shopfront(shell)
+	_build_store_room_dressing(shell)
+	_build_trade_dressing(shell)
+
 	# Partition, with a gap through to the store room.
 	_add_wall(
 		shell, "PartitionWest",
@@ -482,6 +546,147 @@ func _build_shell() -> void:
 	)
 
 
+## The street wall, from the inside: glazing either side of the doorway, a stall
+## riser under it and a header above. Without it the front of a shop is a blank
+## wall, which is the single strongest reason the old interiors read as boxes.
+func _build_shopfront(parent: Node3D) -> void:
+	var south := room.end.y
+	var west := room.position.x
+	var east := room.end.x
+	for pair in [
+		["West", west + 0.4, -DOORWAY_HALF_WIDTH - 0.2],
+		["East", DOORWAY_HALF_WIDTH + 0.2, east - 0.4],
+	]:
+		var from := float(pair[1])
+		var to := float(pair[2])
+		if to - from < 0.6:
+			continue
+		var mid := (from + to) * 0.5
+		var width := to - from
+		CityKit.add_box(
+			parent, "Riser%s" % pair[0], Vector3(mid, 0.30, south + 0.02),
+			Vector3(width, 0.60, 0.10), _mat("trim"), false, false
+		)
+		CityKit.add_box(
+			parent, "Glazing%s" % pair[0], Vector3(mid, 1.75, south + 0.02),
+			Vector3(width, 2.30, 0.08), _mat("glass"), false, false
+		)
+		# Mullions, so a two-metre pane is not one flat sheet.
+		var bays := maxi(int(width / 1.6), 1)
+		for i in range(1, bays):
+			CityKit.add_box(
+				parent, "Mullion%s%d" % [pair[0], i],
+				Vector3(from + width * float(i) / float(bays), 1.75, south + 0.04),
+				Vector3(0.08, 2.30, 0.12), _mat("trim"), false, false
+			)
+
+
+## What the room has that the player did not buy: the fittings a business of
+## this kind comes with rather than fits out. A cafe gets seating, a menu board
+## and a plant; a shop gets a chiller cabinet against the wall.
+##
+## Kept clear of the customer routes — a table in the walk-up lane is a queue of
+## stuck customers rather than a table — by hugging the side walls.
+func _build_trade_dressing(parent: Node3D) -> void:
+	var style := _style_id()
+	if style != &"coffee_shop" and style != &"convenience_store":
+		return
+	var holder := Node3D.new()
+	holder.name = "TradeDressing"
+	parent.add_child(holder)
+
+	var west := room.position.x + 1.25
+	var east := room.end.x - 1.25
+
+	if style == &"coffee_shop":
+		# Seating down the west wall, out of the line between the door and the
+		# counter.
+		var seats := clampi(int(retail_area.size.y / 2.6), 2, 4)
+		for i in seats:
+			PropKit.cafe_table(
+				holder, "CafeTable%d" % i,
+				Vector3(
+					west, 0.0,
+					retail_area.position.y + 1.6 + float(i) * (retail_area.size.y - 3.2)
+						/ float(maxi(seats - 1, 1))
+				)
+			)
+		PropKit.menu_board(
+			holder, "MenuBoard",
+			Vector3(0.0, 2.05, partition_z + WALL_THICKNESS + 0.08),
+			["ESPRESSO      2.60", "FLAT WHITE    3.20", "TEA           2.40", "PASTRY        2.90"]
+		)
+		PropKit.pot_plant(holder, "CafePlant", Vector3(east, 0.0, retail_area.end.y - 1.4), 1.1)
+		PropKit.pot_plant(holder, "CafePlantB", Vector3(east, 0.0, retail_area.position.y + 1.2), 0.9)
+	else:
+		# A chiller run against the east wall: the thing a convenience store has
+		# that a cafe does not, and the clearest way to tell the two apart from
+		# above.
+		var cabinets := clampi(int(retail_area.size.y / 2.0), 1, 3)
+		for i in cabinets:
+			PropKit.chiller(
+				holder, "Chiller%d" % i,
+				Vector3(
+					east, 0.0,
+					retail_area.position.y + 1.4 + float(i) * 1.85
+				),
+				-90.0
+			)
+		PropKit.menu_board(
+			holder, "PriceBoard",
+			Vector3(0.0, 2.05, partition_z + WALL_THICKNESS + 0.08),
+			["TODAY", "WATER   1.60", "SODA    1.90", "SNACKS  1.40"]
+		)
+
+
+## The back of house. A vacant unit gets an empty room with a rack in it; a
+## trading one gets the boxes and pallets a stock room actually has.
+func _build_store_room_dressing(parent: Node3D) -> void:
+	var holder := Node3D.new()
+	holder.name = "StoreRoomDressing"
+	parent.add_child(holder)
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(String(property_id)) + 11
+	var back := Rect2(
+		room.position.x + 0.7, room.position.y + 0.7,
+		room.size.x - 1.4, maxf(partition_z - room.position.y - 1.4, 0.5)
+	)
+	if back.size.y < 1.0:
+		return
+
+	# A steel rack against the back wall. Not solid: the stocker walks this room
+	# on a route the shelves do not know about, and a rack in the way of it
+	# stops the shop restocking itself.
+	var rack_z := back.position.y + 0.4
+	CityKit.add_box(
+		holder, "Rack", Vector3(back.get_center().x, 1.0, rack_z),
+		Vector3(back.size.x * 0.72, 2.0, 0.55), _mat("metal"), false
+	)
+	for level in 3:
+		CityKit.add_box(
+			holder, "RackShelf%d" % level,
+			Vector3(back.get_center().x, 0.45 + float(level) * 0.62, rack_z - 0.06),
+			Vector3(back.size.x * 0.70, 0.05, 0.60), _mat("trim"), false, false
+		)
+	if _business != null:
+		for level in 3:
+			PropKit.goods_row(
+				holder, "RackGoods%d" % level,
+				Vector3(back.get_center().x, 0.48 + float(level) * 0.62, rack_z - 0.06),
+				back.size.x * 0.62, [&"drinks", &"snacks", &"general"][level], rng
+			)
+		for i in 3:
+			PropKit.crate_stack(
+				holder, "Crates%d" % i,
+				Vector3(
+					rng.randf_range(back.position.x + 0.5, back.end.x - 0.5), 0.0,
+					rng.randf_range(rack_z + 1.0, back.end.y - 0.4)
+				),
+				rng
+			)
+
+
 func _add_wall(parent: Node3D, wall_name: String, rect: Rect2) -> void:
 	if rect.size.x <= 0.01 or rect.size.y <= 0.01:
 		return
@@ -489,7 +694,32 @@ func _add_wall(parent: Node3D, wall_name: String, rect: Rect2) -> void:
 	CityKit.add_slab(parent, wall_name + "Trim", rect.grow(0.04), 0.0, 0.35, _mat("trim"))
 
 
+## Light, and something to see it coming from.
+##
+## The room has no ceiling — it cannot, with a camera directly above it — so the
+## fittings run along the tops of the walls instead: an emissive strip that
+## reads from above as a lit room, plus a handful of omnis doing the actual
+## work. Warm in a cafe, cool in a shop, which is most of what makes the two
+## feel like different businesses before you look at what is in them.
 func _build_lighting() -> void:
+	var warm := _style_id() == &"coffee_shop"
+	var tone := Color(0.996, 0.925, 0.808) if warm else Color(0.945, 0.965, 0.988)
+	var strip := Palette.glow(tone, 0.55)
+
+	var holder := Node3D.new()
+	holder.name = "Lighting"
+	add_child(holder)
+
+	# Tight against the tops of the side walls. Any wider or further in and,
+	# from a camera directly overhead, a light fitting reads as a white stripe
+	# painted down the middle of the shop floor.
+	for side: float in [-1.0, 1.0]:
+		CityKit.add_box(
+			holder, "Strip%d" % int(side),
+			Vector3(side * (room.size.x * 0.5 - 0.18), WALL_HEIGHT - 0.30, room.get_center().y),
+			Vector3(0.12, 0.08, room.size.y * 0.86), strip, false, false
+		)
+
 	for spot in [
 		Vector3(-3.5, 2.9, 1.5), Vector3(3.5, 2.9, 1.5),
 		Vector3(0.0, 2.9, -4.2), Vector3(0.0, 2.9, 4.6),
@@ -497,11 +727,11 @@ func _build_lighting() -> void:
 		var light := OmniLight3D.new()
 		light.name = "CeilingLight"
 		light.position = spot
-		light.light_color = Color(0.98, 0.98, 0.94)
-		light.light_energy = 3.0
-		light.omni_range = 13.0
+		light.light_color = tone
+		light.light_energy = 0.8 if warm else 0.95
+		light.omni_range = 11.0
 		light.shadow_enabled = false
-		add_child(light)
+		holder.add_child(light)
 
 
 func _build_markers_and_doors() -> void:

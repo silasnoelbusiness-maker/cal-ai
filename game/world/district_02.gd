@@ -66,6 +66,22 @@ const POLICE_OFFICER_SCENE: PackedScene = preload("res://npc/police_officer.tscn
 ## Denser than Harbour Row, which is the whole point of the place.
 const PEDESTRIAN_COUNT := 30
 
+## Names for the NPC-run shops along Central's parades. Original, generic and
+## short enough to read from the elevated camera.
+const NPC_SHOP_NAMES: Array[String] = [
+	"MERIDIAN NEWS", "KETTLE & CO", "THE PAPER ROOM", "FOLD",
+	"NORTHGATE PHARMACY", "SALT & SODA", "CIVIC BOOKS", "TRAM CAFE",
+	"HARBOUR OPTICS", "GREENLINE GROCER", "PLAZA FLORIST", "EXCHANGE DELI",
+]
+
+## Sign colours, drawn from the palette's accents so a parade of shops is varied
+## without any one of them being lurid.
+const SIGN_COLOURS: Array[Color] = [
+	Color(0.180, 0.286, 0.404), Color(0.400, 0.239, 0.235),
+	Color(0.216, 0.361, 0.318), Color(0.400, 0.341, 0.220),
+	Color(0.286, 0.243, 0.361), Color(0.196, 0.220, 0.259),
+]
+
 var _palette: Dictionary = {}
 var _geometry: Node3D = null
 var _interactables: Node3D = null
@@ -88,6 +104,7 @@ func _ready() -> void:
 	_build_blocks()
 	_build_plaza()
 	_build_street_furniture()
+	_build_street_props()
 	_build_venue_doors()
 	_extend_navigation()
 	_build_traffic_signals()
@@ -135,8 +152,8 @@ func _build_palette() -> void:
 	_palette = {
 		"ground": CityKit.make_surface(Color(0.286, 0.294, 0.306), 0.6),
 		"asphalt": CityKit.make_surface(Color(0.176, 0.180, 0.196), 0.9),
-		"paving": CityKit.make_surface(Color(0.612, 0.608, 0.596), 0.7),
-		"plaza": CityKit.make_surface(Color(0.678, 0.659, 0.620), 0.8),
+		"paving": CityKit.make_surface(Color(0.541, 0.541, 0.529), 0.78, 1.1, 0.8, 0.13, 0.0, 3),
+		"plaza": CityKit.make_surface(Color(0.596, 0.580, 0.545), 0.80, 1.2, 1.0, 0.16, 0.0, 8),
 		"marking": CityKit.make_material(Color(0.878, 0.878, 0.855)),
 		"kerb": CityKit.make_material(Color(0.545, 0.545, 0.537)),
 		"glass": CityKit.make_material(Color(0.243, 0.290, 0.337), 0.25, 0.4),
@@ -335,6 +352,15 @@ func _build_blocks() -> void:
 				_mat(material_key)
 			)
 
+		# Plant, ducting, a tank and a mast on the roof. From an elevated camera
+		# a roof is the largest face a building has, and a bare one is the last
+		# thing that still reads as a box.
+		var roof_rng := RandomNumberGenerator.new()
+		roof_rng.seed = hash(block_name) + 13
+		var roof_rect := rect.grow(-6.4) if style == "tower" else rect
+		var roof_y := (height + height * 0.28) if style == "tower" else height + 0.7
+		BuildingKit.add_roof_kit(container, block_name, roof_rect, roof_y, roof_rng)
+
 
 ## Lit bands up each face. One material per building, so the whole district's
 ## windows come on together at dusk for the cost of a handful of writes.
@@ -343,14 +369,18 @@ func _add_window_bands(parent: Node3D, block_name: String, rect: Rect2, height: 
 		Color(0.278, 0.310, 0.361), 0.0, WINDOW_GLOW
 	)
 	_window_materials.append(glow)
-	var floors := maxi(int(height / 3.4), 2)
-	for level in range(1, floors):
-		var band := 0.35 + float(level) * (height / float(floors))
-		if band > height - 1.0:
-			break
+	# Punched windows on a grid: a Central tower now has a facade of individual
+	# lit panes rather than five painted stripes, and lights up at dusk for the
+	# same one write per district.
+	BuildingKit.add_window_grid(
+		parent, block_name, rect, 4.4, height - 1.4, glow, _mat("trim"), 3.0, 1.4, 1.9
+	)
+	# The tallest blocks get a crown band as well, so the skyline is not four
+	# identical parapets.
+	if height > 16.0:
 		CityKit.add_slab(
-			parent, "%sBand%d" % [block_name, level], rect.grow(0.12), band, 0.9, glow,
-			false, false
+			parent, "%sCrown" % block_name, rect.grow(0.30), height - 1.1, 0.6,
+			_mat("stone"), false, false
 		)
 
 
@@ -363,6 +393,36 @@ func _add_shopfronts(parent: Node3D, block_name: String, rect: Rect2) -> void:
 	CityKit.add_slab(
 		parent, block_name + "Canopy", rect.grow(1.4), 3.3, 0.25, _mat("trim"), false, false
 	)
+	# Shopfront glass gets its own lit material, joined to the district's night
+	# switch: an office tower with its windows on and dark shops underneath it
+	# reads as a city with the ground floor missing, and street-level glow is
+	# most of what makes a night street look inhabited.
+	var shop_glow := CityKit.make_emissive_material(
+		Color(0.325, 0.353, 0.400), 0.0, Color(0.996, 0.906, 0.729)
+	)
+	_window_materials.append(shop_glow)
+
+	# Real shopfronts down the long faces: glazing, mullions, a sign band and an
+	# awning. Names come from the district's own list, so a Central street reads
+	# as a parade of shops rather than as glazing with nothing behind it.
+	var along_x := rect.size.x >= rect.size.y
+	var run: float = rect.size.x if along_x else rect.size.y
+	var units := clampi(int(run / 11.0), 1, 3)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(block_name)
+	for face: float in [-1.0, 1.0]:
+		for i in units:
+			var start: float = (
+				(rect.position.x if along_x else rect.position.y) + run * float(i) / float(units)
+			)
+			var finish := start + run / float(units)
+			BuildingKit.add_storefront(
+				parent, "%s%d_%d" % [block_name, int(face), i], rect, along_x, face,
+				start + 1.2, finish - 1.2,
+				NPC_SHOP_NAMES[rng.randi_range(0, NPC_SHOP_NAMES.size() - 1)],
+				SIGN_COLOURS[rng.randi_range(0, SIGN_COLOURS.size() - 1)],
+				shop_glow, _mat("trim"), _mat("stone")
+			)
 
 
 # --- Central Plaza -------------------------------------------------------
@@ -404,13 +464,33 @@ func _build_plaza() -> void:
 	CityKit.add_cylinder(
 		container, "PlinthUpper", MONUMENT + Vector3(0.0, 0.9, 0.0), 3.0, 0.6, _mat("stone")
 	)
+	# A tapered column rather than a pipe: three drums of falling radius, a
+	# banded collar and a lantern on top. From the elevated camera a plain
+	# cylinder reads as scaffolding, and this is the thing the district is meant
+	# to be navigated by.
 	CityKit.add_cylinder(
-		container, "Column", MONUMENT + Vector3(0.0, 5.5, 0.0), 1.1, 8.6, _mat("pale")
+		container, "ColumnBase", MONUMENT + Vector3(0.0, 1.5, 0.0), 1.35, 0.6, _mat("stone")
+	)
+	CityKit.add_cylinder(
+		container, "ColumnLower", MONUMENT + Vector3(0.0, 3.6, 0.0), 1.15, 3.6, _mat("pale")
+	)
+	CityKit.add_cylinder(
+		container, "ColumnUpper", MONUMENT + Vector3(0.0, 7.3, 0.0), 0.92, 3.8, _mat("pale")
+	)
+	CityKit.add_cylinder(
+		container, "Collar", MONUMENT + Vector3(0.0, 9.3, 0.0), 1.30, 0.42, _mat("stone")
 	)
 	var finial := CityKit.make_emissive_material(Color(0.729, 0.663, 0.478), 0.0, LAMP_GLOW)
 	_lamp_materials.append(finial)
+	CityKit.add_cylinder(
+		container, "Lantern", MONUMENT + Vector3(0.0, 10.1, 0.0), 0.72, 1.2, finial, false
+	)
+	CityKit.add_cylinder(
+		container, "LanternCap", MONUMENT + Vector3(0.0, 10.85, 0.0), 0.86, 0.24, _mat("metal")
+	)
 	CityKit.add_sphere(
-		container, "Finial", MONUMENT + Vector3(0.0, 10.4, 0.0), Vector3(1.5, 1.5, 1.5), finial
+		container, "Finial", MONUMENT + Vector3(0.0, 11.25, 0.0), Vector3(0.5, 0.7, 0.5),
+		_mat("metal")
 	)
 	# A basin round the foot of it, so the plaza has something in it besides
 	# paving from directly above.
@@ -770,6 +850,7 @@ func _make_commercial_property(
 	unit.camera_distance = 16.0
 	unit.camera_pitch = 68.0
 	unit.district_id = &"central"
+	unit.sign_yaw = rad_to_deg(atan2(facing.x, facing.z))
 
 	match id:
 		&"unit_central_88":
@@ -873,6 +954,80 @@ func _add_door_panel(node_name: String, point: Vector3, facing: Vector3) -> void
 	var along := Vector3(absf(facing.z), 0.0, absf(facing.x))
 	var size := along * 2.6 + Vector3(0.0, 2.8, 0.0) + facing.abs() * 0.3
 	CityKit.add_box(_geometry, "DoorPanel_%s" % node_name, centre, size, _mat("door"), false)
+
+
+## Everything that makes a pavement a place rather than a surface: seating,
+## bins, planters, racks, meters, a shelter and the street names on posts.
+##
+## Placed off the walking routes on purpose. Nothing here is on a pavement lane
+## the navigation graph uses — a bench in a walking lane is a queue of jammed
+## pedestrians rather than a bench — so props sit against the kerb or against
+## the buildings, and only the bollards and the shelter posts are solid.
+func _build_street_props() -> void:
+	var container := _make_container("StreetProps")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("CentralStreetProps")
+	var kerb := ROAD_HALF + 1.1
+
+	# Street names at the signalled junctions, so the map's road names exist in
+	# the world as well.
+	var junctions := [
+		[Vector3(CENTER_BLVD_X + 8.0, 0.0, MARKET_ST_Z - 8.0), "MARKET ST"],
+		[Vector3(CENTER_BLVD_X + 8.0, 0.0, KINGSTON_RD_Z - 8.0), "KINGSTON RD"],
+		[Vector3(CENTER_BLVD_X + 8.0, 0.0, RIVERSIDE_DR_Z - 8.0), "RIVERSIDE DR"],
+		[Vector3(PLAZA_ST_X - 8.0, 0.0, MARKET_ST_Z + 8.0), "PLAZA ST"],
+		[Vector3(EXCHANGE_ST_X + 8.0, 0.0, KINGSTON_RD_Z + 8.0), "EXCHANGE ST"],
+	]
+	for entry in junctions:
+		PropKit.street_sign(
+			container, "Sign_%s" % String(entry[1]).replace(" ", ""),
+			entry[0] as Vector3, String(entry[1]), rng.randf_range(-8.0, 8.0)
+		)
+
+	# Kerbside furniture down the three main streets, alternating so no stretch
+	# is a row of the same object.
+	var index := 0
+	for road_z: float in [MARKET_ST_Z, KINGSTON_RD_Z, RIVERSIDE_DR_Z]:
+		for x: float in [-96.0, -78.0, -54.0, -34.0, 20.0, 40.0, 62.0, 84.0, 100.0]:
+			for side: float in [-1.0, 1.0]:
+				var spot := Vector3(x, 0.0, road_z + side * kerb)
+				if not BOUNDS.has_point(Vector2(spot.x, spot.z)):
+					continue
+				match index % 6:
+					0:
+						PropKit.bin(container, "Bin%d" % index, spot)
+					1:
+						PropKit.planter(
+							container, "Planter%d" % index, spot, rng.randf_range(1.0, 1.35)
+						)
+					2:
+						PropKit.parking_meter(container, "Meter%d" % index, spot)
+					3:
+						PropKit.bench(
+							container, "Bench%d" % index, spot, 0.0 if side < 0.0 else 180.0
+						)
+					4:
+						PropKit.hydrant(container, "Hydrant%d" % index, spot)
+					_:
+						PropKit.bike_rack(
+							container, "Rack%d" % index, spot, 90.0
+						)
+				index += 1
+
+	# A shelter on the boulevard, where somebody would actually wait.
+	PropKit.shelter(
+		container, "BoulevardShelter",
+		Vector3(CENTER_BLVD_X + kerb + 1.4, 0.0, KINGSTON_RD_Z + 22.0), 90.0
+	)
+
+	# Outdoor seating on the plaza edge: three tables under the shopfronts,
+	# which is the cue that Central is where people sit outside.
+	for i in 3:
+		PropKit.cafe_table(
+			container, "PlazaTable%d" % i,
+			Vector3(PLAZA.end.x + 3.2, 0.0, PLAZA.position.y + 5.0 + float(i) * 6.0),
+			true
+		)
 
 
 # --- Parking -------------------------------------------------------------

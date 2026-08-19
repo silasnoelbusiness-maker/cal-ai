@@ -11,5 +11,7 @@ run_speed = 6.2
 body_color = Color(0.145098, 0.192157, 0.317647, 1)
 accent_color = Color(0.882353, 0.858824, 0.317647, 1)
 body_height = 1.82
+look_category = 3
+casts_shadow = true
 
 [node name="BodyPivot" type="Node3D" parent="."]

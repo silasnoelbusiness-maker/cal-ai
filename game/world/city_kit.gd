@@ -414,6 +414,26 @@ static func add_tree(
 		holder, "Trunk", Vector3(0.0, trunk_height * 0.5, 0.0),
 		trunk_radius, trunk_height, trunk_material, solid_trunk
 	)
+	# A flare where the trunk meets the ground and two limbs reaching into the
+	# canopy. Three cylinders, and they are the difference between a tree and a
+	# broom handle with balls on it.
+	add_cylinder(
+		holder, "Flare", Vector3(0.0, trunk_height * 0.06, 0.0),
+		trunk_radius * 1.55, trunk_height * 0.12, trunk_material, false
+	)
+	for limb in 2:
+		var lean := TAU * (float(limb) / 2.0) + rng.randf_range(-0.5, 0.5)
+		var branch := add_cylinder(
+			holder, "Limb%d" % limb,
+			Vector3(
+				cos(lean) * 0.30 * scale_factor,
+				trunk_height * 0.80,
+				sin(lean) * 0.30 * scale_factor
+			),
+			trunk_radius * 0.55, trunk_height * 0.55, trunk_material, false
+		)
+		branch.rotation.z = cos(lean) * 0.42
+		branch.rotation.x = -sin(lean) * 0.42
 
 	var blobs := rng.randi_range(3, 5)
 	var canopy_base := trunk_height * 0.82

@@ -39,11 +39,18 @@ const CAR_SCENES := VehicleCatalogue.SCENES
 
 ## A small palette beats a material per car; each vehicle gets a tinted copy of
 ## its model's shared VehicleData.
+##
+## Weighted towards what actually fills a car park — white, silver, grey, black —
+## with the colours further down the list turning up often enough to break the
+## monotony. A uniformly random palette gives a street of novelty cars.
 const BODY_COLOURS: Array[Color] = [
-	Color(0.702, 0.706, 0.722), Color(0.259, 0.310, 0.376),
-	Color(0.514, 0.208, 0.196), Color(0.318, 0.427, 0.376),
-	Color(0.647, 0.549, 0.361), Color(0.365, 0.325, 0.416),
-	Color(0.180, 0.192, 0.216), Color(0.588, 0.612, 0.647),
+	Color(0.878, 0.886, 0.898), Color(0.878, 0.886, 0.898),
+	Color(0.706, 0.714, 0.729), Color(0.706, 0.714, 0.729),
+	Color(0.443, 0.455, 0.478), Color(0.443, 0.455, 0.478),
+	Color(0.129, 0.137, 0.157), Color(0.129, 0.137, 0.157),
+	Color(0.192, 0.286, 0.451), Color(0.545, 0.176, 0.169),
+	Color(0.196, 0.373, 0.318), Color(0.616, 0.541, 0.290),
+	Color(0.361, 0.310, 0.400), Color(0.729, 0.478, 0.239),
 ]
 
 ## Clothing colours for the people behind the wheel, kept apart from the body

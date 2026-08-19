@@ -46,10 +46,64 @@ var _is_sprinting: bool = false
 ## The vehicle being driven, or null when on foot.
 var _vehicle: Node3D = null
 
+## The player's figure and the joints that move it. Built rather than authored
+## in the scene so the player is the same drawing as everybody else in the city.
+var rig: CharacterKit.Rig = null
+var character_look: CharacterLook = null
+
+var _animator: CharacterAnimator = null
+
 
 func _ready() -> void:
 	add_to_group(&"saveable")
 	GameManager.register_player(self)
+	_build_figure()
+
+
+## Replaces whatever placeholder the scene shipped with a proper humanoid. The
+## collider is untouched — it is still the capsule every system was tuned
+## against, and a person-shaped one would only snag on kerbs.
+func _build_figure() -> void:
+	for child in _body_pivot.get_children():
+		child.queue_free()
+	character_look = CharacterLook.player_default()
+	rig = CharacterKit.build(_body_pivot, character_look, true)
+	_animator = CharacterAnimator.new()
+	_animator.name = "Animator"
+	add_child(_animator)
+	_animator.setup(rig)
+
+
+## Puts the player into a pose their movement cannot express — behind a till,
+## carrying stock. Cleared by passing IDLE.
+func set_pose(state: CharacterAnimator.State) -> void:
+	if _animator != null:
+		_animator.set_state(state)
+		_pose_override = state
+
+
+var _pose_override: int = -1
+
+
+func clear_pose() -> void:
+	_pose_override = -1
+
+
+func _refresh_animation() -> void:
+	if _animator == null:
+		return
+	var speed := get_planar_speed()
+	_animator.set_speed(speed)
+	if _pose_override >= 0:
+		return
+	if _vehicle != null:
+		_animator.set_state(CharacterAnimator.State.IDLE)
+	elif speed > sprint_speed * 0.72:
+		_animator.set_state(CharacterAnimator.State.RUN)
+	elif speed > 0.35:
+		_animator.set_state(CharacterAnimator.State.WALK)
+	else:
+		_animator.set_state(CharacterAnimator.State.IDLE)
 
 
 func _exit_tree() -> void:
@@ -114,6 +168,7 @@ func exit_vehicle(at: Transform3D) -> void:
 	_body_pivot.rotation.y = at.basis.get_euler().y
 	velocity = Vector3.ZERO
 	_collision.set_deferred("disabled", false)
+	_body_pivot.visible = true
 	set_physics_process(true)
 	interaction.set_active(true)
 	vehicle_changed.emit(null)
@@ -206,6 +261,7 @@ func _face_movement(planar_velocity: Vector3, delta: float) -> void:
 		return
 	var target_yaw := atan2(planar_velocity.x, planar_velocity.z)
 	_body_pivot.rotation.y = lerp_angle(_body_pivot.rotation.y, target_yaw, turn_speed * delta)
+	_refresh_animation()
 
 
 func _update_move_state(speed: float) -> void:
