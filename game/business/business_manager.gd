@@ -1272,8 +1272,8 @@ func load_state(state: Dictionary) -> void:
 	_unplaced_equipment.clear()
 	_pending_customers.clear()
 	_orders.clear()
-	_traded_to.clear()
 	_milestones_reached.clear()
+	_traded_to.clear()
 
 	for record in state.get("businesses", []):
 		_register(BusinessInstance.from_dict(record))
@@ -1288,6 +1288,8 @@ func load_state(state: Dictionary) -> void:
 		if _statistics.has(StringName(key)):
 			_statistics[StringName(key)] = int(state["statistics"][key])
 
+	# Deliveries keep their remaining time: a save made with a van an hour out
+	# reloads with the van still an hour out, and never delivers twice.
 	for entry in state.get("orders", []):
 		_orders.append(PurchaseOrder.from_dict(entry))
 	for id in state.get("milestones", []):

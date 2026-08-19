@@ -32,7 +32,8 @@ var _approach: Vector3 = Vector3.ZERO
 var _exit_point: Vector3 = Vector3.ZERO
 var _facing: Vector3 = Vector3.FORWARD
 var _repaths: int = 0
-## Stocker: where they are headed, and how long they stand there.
+## Stocker: whether they have an armful, and how long they stand still handling
+## it at each end of the trip.
 var _carrying: bool = false
 var _handling: float = 0.0
 var _target_shelf: BusinessEquipment = null
