@@ -196,10 +196,23 @@ func points_for_level(target: int) -> int:
 	return int(level_thresholds[target])
 
 
+## How many units the level is worth, scaled by how policed this part of the city
+## is. Central keeps more officers than Harbour Row does, so the same crime
+## brings a heavier answer there — which is the risk half of a district that pays
+## better rent.
 func get_response_budget() -> int:
 	if level <= 0 or level >= response_budget_by_level.size():
 		return 0
-	return int(response_budget_by_level[level])
+	return int(ceil(float(response_budget_by_level[level]) * local_police_presence()))
+
+
+## Police presence where the player is, or 1.0 in a world with no districts in
+## it — which is what a bare test scene looks like.
+func local_police_presence() -> float:
+	var player := GameManager.player
+	if player == null or WorldManager.count() == 0:
+		return 1.0
+	return WorldManager.police_presence_at(player.global_position)
 
 
 ## How hard the police push at the current level. Police AI multiplies its

@@ -1,0 +1,36 @@
+[gd_resource type="Resource" script_class="VehicleData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://vehicles/vehicle_data.gd" id="1_vehicle_data"]
+
+[resource]
+script = ExtResource("1_vehicle_data")
+id = &"compact"
+display_name = "Pip Compact"
+description = "Small, light and easy to thread down a service road."
+max_speed = 20.0
+max_reverse_speed = 7.5
+acceleration = 13.0
+brake_deceleration = 24.0
+engine_braking = 6.0
+handbrake_deceleration = 17.0
+steer_rate_low = 3.1
+steer_rate_high = 1.15
+steer_response = 8.4
+handbrake_steer_bonus = 1.35
+min_speed_to_steer = 0.6
+full_steer_speed = 3.0
+max_health = 82.0
+damage_speed_threshold = 7.0
+damage_per_impact_speed = 3.6
+impact_speed_retention = 0.15
+body_length = 3.6
+body_width = 1.72
+body_height = 0.58
+cabin_height = 0.54
+ground_clearance = 0.20
+wheel_radius = 0.31
+wheel_width = 0.22
+body_color = Color(0.427451, 0.560784, 0.541176, 1)
+trim_color = Color(0.176471, 0.184314, 0.207843, 1)
+glass_color = Color(0.121569, 0.184314, 0.215686, 1)
+resale_value = 3400

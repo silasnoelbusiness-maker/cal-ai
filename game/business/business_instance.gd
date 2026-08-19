@@ -848,10 +848,20 @@ func property() -> CommercialProperty:
 	return PropertyManager.by_id(property_id)
 
 
-## What the address itself is worth in trade.
+## What the address itself is worth in trade: the pitch and the part of town.
+##
+## Two factors rather than one number per unit, because they answer different
+## questions. The unit's own modifier is the address within its district — a
+## back street against the main road against the plaza — and the district's is
+## how busy that part of the city is at all. A premium Central pitch therefore
+## earns both, which is what makes its rent worth paying.
 func location_multiplier() -> float:
 	var unit := property()
-	return unit.location_demand_modifier if unit != null else 1.0
+	if unit == null:
+		return 1.0
+	var district := WorldManager.by_id(unit.district_id)
+	var district_factor := district.commercial_demand_modifier if district != null else 1.0
+	return unit.location_demand_modifier * district_factor
 
 
 ## How many customers may be inside at once, and how long a queue they will

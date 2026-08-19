@@ -26,6 +26,9 @@ enum Layer { WALK, ROAD }
 
 var _graphs: Dictionary = {}
 var _point_ids: Dictionary = {}
+## Layer -> Array[Vector3] of every sampled point, kept so the graph can be
+## extended later without re-deriving what is already in it.
+var _positions: Dictionary = {}
 
 
 func _ready() -> void:
@@ -35,8 +38,21 @@ func _ready() -> void:
 ## `walk_lines` and `road_lines` are arrays of [Vector2 start, Vector2 end] on
 ## the ground plane.
 func build(walk_lines: Array, road_lines: Array) -> void:
-	_build_layer(Layer.WALK, walk_lines, walk_spacing, walk_connect_radius)
-	_build_layer(Layer.ROAD, road_lines, road_spacing, road_connect_radius)
+	_graphs.clear()
+	_point_ids.clear()
+	_positions.clear()
+	extend(walk_lines, road_lines)
+
+
+## Adds more of the city to an existing graph.
+##
+## This is how the city stays one navigable space as it grows: a second district
+## hands over its own pavements and streets, and anything already connected to
+## the first — a route, an officer chasing somebody, a pedestrian walking home —
+## carries straight across the boundary because there is only ever one graph.
+func extend(walk_lines: Array, road_lines: Array) -> void:
+	_add_lines(Layer.WALK, walk_lines, walk_spacing, walk_connect_radius)
+	_add_lines(Layer.ROAD, road_lines, road_spacing, road_connect_radius)
 
 
 func point_count(layer: Layer) -> int:
@@ -97,10 +113,20 @@ func random_point_away_from(
 
 # --- Building ------------------------------------------------------------
 
-func _build_layer(layer: Layer, lines: Array, spacing: float, connect_radius: float) -> void:
-	var graph := AStar3D.new()
-	var ids: Array[int] = []
-	var positions: Array[Vector3] = []
+## Samples a set of lines into one layer, joining anything within reach of what
+## is already there. Points added later connect to points added earlier, which is
+## what makes the join between two districts a real connection rather than two
+## graphs that happen to touch.
+func _add_lines(layer: Layer, lines: Array, spacing: float, connect_radius: float) -> void:
+	if not _graphs.has(layer):
+		_graphs[layer] = AStar3D.new()
+		_point_ids[layer] = [] as Array[int]
+		_positions[layer] = [] as Array[Vector3]
+
+	var graph: AStar3D = _graphs[layer]
+	var ids: Array[int] = _point_ids[layer]
+	var positions: Array[Vector3] = _positions[layer]
+	var first_new := positions.size()
 
 	for line in lines:
 		var start: Vector2 = line[0]
@@ -118,14 +144,15 @@ func _build_layer(layer: Layer, lines: Array, spacing: float, connect_radius: fl
 			positions.append(point)
 			ids.append(id)
 
-	# O(n^2), but it runs once at load over a couple of hundred points.
-	for i in positions.size():
-		for j in range(i + 1, positions.size()):
+	# Only the new points need connecting, and each of them only against
+	# everything — which keeps a second district's cost proportional to the
+	# second district rather than to the whole city squared.
+	for i in range(first_new, positions.size()):
+		for j in positions.size():
+			if i == j:
+				continue
 			if positions[i].distance_to(positions[j]) <= connect_radius:
 				graph.connect_points(i, j)
-
-	_graphs[layer] = graph
-	_point_ids[layer] = ids
 
 
 func _too_close(positions: Array[Vector3], point: Vector3, threshold: float) -> bool:

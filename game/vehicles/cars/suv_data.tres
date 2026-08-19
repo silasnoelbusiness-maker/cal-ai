@@ -1,0 +1,36 @@
+[gd_resource type="Resource" script_class="VehicleData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://vehicles/vehicle_data.gd" id="1_vehicle_data"]
+
+[resource]
+script = ExtResource("1_vehicle_data")
+id = &"suv"
+display_name = "Ridgeline SUV"
+description = "Heavy, high and slow to change its mind."
+max_speed = 21.5
+max_reverse_speed = 7.0
+acceleration = 9.5
+brake_deceleration = 19.0
+engine_braking = 5.0
+handbrake_deceleration = 14.0
+steer_rate_low = 2.1
+steer_rate_high = 0.78
+steer_response = 5.6
+handbrake_steer_bonus = 1.35
+min_speed_to_steer = 0.6
+full_steer_speed = 3.0
+max_health = 135.0
+damage_speed_threshold = 7.0
+damage_per_impact_speed = 2.6
+impact_speed_retention = 0.15
+body_length = 4.9
+body_width = 2.12
+body_height = 0.86
+cabin_height = 0.74
+ground_clearance = 0.30
+wheel_radius = 0.40
+wheel_width = 0.30
+body_color = Color(0.290196, 0.309804, 0.352941, 1)
+trim_color = Color(0.176471, 0.184314, 0.207843, 1)
+glass_color = Color(0.121569, 0.184314, 0.215686, 1)
+resale_value = 11500

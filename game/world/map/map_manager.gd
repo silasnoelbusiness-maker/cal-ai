@@ -1,0 +1,209 @@
+extends Node
+## What the city map knows.
+##
+## Two jobs: gather the markers worth showing, and remember where the player has
+## asked to go. It owns no geometry and caches nothing — the markers are built
+## from whatever the world currently holds, so a shop that closed a minute ago
+## says CLOSED without anything having to tell the map.
+
+signal destination_changed(marker: MapMarker)
+signal destination_reached(marker: MapMarker)
+
+## How close counts as arriving.
+@export var arrival_radius: float = 12.0
+
+var _destination: MapMarker = null
+var _filters: Dictionary = {}
+var _timer: float = 0.0
+
+
+func _ready() -> void:
+	for category in MapMarker.Category.values():
+		_filters[category] = true
+
+
+# --- Markers -------------------------------------------------------------
+
+## Everything worth putting on the map, gathered fresh.
+func collect_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	markers.append_array(_business_markers())
+	markers.append_array(_property_markers())
+	markers.append_array(_residence_markers())
+	markers.append_array(_job_markers())
+	markers.append_array(_service_markers())
+	return markers
+
+
+func visible_markers() -> Array[MapMarker]:
+	var shown: Array[MapMarker] = []
+	for marker in collect_markers():
+		if is_category_shown(marker.category):
+			shown.append(marker)
+	return shown
+
+
+func _business_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	for business in BusinessManager.get_businesses():
+		var unit := PropertyManager.by_id(business.property_id)
+		if unit == null:
+			continue
+		var detail := business.status_text()
+		if business.total_shelf_units() == 0 and not business.serves_prepared_goods():
+			detail += " · LOW STOCK"
+		markers.append(MapMarker.make(
+			MapMarker.Category.OWNED_BUSINESS, business.business_name,
+			unit.global_position, detail, business.business_id
+		))
+	return markers
+
+
+func _property_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	for unit in PropertyManager.get_properties():
+		if not unit.is_vacant():
+			continue
+		markers.append(MapMarker.make(
+			MapMarker.Category.AVAILABLE_PROPERTY, unit.address, unit.global_position,
+			"AVAILABLE · $%d rent" % unit.rent_amount, unit.property_id
+		))
+	return markers
+
+
+func _residence_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	for node in get_tree().get_nodes_in_group(&"residence"):
+		var home := node as ResidenceProperty
+		if home == null:
+			continue
+		var detail := "HOME" if home.is_current_home() else (
+			"LEASED" if home.is_leased_by_player() else "TO LET · $%d" % home.rent_amount
+		)
+		markers.append(MapMarker.make(
+			MapMarker.Category.HOME, home.address, home.global_position, detail, home.residence_id
+		))
+	return markers
+
+
+func _job_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	for node in get_tree().get_nodes_in_group(&"job_station"):
+		var station := node as Node3D
+		if station == null:
+			continue
+		markers.append(MapMarker.make(
+			MapMarker.Category.JOB, String(station.get("prompt_subtitle")),
+			station.global_position, "Work"
+		))
+	for node in get_tree().get_nodes_in_group(&"courier_depot"):
+		markers.append(MapMarker.make(
+			MapMarker.Category.JOB, "Central Depot", (node as Node3D).global_position,
+			"Courier work"
+		))
+	return markers
+
+
+## Police stations, NPC shops and the city's landmarks — the things that are not
+## the player's but are worth navigating by.
+func _service_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	for node in get_tree().get_nodes_in_group(&"bust_release_point"):
+		markers.append(MapMarker.make(
+			MapMarker.Category.POLICE, "Precinct House", (node as Node3D).global_position
+		))
+	for node in get_tree().get_nodes_in_group(&"shop"):
+		var shop := node as Shop
+		# Only counters out on the street: a player-owned till inside a leased
+		# unit is already on the map as a business.
+		if shop == null or shop.save_id != &"":
+			continue
+		markers.append(MapMarker.make(
+			MapMarker.Category.SHOP, shop.shop_name, shop.global_position,
+			"OPEN" if shop.is_open() else "CLOSED"
+		))
+	for node in get_tree().get_nodes_in_group(&"landmark"):
+		var landmark := node as Node3D
+		markers.append(MapMarker.make(
+			MapMarker.Category.LANDMARK, String(landmark.get_meta("label", landmark.name)),
+			landmark.global_position
+		))
+	return markers
+
+
+# --- Filters -------------------------------------------------------------
+
+func is_category_shown(category: int) -> bool:
+	return bool(_filters.get(category, true))
+
+
+func set_category_shown(category: int, shown: bool) -> void:
+	_filters[category] = shown
+
+
+func toggle_category(category: int) -> void:
+	set_category_shown(category, not is_category_shown(category))
+
+
+# --- Destination ---------------------------------------------------------
+
+func get_destination() -> MapMarker:
+	return _destination
+
+
+func has_destination() -> bool:
+	return _destination != null
+
+
+func set_destination(marker: MapMarker) -> void:
+	_destination = marker
+	destination_changed.emit(marker)
+	if marker != null:
+		GameManager.notify("DESTINATION SET\n%s" % marker.label.to_upper(), GameManager.Tone.INFO)
+
+
+func clear_destination() -> void:
+	if _destination == null:
+		return
+	_destination = null
+	destination_changed.emit(null)
+
+
+## Metres from the player to where they said they were going, or -1.
+func distance_to_destination() -> float:
+	var player := GameManager.player
+	if _destination == null or player == null:
+		return -1.0
+	var offset := _destination.position - player.global_position
+	offset.y = 0.0
+	return offset.length()
+
+
+## The route there, on whichever graph suits how the player is travelling.
+## Drawn on the map rather than followed, so a road that is not the shortest way
+## is still the way a car has to go.
+func route_to_destination() -> PackedVector3Array:
+	var player := GameManager.player
+	var nav := get_tree().get_first_node_in_group(&"nav_graph") as NavGraph
+	if _destination == null or player == null or nav == null:
+		return PackedVector3Array()
+	var layer := (
+		NavGraph.Layer.ROAD if player.has_method("is_driving") and player.call("is_driving")
+		else NavGraph.Layer.WALK
+	)
+	return nav.find_path(layer, player.global_position, _destination.position)
+
+
+func _process(delta: float) -> void:
+	if _destination == null:
+		return
+	_timer -= delta
+	if _timer > 0.0:
+		return
+	_timer = 0.4
+	var distance := distance_to_destination()
+	if distance >= 0.0 and distance <= arrival_radius:
+		var reached := _destination
+		_destination = null
+		destination_changed.emit(null)
+		destination_reached.emit(reached)

@@ -112,6 +112,14 @@ func has_path() -> bool:
 	return _path_index < _path.size()
 
 
+## The route still to be walked, for the world debug view. Everything before the
+## current index has already been covered and is not worth drawing.
+func debug_path() -> PackedVector3Array:
+	if not has_path():
+		return PackedVector3Array()
+	return _path.slice(maxi(_path_index - 1, 0))
+
+
 func is_running() -> bool:
 	return _running
 

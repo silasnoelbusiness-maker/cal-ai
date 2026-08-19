@@ -32,6 +32,19 @@ enum Condition { ACTIVE, INCAPACITATED }
 @export var flee_seconds: float = 9.0
 @export var min_flee_distance: float = 35.0
 
+@export_group("Activation")
+## Beyond this from the player a civilian stops thinking and stops walking.
+##
+## This is the crowd's half of the near/far split the businesses already use:
+## everyone in the district the player is in is fully simulated, and the district
+## they are not in costs a distance check each every second. It is set wider than
+## a district is across, so nobody freezes inside the part of the city that is on
+## screen.
+@export var active_distance: float = 140.0
+## Seconds between activation checks. One distance test per civilian at this
+## rate is nothing next to what being awake costs them.
+@export var activation_interval: float = 0.25
+
 @export_group("Traffic safety")
 @export var max_health: float = 100.0
 ## Seconds between traffic scans. Coarse deliberately: a crowd of sixteen doing
@@ -78,6 +91,8 @@ var _state_timer: float = 0.0
 var _rng := RandomNumberGenerator.new()
 var _crime_position: Vector3 = Vector3.ZERO
 var _danger_timer: float = 0.0
+var _activation_timer: float = 0.0
+var _active: bool = true
 var _threat_position: Vector3 = Vector3.ZERO
 
 
@@ -91,12 +106,33 @@ func _ready() -> void:
 	# Stagger the traffic scans too, so the crowd's checks spread across frames
 	# instead of all landing on the same one.
 	_danger_timer = _rng.randf_range(0.0, danger_check_interval)
+	# Staggered as well, for the same reason: a crowd all testing their distance
+	# to the player on one frame is the spike this is meant to avoid.
+	_activation_timer = _rng.randf_range(0.0, activation_interval)
 	# Stagger the first decision so a freshly spawned crowd does not all move
 	# off on the same frame.
 	_enter_idle(_rng.randf_range(0.0, 2.5))
 
 
+## True while this civilian is close enough to the player to be worth simulating.
+func is_active() -> bool:
+	return _active
+
+
+## Brings a civilian back into simulation immediately rather than at the next
+## check. For anything that puts one somewhere and then expects it to behave.
+func wake() -> void:
+	_refresh_activation()
+
+
 func _process(delta: float) -> void:
+	_activation_timer -= delta
+	if _activation_timer <= 0.0:
+		_activation_timer = activation_interval
+		_refresh_activation()
+	if not _active:
+		return
+
 	_danger_timer -= delta
 	if _danger_timer <= 0.0:
 		_danger_timer = danger_check_interval
@@ -132,8 +168,28 @@ func _process(delta: float) -> void:
 			_state_timer = 1.0
 
 
+## Switches this civilian off when the player is nowhere near them, and back on
+## when they come back. Off means no traffic scan, no decisions and no movement;
+## they stand where they were until somebody is there to see them.
+func _refresh_activation() -> void:
+	var player := GameManager.player
+	var active := (
+		player == null
+		or global_position.distance_to(player.global_position) <= active_distance
+	)
+	if active == _active:
+		return
+	_active = active
+	set_physics_process(active)
+	if not active:
+		velocity = Vector3.ZERO
+
+
 ## Called by the witness system when this civilian sees a crime.
 func witness_crime(crime_position: Vector3) -> void:
+	# Anything close enough to be seen from is close enough to be awake, but a
+	# civilian who has just been moved here has not had their check yet.
+	_refresh_activation()
 	if state == State.WITNESSING or state == State.FLEEING or state == State.KNOCKED_DOWN:
 		return
 	_crime_position = crime_position

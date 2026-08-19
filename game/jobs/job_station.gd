@@ -19,6 +19,8 @@ var _tracked_day: int = -1
 
 
 func _ready() -> void:
+	# Looked up by the city map, which shows the player where the work is.
+	add_to_group(&"job_station")
 	_tracked_day = TimeManager.day_index
 	TimeManager.day_passed.connect(_on_day_passed)
 	TimeManager.hour_passed.connect(_on_hour_passed)

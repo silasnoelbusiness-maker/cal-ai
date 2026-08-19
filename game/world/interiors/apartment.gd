@@ -11,17 +11,37 @@ extends Node3D
 ## roofless so the elevated camera can look down into the room.
 
 ## Where the district's apartment door sends the player.
+## Which residence this room belongs to. The starter flat keeps the original
+## group names so nothing that already looks them up has to change; a second
+## apartment derives its own from its id.
+@export var residence_id: StringName = &"larkspur"
+## A bigger, better flat. Same room, more of it, and a proper living area.
+@export var spacious: bool = false
+
 const ENTRY_GROUP := &"apartment_interior_entry"
 ## Where this flat's front door sends the player back to.
 const EXIT_GROUP := &"apartment_street_exit"
 
 const ROOM := Rect2(-5.0, -4.0, 10.0, 8.0)
+const ROOM_SPACIOUS := Rect2(-7.5, -6.0, 15.0, 12.0)
 const WALL_HEIGHT := 2.8
 const WALL_THICKNESS := 0.3
 ## Gap left in the south wall for the front door.
 const DOORWAY_HALF_WIDTH := 1.2
 
 var _palette: Dictionary = {}
+
+
+static func entry_group_for(id: StringName) -> StringName:
+	return ENTRY_GROUP if id == &"larkspur" else StringName("apartment_entry_%s" % id)
+
+
+static func exit_group_for(id: StringName) -> StringName:
+	return EXIT_GROUP if id == &"larkspur" else StringName("apartment_exit_%s" % id)
+
+
+func room() -> Rect2:
+	return ROOM_SPACIOUS if spacious else ROOM
 
 
 func _ready() -> void:
@@ -63,7 +83,7 @@ func _build_shell() -> void:
 	# camera seeing the void past the walls, and — more importantly — stops the
 	# player falling forever if they walk out through the open doorway. Built as
 	# a ring rather than one big slab so nothing is coplanar with the floor.
-	var footprint := ROOM.grow(WALL_THICKNESS)
+	var footprint := room().grow(WALL_THICKNESS)
 	var reach := 40.0
 	var apron := [
 		CityKit.rect_from_bounds(-reach, -reach, reach, footprint.position.y),
@@ -86,23 +106,23 @@ func _build_shell() -> void:
 		false
 	)
 
-	var north := ROOM.position.y
-	var south := ROOM.end.y
-	var west := ROOM.position.x
-	var east := ROOM.end.x
+	var north := room().position.y
+	var south := room().end.y
+	var west := room().position.x
+	var east := room().end.x
 
-	_add_wall(shell, "WallNorth", Rect2(west, north - WALL_THICKNESS, ROOM.size.x, WALL_THICKNESS))
+	_add_wall(shell, "WallNorth", Rect2(west, north - WALL_THICKNESS, room().size.x, WALL_THICKNESS))
 	_add_wall(
 		shell,
 		"WallWest",
 		Rect2(west - WALL_THICKNESS, north - WALL_THICKNESS, WALL_THICKNESS,
-			ROOM.size.y + WALL_THICKNESS * 2.0)
+			room().size.y + WALL_THICKNESS * 2.0)
 	)
 	_add_wall(
 		shell,
 		"WallEast",
 		Rect2(east, north - WALL_THICKNESS, WALL_THICKNESS,
-			ROOM.size.y + WALL_THICKNESS * 2.0)
+			room().size.y + WALL_THICKNESS * 2.0)
 	)
 	# South wall, split around the front doorway.
 	_add_wall(
@@ -142,6 +162,8 @@ func _build_bed() -> void:
 
 	var bed := Bed.new()
 	bed.name = "SleepPoint"
+	bed.residence_id = residence_id
+	bed.unavailable_prompt = "NOT YOUR HOME\nSet this flat as your home to sleep here"
 	bed.prompt_action = "Sleep"
 	bed.prompt_subtitle = "until 07:00"
 	bed.focus_priority = 1
@@ -222,13 +244,13 @@ func _build_markers_and_doors() -> void:
 	var entry := Marker3D.new()
 	entry.name = "EntryPoint"
 	entry.position = Vector3(0.0, 0.4, 2.6)
-	entry.add_to_group(ENTRY_GROUP)
+	entry.add_to_group(entry_group_for(residence_id))
 	add_child(entry)
 
 	CityKit.add_box(
 		self,
 		"FrontDoorPanel",
-		Vector3(0.0, 1.35, ROOM.end.y + WALL_THICKNESS * 0.5),
+		Vector3(0.0, 1.35, room().end.y + WALL_THICKNESS * 0.5),
 		Vector3(DOORWAY_HALF_WIDTH * 2.0, 2.7, WALL_THICKNESS + 0.06),
 		_mat("door"),
 		false
@@ -237,7 +259,7 @@ func _build_markers_and_doors() -> void:
 	var exit_door := Portal.new()
 	exit_door.name = "FrontDoor"
 	exit_door.prompt_action = "Leave apartment"
-	exit_door.destination_group = EXIT_GROUP
+	exit_door.destination_group = exit_group_for(residence_id)
 	exit_door.travel_minutes = 1
 	exit_door.override_camera = false
-	CityKit.attach_interactable(self, exit_door, Vector3(0.0, 1.0, ROOM.end.y - 0.6), 1.6)
+	CityKit.attach_interactable(self, exit_door, Vector3(0.0, 1.0, room().end.y - 0.6), 1.6)

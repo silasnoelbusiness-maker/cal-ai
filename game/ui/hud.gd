@@ -32,6 +32,9 @@ const TONE_COLORS: Array[Color] = [
 @onready var _shop_panel: Control = %ShopPanel
 @onready var _property_panel: Control = %PropertyPanel
 @onready var _business_dashboard: Control = %BusinessDashboard
+@onready var _city_map: Control = %CityMap
+@onready var _residence_panel: Control = %ResidencePanel
+@onready var _destination_label: Label = %DestinationLabel
 @onready var _empire_dashboard: Control = %EmpireDashboard
 @onready var _store_panel: PanelContainer = %StorePanel
 @onready var _store_name: Label = %StoreName
@@ -87,6 +90,12 @@ func _ready() -> void:
 	_property_panel.closed.connect(_on_screen_visibility_changed)
 	_business_dashboard.opened.connect(_on_screen_visibility_changed)
 	_business_dashboard.closed.connect(_on_screen_visibility_changed)
+	_city_map.opened.connect(_on_screen_visibility_changed)
+	_city_map.closed.connect(_on_screen_visibility_changed)
+	_residence_panel.opened.connect(_on_screen_visibility_changed)
+	_residence_panel.closed.connect(_on_screen_visibility_changed)
+
+	MapManager.destination_changed.connect(_on_destination_changed)
 	_business_dashboard.empire_requested.connect(_on_empire_requested)
 	_empire_dashboard.opened.connect(_on_screen_visibility_changed)
 	_empire_dashboard.closed.connect(_on_screen_visibility_changed)
@@ -104,6 +113,7 @@ func _ready() -> void:
 	_escape_label.visible = false
 	_busted_overlay.visible = false
 	_store_panel.visible = false
+	_destination_label.visible = false
 	set_process(false)
 
 	_refresh_clock()
@@ -197,6 +207,7 @@ func _on_vehicle_changed(vehicle: Node3D) -> void:
 
 func _process(_delta: float) -> void:
 	_refresh_speed()
+	_refresh_destination()
 	# Prompts are re-read rather than cached: what a thing offers can change
 	# while the player stands in front of it — a car slowing to a stop becomes
 	# carjackable, a shop that has just been robbed stops offering the till.
@@ -261,15 +272,49 @@ func _on_bust_finished(fine_paid: int) -> void:
 
 
 ## The HUD only needs a per-frame tick while something on it is live.
+## How far it is to wherever the player said they were going. One line, only when
+## there is somewhere to go — the map is where the detail lives.
+func _on_destination_changed(marker: MapMarker) -> void:
+	_destination_label.visible = marker != null
+	if marker != null:
+		_destination_label.text = marker.label.to_upper()
+	_update_process_need()
+
+
+func _refresh_destination() -> void:
+	if not _destination_label.visible:
+		return
+	var marker := MapManager.get_destination()
+	if marker == null:
+		_destination_label.visible = false
+		return
+	var distance := MapManager.distance_to_destination()
+	_destination_label.text = "%s\n%s" % [
+		marker.label.to_upper(),
+		"%d m" % roundi(distance) if distance < 1000.0 else "%.1f km" % (distance / 1000.0),
+	]
+
+
 func _update_process_need() -> void:
 	# A visible prompt is a third reason to tick: what an interactable offers can
 	# change while the player stands still in front of it.
-	set_process(_vehicle != null or _escape_label.visible or _prompt_panel.visible)
+	set_process(
+		_vehicle != null or _escape_label.visible or _prompt_panel.visible
+		or _destination_label.visible
+	)
 
 
 # --- Screens -------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("city_map"):
+		if _city_map.is_open():
+			_city_map.close()
+		else:
+			close_screens()
+			_city_map.open()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("business_menu"):
 		# One key, and it opens whichever answer the player is standing in front
 		# of: the shop they are inside, or the company as a whole.
@@ -308,6 +353,10 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 			_empire_dashboard.open()
 		&"shelf":
 			_business_dashboard.open_shelf(context as BusinessEquipment)
+		&"residence":
+			_residence_panel.open(context as ResidenceProperty)
+		&"map":
+			_city_map.open()
 		_:
 			push_warning("HUD has no screen for '%s'." % screen_id)
 
@@ -317,6 +366,8 @@ func close_screens() -> void:
 	_shop_panel.close()
 	_property_panel.close()
 	_business_dashboard.close()
+	_residence_panel.close()
+	_city_map.close()
 	_empire_dashboard.close()
 
 

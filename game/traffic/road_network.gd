@@ -38,7 +38,16 @@ func build(strands: Array) -> void:
 	_positions.clear()
 	_directions.clear()
 	_successors.clear()
+	extend(strands)
 
+
+## Adds more lanes to the network the traffic is already driving on.
+##
+## A second district hands over its own strands, plus the road that joins the
+## two. Successors are re-derived across the whole network afterwards, so a lane
+## that ends at the boundary finds the lane that starts there and a car drives
+## across without anything special happening at the line.
+func extend(strands: Array) -> void:
 	for strand in strands:
 		_sample_strand(strand)
 	_link_nodes()
@@ -127,9 +136,13 @@ func _sample_strand(waypoints: Array) -> void:
 			_directions.append(direction)
 
 
+## Re-derives every node's successors from scratch. Cleared first because this
+## runs again each time the network is extended, and a node that kept its old
+## links would end up with each of them twice.
 func _link_nodes() -> void:
 	var forward_limit := cos(deg_to_rad(link_forward_angle))
 	var turn_limit := cos(deg_to_rad(link_turn_angle))
+	_successors.clear()
 
 	for i in _positions.size():
 		var links := PackedInt32Array()

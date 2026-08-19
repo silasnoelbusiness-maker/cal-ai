@@ -25,6 +25,10 @@ enum Status { VACANT, LEASED }
 enum SizeClass { SMALL, MEDIUM }
 
 @export var property_id: StringName = &""
+## Which part of the city this stands in. Set by whoever builds the street, and
+## read by anything that wants the district's own demand or rent on top of the
+## address's.
+@export var district_id: StringName = &"harbour_row"
 @export var address: String = "1 Main Street"
 @export var property_type: String = "Retail Unit"
 @export var size_class: SizeClass = SizeClass.SMALL

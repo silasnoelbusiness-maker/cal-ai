@@ -16,6 +16,10 @@ signal slept(minutes: int)
 @export_group("Restores")
 @export var energy_restore: float = 100.0
 @export var health_restore: float = 12.0
+## Which residence this bed belongs to. Only the bed in the player's current
+## home is theirs to sleep in — a flat they merely rent out, or a show flat they
+## have not taken on, is somebody else's bedroom.
+@export var residence_id: StringName = &""
 
 
 ## In-game minutes from now until the next `wake_hour`, floored at the minimum.
@@ -28,10 +32,29 @@ func get_sleep_minutes() -> int:
 	return maxi(minutes, min_sleep_minutes)
 
 
+## True when this bed is in the place the player currently calls home. A bed with
+## no residence set (a test scene, a future safehouse) is always available.
+func is_players_bed() -> bool:
+	if residence_id == StringName(""):
+		return true
+	var home := PropertyManager.current_home()
+	return home != null and home.residence_id == residence_id
+
+
 func can_interact(interactor: Node3D) -> bool:
 	if not super.can_interact(interactor):
 		return false
-	return interactor != null and interactor.has_method("get_stats")
+	if interactor == null or not interactor.has_method("get_stats"):
+		return false
+	return is_players_bed()
+
+
+## The base class only shows `unavailable_prompt` when the whole interactable is
+## switched off. This bed is on — it just is not yours — so it says so itself.
+func get_prompt_text() -> String:
+	if available and not is_players_bed():
+		return unavailable_prompt
+	return super.get_prompt_text()
 
 
 func _perform(interactor: Node3D) -> void:

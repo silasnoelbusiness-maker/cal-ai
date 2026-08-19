@@ -123,7 +123,26 @@ var _sidewalk_index: int = 0
 var _nav: NavGraph = null
 
 
+## What this district is like, for everything that asks WorldManager rather than
+## checking coordinates itself. Harbour Row is the baseline the rest of the city
+## is described against, so most of its numbers are 1.0.
+func _register_district() -> void:
+	var district := DistrictData.make(
+		&"harbour_row", "Harbour Row", Rect2(-EXTENT, -EXTENT, EXTENT * 2.0, EXTENT * 2.0),
+		"Where you started"
+	)
+	district.traffic_density = 1.0
+	district.pedestrian_density = 1.0
+	district.commercial_demand_modifier = 1.0
+	district.commercial_rent_modifier = 1.0
+	district.residential_rent_modifier = 1.0
+	district.police_presence = 1.0
+	WorldManager.register(district)
+
+
 func _ready() -> void:
+	add_to_group(&"district")
+	_register_district()
 	_build_palette()
 	_geometry = _make_container("Geometry")
 	_props = _make_container("Props")
@@ -520,13 +539,26 @@ func _add_kerb(rect: Rect2, edge: Kerb) -> void:
 	)
 
 
-## A low wall marking the edge of the playable district. New districts will
-## replace these with connecting road stubs.
+## A low wall marking the edge of the district, with a gap at the north end of
+## Center Boulevard where the road carries on into the Central District.
+##
+## The gap is the join: the carriageway, the pavements and both graphs run
+## straight through it, so nothing happens at the boundary except the buildings
+## getting taller.
 func _build_perimeter() -> void:
 	var wall_height := 2.4
 	var thickness := 1.0
+	var gateway_half := ROAD_HALF + WALK_WIDTH + 1.0
 	var edges := [
-		CityKit.rect_from_bounds(-EXTENT - thickness, -EXTENT - thickness, EXTENT + thickness, -EXTENT),
+		# North wall, in two pieces either side of the gateway.
+		CityKit.rect_from_bounds(
+			-EXTENT - thickness, -EXTENT - thickness,
+			CENTER_BLVD_X - gateway_half, -EXTENT
+		),
+		CityKit.rect_from_bounds(
+			CENTER_BLVD_X + gateway_half, -EXTENT - thickness,
+			EXTENT + thickness, -EXTENT
+		),
 		CityKit.rect_from_bounds(-EXTENT - thickness, EXTENT, EXTENT + thickness, EXTENT + thickness),
 		CityKit.rect_from_bounds(-EXTENT - thickness, -EXTENT, -EXTENT, EXTENT),
 		CityKit.rect_from_bounds(EXTENT, -EXTENT, EXTENT + thickness, EXTENT),
@@ -772,8 +804,20 @@ func _add_rooftop_clutter(
 
 # --- Park ----------------------------------------------------------------
 
+## Harbour Row's own landmark, so the map has an anchor at this end of the city
+## as well as in Central.
+func _add_park_landmark(parent: Node3D) -> void:
+	var landmark := Marker3D.new()
+	landmark.name = "HarbourParkLandmark"
+	landmark.position = Vector3(PARK_PATH_X, 0.4, PARK_PATH_Z)
+	landmark.set_meta("label", "Harbour Park")
+	landmark.add_to_group(&"landmark")
+	parent.add_child(landmark)
+
+
 func _build_park() -> void:
 	var container := _make_container("Park")
+	_add_park_landmark(container)
 	var park := CityKit.rect_from_bounds(-38.0, 15.0, -13.0, 60.0)
 	CityKit.add_slab(
 		container, "Lawn", park, GRASS_BASE, GRASS_THICKNESS, _mat("grass"), false, false
@@ -1179,14 +1223,26 @@ func _build_venue_doors() -> void:
 
 ## The front door of Larkspur Apartments, plus the marker the flat's own door
 ## sends the player back to.
-func _make_apartment_portal(point: Vector3, facing: Vector3) -> Portal:
+func _make_apartment_portal(point: Vector3, facing: Vector3) -> ResidenceProperty:
 	var street_marker := Marker3D.new()
 	street_marker.name = "ApartmentStreetExit"
 	street_marker.position = point + facing * 1.6 - Vector3(0.0, 0.8, 0.0)
 	street_marker.add_to_group(ApartmentInterior.EXIT_GROUP)
 	_interactables.add_child(street_marker)
 
-	var portal := Portal.new()
+	# The starter flat is a residence whose lease is already signed and which is
+	# already home, so nothing has to special-case where the player begins.
+	var portal := ResidenceProperty.new()
+	portal.residence_id = &"larkspur"
+	portal.address = "Larkspur Apartments"
+	portal.display_name = "Studio Flat"
+	portal.district_id = &"harbour_row"
+	portal.size_label = "Studio"
+	portal.amenities = "Bed · Wardrobe · Shared entrance"
+	portal.rent_amount = 220
+	portal.deposit = 200
+	portal.leased_by_player = true
+	portal.is_home = true
 	portal.destination_group = ApartmentInterior.ENTRY_GROUP
 	portal.prompt_subtitle = "Larkspur Apartments"
 	# Climbing the stairs costs a couple of minutes.
@@ -1262,7 +1318,7 @@ func _make_commercial_property(
 			unit.queue_capacity = 6
 			unit.location_demand_modifier = 1.1
 		&"unit_plaza_07":
-			unit.address = "7 Central Plaza"
+			unit.address = "7 Anchor Plaza"
 			unit.property_type = "Premium Retail"
 			unit.size_class = CommercialProperty.SizeClass.MEDIUM
 			unit.floor_area = 84

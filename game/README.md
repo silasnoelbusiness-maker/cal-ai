@@ -1,17 +1,24 @@
-# Meridian City — V0.1 Prototype
+# Street Capital — V0.1 Prototype
 
-An original 3D open-world life & crime simulator, viewed from an elevated
-top-down camera. This directory holds a self-contained **Godot 4.3** project; it
-is unrelated to the Next.js app in the repository root.
+An original 3D open-world life, business & crime simulator, viewed from an
+elevated top-down camera. This directory holds a self-contained **Godot 4.3**
+project; it is unrelated to the Next.js app in the repository root.
 
-**V0.1 phases A–J are complete** (two of them were called G — the art pass and
-the crime expansion; the naming is kept here as it happened, so the empire phase
-is the tenth milestone and the ninth letter). The full life/economy loop is playable end to
-end — wake up in your flat, sleep off the night, walk to the warehouse for a
-paid shift, buy food at the convenience store, eat it, head home — and the city
-around it now moves: civilian traffic on both streets, signals at the two
-junctions, a crowd that gets out of the way of cars, and police who chase you
-through all of it.
+**V0.1 phases A–J are complete** — eleven milestones, because two of them were
+called G (the art pass and the crime expansion) and the naming is kept here as
+it happened. The full life/economy loop is playable end to end — wake up in your
+flat, sleep off the night, walk to the warehouse for a paid shift, buy food at
+the convenience store, eat it, head home — and the city around it now moves:
+civilian traffic on every street, signals at five junctions, a crowd that gets
+out of the way of cars, and police who chase you through all of it.
+
+The city is now two districts. **Harbour Row** is where you start: low brick and
+timber, a park, a warehouse, room to park. **Central District** is north up the
+boulevard: twenty-metre towers, three streets each way, service roads round the
+back, a pedestrian plaza with a monument in it, and rents to match. They share
+one coordinate space, one pedestrian graph and one lane network, so a route, a
+delivery, a car or a police chase crosses the district line without anything
+happening at it.
 
     sleep at home  ->  4h shift, +$120  ->  buy a meal, -$15  ->  eat  ->  home
 
@@ -81,6 +88,7 @@ scene is `res://main.tscn`.
 | `F` | Enter / exit a vehicle · carjack an occupied one |
 | `G` | Rob the till you are stood at |
 | `B` | Open the business dashboard, or the company view outside a shop |
+| `M` | Open the city map |
 | Left mouse | Attack with whatever is in your hand · place equipment |
 | `R` | Rotate the equipment being placed |
 
@@ -107,6 +115,8 @@ Development keys, to be removed before release:
 | `F4` | Put a steel pipe in the bag, for testing melee |
 | `F10` | Show / hide the business overlay |
 | `1`–`0`, `Q`–`I` | Business debug commands, only while that overlay is up |
+| `F11` | Show / hide the world overlay (district, populations, graphs, FPS) |
+| `1`–`6`, `0` | World debug view layers, only while that overlay is up |
 
 `F9` was quick-load in Phase D; it is now clear-wanted, and quick-load moved to
 `F12`.
@@ -190,24 +200,110 @@ a net worth. A business can be closed — it stops trading and the rent carries 
     one shop  ->  a manager  ->  a second unit  ->  a coffee shop  ->  a loan
     ->  two shops running while you are across the city committing a crime
 
-## The district
+## The city
 
-"Harbour Row" is roughly 176m square: two east–west streets (Main Street, North
-Avenue) crossed by Center Boulevard, giving two junctions with crosswalks. It
-holds 12 buildings — pitched roofs on the low ones, parapets and pilasters on the
-tall ones — a park with a fountain, a paved plaza, hedges and benches, kerbside
-parking bays and an off-street lot, 44 street lights, tree-lined verges, overhead
-cable runs on timber poles, patched asphalt, driveway aprons, a set of signals at
-each junction, and a perimeter wall marking where the next district will
-connect.
+### Harbour Row
 
-Everything is generated from the layout tables in `world/district_01.gd` rather
-than hand-placed, so the grid can be retuned by editing data. Geometry is still
+Roughly 176m square: two east–west streets (Main Street, North Avenue) crossed
+by Center Boulevard, giving two junctions with crosswalks. It holds 12 buildings
+— pitched roofs on the low ones, parapets and pilasters on the tall ones — a
+park with a fountain, a paved plaza, hedges and benches, kerbside parking bays
+and an off-street lot, 44 street lights, tree-lined verges, overhead cable runs
+on timber poles, patched asphalt, driveway aprons, and a set of signals at each
+junction. Its perimeter wall now has a gap in it where Center Boulevard leaves
+to the north.
+
+### Central District
+
+220m by 200m of city centre, up the boulevard. Three east–west streets (Market
+Street, Kingston Road, Riverside Drive) crossed by three north–south ones (Plaza
+Street, Center Boulevard, Exchange Street), with a pair of narrow service roads
+behind the outer blocks. Thirteen blocks run to twenty-two metres with the
+setbacks halved, so the streets read as canyons from the elevated camera rather
+than as open ground with boxes on it; the ground floors are glazed with canopies
+where a block has shops in it, and lit window bands come on together at dusk.
+
+Central Plaza sits in the middle of it — paving, benches, planters, a monument,
+and bollards that keep cars out of it while pedestrians walk straight through.
+Two surface car parks sit behind the service roads, which is where a car goes in
+a district whose kerbs are all double-yellow. Three more signalled junctions run
+out of phase with Harbour Row's, and the top of the boulevard is barriered with
+a `NORTHGATE — ROAD CLOSED` sign on it: the seam a third district opens along.
+
+Central holds four commercial units (a small one on Market Street, two medium
+ones on Central Boulevard and Central Plaza, a food-service unit on Kingston
+Road), a one-bedroom flat at 5 Kingston Road, a grocer, a coffee counter, a
+courier depot and a police post.
+
+### One world
+
+Everything is generated from the layout tables in `world/district_01.gd` and
+`world/district_02.gd` rather than hand-placed, so either grid can be retuned by
+editing data. Geometry is still
 primitives — boxes, cylinders, spheres, one hip-roof mesh — sharing a small
 palette of procedurally textured materials. There are no imported art assets and
 no image files in the repository: every surface, canopy and cable is generated at
 load. Gameplay does not depend on any of it, so modelled meshes can replace the
 primitives later without touching a system.
+
+`WorldManager` is the register: each district builds itself and hands over a
+`DistrictData` — bounds, centre, traffic and pedestrian density, commercial and
+residential rent modifiers, demand modifier, police presence — and everything
+that used to assume one square of map asks it instead. There is one nav graph
+and one lane network for the whole city; districts `extend()` them rather than
+building their own, which is why a walking route from a Harbour Row pavement to
+Central Plaza is 54 hops of one graph and not two graphs stitched together.
+
+Crossing the line is not an event. There is no loading screen, no prompt, and
+nothing is unloaded — the only thing that happens at the boundary is a name
+appearing once, the first time you arrive. Traffic density follows the player's
+district, and which cars turn up follows it too: vans and saloons down in
+Harbour Row, compacts and the odd coupe in Central. So does the police response:
+the same wanted level sends more units in Central than in Harbour Row, which is
+the risk half of a district that charges more rent.
+
+What a second district must not do is cost twice as much to run all the time.
+Traffic is one pool that follows the player and recycles rather than growing,
+businesses were already split near/far, and pedestrians now do the same: a
+civilian more than 140m from the player stops thinking and stops walking, at the
+cost of one distance check each per quarter second. That is wider than a
+district is across, so nobody freezes anywhere you can see them — you are always
+in a full crowd, and the other district costs almost nothing until you drive
+into it.
+
+## The map
+
+`M` opens the city map. It draws the district rectangles, the real lane network
+(node to successor, so what you see is what traffic drives), your position and
+facing, and a marker for everything worth going to: your home, your businesses,
+vacant units, jobs, the precinct, shops and the landmark. Categories can be
+switched off. Selecting a marker offers `SET DESTINATION` — and, for a business
+you own, `VIEW BUSINESS` — after which the route is drawn on the map, the
+distance sits under the HUD clock and counts down as you travel, and arriving
+clears it.
+
+The route follows the road graph while you are driving and the pavement graph
+while you are on foot, so a car is never routed through a building or a plaza.
+
+## Courier work
+
+The map paying for itself: the depot in Central hands out deliveries. A run
+picks a destination at least 120m away from the pool of real addresses, sets it
+as your map destination, and pays a base fee plus distance, with a bonus for
+getting there promptly. Each run costs eight minutes of the day whether or not
+you hurry, so it cannot be farmed by driving in circles.
+
+## Somewhere to live
+
+The starter studio at Larkspur Apartments is now a property like any other, and
+5 Kingston Road in Central is the one to move up to — dearer, bigger, a
+bedroom and a kitchen rather than a bedsit. Renting takes a deposit and the
+first week's rent; residential rent then falls due on the same calendar as
+commercial rent, out of your own pocket rather than a business account.
+
+Whichever place is set as `CURRENT HOME` is the one you sleep in. The other
+bed says `NOT YOUR HOME` and will not let you, and ending a lease does not
+happen by itself when you take on another.
 
 ## Layout
 
@@ -224,8 +320,13 @@ ui/           hud, inventory_panel, shop_panel
 npc/          nav_graph, npc_walker, pedestrian, police_officer, police_driver
 traffic/      road_network, traffic_light, traffic_driver, traffic_manager,
               traffic_debug
-vehicles/     vehicle_base, vehicle_data, vehicle_door + cars/*.tres
-world/        district_01, city_kit, day_night_cycle, portal, interiors/
+vehicles/     vehicle_base, vehicle_data, vehicle_door, vehicle_catalogue
+              + cars/*.tres  (compact, sedan, hatchback, van, suv, coupe)
+world/        world_manager, district_data, district_01, district_02,
+              world_debug, city_kit, day_night_cycle, portal, interiors/
+world/map/    map_manager, map_marker
+ui/map/       city_map
+property/     property_manager, commercial_property, residence_property
 tests/        smoke_test, screenshot
 main.tscn     entry scene
 ```
@@ -396,11 +497,43 @@ through and both shops trade through them; a crime and an arrest happen around
 it all; and the whole empire goes through a save file and back without
 duplicating anything. A Phase H save loads into it unchanged.
 
+The city expansion is tested for the thing that is easy to get wrong when a
+world grows: that it is still one world. Both districts register with their own
+bounds, densities and rent modifiers, and the modifiers actually differ in the
+direction the design says they do — Central is dearer, busier and better
+policed, and the dearest unit in it beats the dearest unit in Harbour Row.
+A point in either district resolves to it, a point on the road between them
+resolves to something rather than nothing, and walking into Central names it
+once and not twice. A walking route and a driving route both cross the boundary
+with no gap in them, and the ground holds all the way along the connecting
+stretch — the check that caught a building laid across a street and, later, a
+second one laid across a service road.
+
+The map is checked for what is on it: every category represented, every marker
+labelled and inside the city, nothing stray, and Central represented. A
+destination is set, its distance measured, its route drawn, and arriving fires
+the arrival and clears it. The better flat is rented — refused without the
+money, charged a deposit and a first rent with it, refused twice — set as home,
+and slept in, with the studio's bed refusing to be slept in once it is not home
+any more. A courier run is taken, the destination proved to be far enough away
+to be worth paying for, driven to and paid; a run that is dropped pays nothing.
+Central's units are proved to differ from each other physically rather than only
+in price, every property in the city is proved to have its own id, and one is
+leased and given up. A robbery in Harbour Row is committed and the wanted level
+carried into Central, where the police still answer. Then the whole enlarged
+world goes through a save file — lease, home, delivery record and all — and a
+save written before the second district existed still loads into it.
+
+Last, the edges: the closed road at the top of Central stops the player without
+dropping them out of the world, the gateway is walled along its verges, there is
+ground under both car parks, and every layer of the world debug view draws and
+clears without taking the game with it.
+
 ```sh
 godot --headless --path game res://tests/smoke_test.tscn
 ```
 
-It exits non-zero if any check fails. As of the empire phase it runs 817
+It exits non-zero if any check fails. As of the city expansion it runs 991
 checks.
 
 A screenshot tool renders the game to a PNG without a desktop, for eyeballing
@@ -428,13 +561,33 @@ Args after `++` are `key=value` pairs, all optional: `out`, `hour`, `scenario`
 `market_operating`, `coffee_empty`, `coffee_placement`, `ingredient_order`,
 `coffee_customers`, `barista`, `stocker`, `manager_running`, `order_in_transit`,
 `delivery_received`, `marketing`, `upgrades`, `two_businesses`,
-`empire_finance`, `business_value`, `loans`, `net_worth`, `player_away_empire`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
+`empire_finance`, `business_value`, `loans`, `net_worth`, `player_away_empire`,
+`city_overview`, `harbour_row`, `central_district`, `central_night`,
+`district_road`, `central_street`, `central_plaza`, `traffic_crossing`,
+`central_pedestrians`, `city_map`, `map_filters`, `map_route`,
+`central_property`, `large_interior`, `better_apartment`, `courier_delivery`,
+`vehicle_roster`, `harbour_business`, `central_business`, `city_empire`,
+`cross_district_chase`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
 rather than faking their results. It runs under the Compatibility renderer, so
 lighting is close to but not identical to the Forward+ game.
 
 ## What is next
 
-Nothing is started. The empire phase left its own threads: a third business type
+Nothing is started. The city expansion left its own threads. Population is still
+built at load rather than streamed: both districts spawn their pedestrians and
+parked cars up front, and only traffic follows the player. That is affordable at
+two districts and will not be at four, so the next world phase wants activation
+ranges around the district the player is in. Business far simulation already
+works that way and is the model to copy.
+
+The vehicle roster grew to six models but nothing sells them: `resale_value` is
+read by net worth and by nothing else, which is the hook a dealership would hang
+off. Office space is zoned in Central and has no gameplay behind it. Street
+names exist as constants and on the map but there is no address search. And the
+north end of Central Boulevard is barriered rather than walled, which is a
+promise about a third district that has not been kept yet.
+
+The empire phase left its own threads: a third business type
 (the architecture takes one as a `BusinessTypeData`, a stock list and — if it
 cooks — a set of recipes), competitor businesses to compete for the same local
 demand, and property that can be bought rather than rented. Eviction is still

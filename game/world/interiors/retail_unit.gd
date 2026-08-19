@@ -167,8 +167,14 @@ func _on_business_registered(_business: BusinessInstance) -> void:
 	_bind_business()
 
 
+## Anything that changes a business redraws the room, if it is this room's.
+##
+## The property is what decides that, not the object identity: loading a save
+## replaces every BusinessInstance with a fresh one, and a unit still holding the
+## old object would quietly never rebuild its shelves again.
 func _on_business_changed(business: BusinessInstance) -> void:
-	if _business == null:
+	var current := BusinessManager.business_for_property(property_id)
+	if current != _business:
 		_bind_business()
 		return
 	if business != _business:

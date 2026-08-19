@@ -137,6 +137,24 @@ func _run() -> void:
 	await _test_old_save_migration()
 	await _test_sell_business()
 
+	# Phase J: city expansion.
+	_test_districts_registered()
+	await _test_district_lookup()
+	_test_district_character()
+	await _test_cross_district_travel()
+	await _test_district_traffic()
+	_test_map_markers()
+	await _test_map_destination()
+	_test_residence_lease()
+	await _test_change_home()
+	await _test_courier_run()
+	_test_central_property()
+	await _test_wanted_across_districts()
+	await _test_world_save_load()
+	await _test_pre_district_save()
+	await _test_city_edge()
+	await _test_world_debug()
+
 	_report()
 
 
@@ -600,8 +618,11 @@ func _test_park_navigation() -> void:
 	)
 	_check(east.size() >= 2, "the east gate joins the park to the boulevard")
 
-	# And a civilian can actually walk it, not just route it.
+	# And a civilian can actually walk it, not just route it. The player stands
+	# where they can see it happen, because a civilian nobody is near is asleep
+	# by design.
 	var walker := get_tree().get_nodes_in_group(&"pedestrian")[0] as Pedestrian
+	await _teleport(Vector3(District01.PARK_PATH_X + 8.0, 0.5, 20.0))
 	walker.global_position = Vector3(District01.PARK_PATH_X, 0.4, 12.0)
 	await _settle(6)
 	var into_park := Vector3(District01.PARK_PATH_X, 0.0, 30.0)
@@ -669,7 +690,14 @@ func _test_road_network() -> void:
 ## TEST F3: the signals cycle, and conflicting directions are never both green.
 func _test_traffic_lights() -> void:
 	var lights := get_tree().get_nodes_in_group(&"traffic_light")
-	_check(lights.size() == 2, "both junctions are signalled (%d)" % lights.size())
+	# Two in Harbour Row and three in Central. Counted per district rather than
+	# city-wide, so this keeps saying something as more districts are added.
+	var harbour_lights := 0
+	for light in lights:
+		if absf((light as Node3D).global_position.z) <= District01.EXTENT:
+			harbour_lights += 1
+	_check(harbour_lights == 2, "both Harbour Row junctions are signalled (%d)" % harbour_lights)
+	_check(lights.size() >= 5, "and Central has its own signals (%d city-wide)" % lights.size())
 	if lights.is_empty():
 		return
 	var light := lights[0] as TrafficLight
@@ -836,6 +864,7 @@ func _test_traffic_flow() -> void:
 	var off_road := 0
 	var wrecked := 0
 	var airborne := 0
+	var airborne_at := Vector3.ZERO
 	for tick in 14:
 		await _settle(40)
 		for node in cars:
@@ -849,6 +878,7 @@ func _test_traffic_flow() -> void:
 				wrecked += 1
 			if car.global_position.y > 1.5 or car.global_position.y < -1.0:
 				airborne += 1
+				airborne_at = car.global_position
 
 	var travelled := 0
 	for node in cars:
@@ -862,7 +892,12 @@ func _test_traffic_flow() -> void:
 	_check(off_road == 0, "and none of it leaves the carriageway (%d samples)" % off_road)
 	_check(speeding == 0, "nobody exceeds the 30-50 km/h band (fastest %.0f)" % fastest)
 	_check(wrecked == 0, "nothing wrecked itself just driving around (%d samples)" % wrecked)
-	_check(airborne == 0, "and nothing left the ground (%d samples)" % airborne)
+	_check(
+		airborne == 0,
+		"and nothing left the ground (%d samples%s)" % [
+			airborne, "" if airborne == 0 else ", e.g. %v" % airborne_at
+		]
+	)
 
 
 ## TEST F6: police and traffic share the roads without sharing a controller, and
@@ -948,6 +983,7 @@ func _test_car_following() -> void:
 	# Now a person in the road instead of a car.
 	var walker := get_tree().get_nodes_in_group(&"pedestrian")[1] as Pedestrian
 	var home := walker.global_position
+	await _teleport(Vector3(-40.0, 0.5, lane_z + 10.0))
 	# Standing their ground: the point of the check is the driver's reaction,
 	# not the pedestrian's, so they neither dodge nor wander off mid-test.
 	walker.danger_check_interval = 9999.0
@@ -1070,6 +1106,7 @@ func _test_traffic_stuck_recovery() -> void:
 func _test_pedestrian_knockdown() -> void:
 	var walker := get_tree().get_nodes_in_group(&"pedestrian")[2] as Pedestrian
 	var home := walker.global_position
+	await _teleport(Vector3(-40.0, 0.5, 84.0))
 	# Not dodging and not wandering off: this test is about what happens when
 	# somebody does not get out of the way.
 	walker.danger_check_interval = 9999.0
@@ -1138,6 +1175,9 @@ func _test_pedestrian_knockdown() -> void:
 func _test_pedestrian_dodges_traffic() -> void:
 	var walker := get_tree().get_nodes_in_group(&"pedestrian")[3] as Pedestrian
 	var home := walker.global_position
+	# Watched from the pavement: a civilian with nobody near them is asleep, so
+	# the player has to be here for there to be anything to check.
+	await _teleport(Vector3(-40.0, 0.5, 84.0))
 	# Slightly off the car's centre line, so which way they jump is decided
 	# rather than a coin toss.
 	walker.global_position = Vector3(-40.0, 0.4, 74.8)
@@ -1171,12 +1211,22 @@ func _test_pedestrian_dodges_traffic() -> void:
 
 func _test_vehicles_spawned() -> void:
 	var cars := _vehicles()
-	_check(cars.size() == 8, "8 vehicles parked in the district (got %d)" % cars.size())
+	# Harbour Row's own eight, counted where they stand: Central parks its own,
+	# and the two sets should not be able to hide each other's absence.
+	var harbour: Array = []
+	var central: Array = []
+	for car in cars:
+		if District02.BOUNDS.has_point(Vector2(car.global_position.x, car.global_position.z)):
+			central.append(car)
+		else:
+			harbour.append(car)
+	_check(harbour.size() == 8, "8 vehicles parked in Harbour Row (got %d)" % harbour.size())
+	_check(central.size() >= 6, "and Central parks its own (%d)" % central.size())
 
 	var owned := 0
 	var npc := 0
 	var healthy := true
-	for car in cars:
+	for car in harbour:
 		if car.owner_type == Vehicle.OwnerType.PLAYER:
 			owned += 1
 		elif car.owner_type == Vehicle.OwnerType.NPC:
@@ -1524,31 +1574,74 @@ func _test_vehicle_save_load() -> void:
 func _test_crowd_spawned() -> void:
 	var civilians := get_tree().get_nodes_in_group(&"pedestrian")
 	var officers := _officers()
+	# The crowd is counted per district: Harbour Row is as it always was, and
+	# Central is busier, which is the point of Central.
+	var harbour := 0
+	var central := 0
+	for node in civilians:
+		var where: Vector3 = (node as Node3D).global_position
+		if District02.BOUNDS.has_point(Vector2(where.x, where.z)):
+			central += 1
+		else:
+			harbour += 1
 	_check(
-		civilians.size() >= 12 and civilians.size() <= 20,
-		"the district is populated (%d pedestrians)" % civilians.size()
+		harbour >= 12 and harbour <= 22,
+		"Harbour Row is populated as it was (%d pedestrians)" % harbour
 	)
-	_check(officers.size() == 3, "three officers are on foot (%d)" % officers.size())
+	_check(central >= 18 and central <= 35, "and Central is busier (%d)" % central)
+	_check(officers.size() >= 3, "officers are on foot (%d city-wide)" % officers.size())
 	_check(_police_cars().size() == 2, "two patrol cars are at the precinct")
 	_check(
 		get_tree().get_first_node_in_group(&"bust_release_point") != null,
 		"there is a release point outside the precinct"
 	)
 
-	# Civilians must actually go somewhere, not stand still.
+	# Civilians must actually go somewhere, not stand still — but only the ones
+	# near the player. The rest of the city is asleep on purpose, which is the
+	# other half of this check.
 	var before: Array[Vector3] = []
-	for civilian in civilians:
-		before.append(civilian.global_position)
-	await _settle(180)
-	var moved := 0
+	var near: Array[int] = []
 	for i in civilians.size():
+		var civilian: Node3D = civilians[i]
+		before.append(civilian.global_position)
+		# Partitioned by what the crowd itself says, not by a distance repeated
+		# here: a second copy of the rule would eventually disagree with it.
+		if bool(civilian.call("is_active")):
+			near.append(i)
+	await _settle(180)
+
+	var moved := 0
+	for i in near:
 		if civilians[i].global_position.distance_to(before[i]) > 2.0:
 			moved += 1
+	_check(near.size() >= 10, "there is a crowd around the player (%d)" % near.size())
 	_check(
-		moved >= civilians.size() / 2,
-		"most pedestrians are walking (%d of %d moved, paused=%s)" % [
-			moved, civilians.size(), get_tree().paused
+		moved >= near.size() / 2,
+		"most of whom are walking (%d of %d moved, paused=%s)" % [
+			moved, near.size(), get_tree().paused
 		]
+	)
+
+	var far_moved := 0
+	var far_total := 0
+	for i in civilians.size():
+		if i in near:
+			continue
+		far_total += 1
+		if civilians[i].global_position.distance_to(before[i]) > 2.0:
+			far_moved += 1
+	_check(far_total > 0, "and a crowd in the other district (%d)" % far_total)
+	_check(
+		far_moved == 0,
+		"which costs nothing while the player is not there (%d moved)" % far_moved
+	)
+	var asleep := 0
+	for i in civilians.size():
+		if not (i in near) and not bool(civilians[i].call("is_active")):
+			asleep += 1
+	_check(
+		asleep == far_total,
+		"and every one of them reports itself asleep (%d of %d)" % [asleep, far_total]
 	)
 
 
@@ -1903,15 +1996,45 @@ func _said(fragment: String) -> bool:
 ## of the three street centre lines.
 ## `margin` allows for the kerb a car legitimately clips while swinging round a
 ## junction; pass 0 when checking somewhere a car was deliberately placed.
+## Every carriageway in the city, as [is east-west, centre, from, to, half width].
+##
+## Built from what the districts themselves say their streets are, rather than
+## from a copy of Harbour Row's three centre lines — which is what this used to
+## be, and which stopped describing the city the moment there were two of them.
+func _city_streets() -> Array:
+	if not _street_cache.is_empty():
+		return _street_cache
+	var reach := District01.EXTENT
+	_street_cache = [
+		[true, District01.MAIN_ST_Z, -reach, reach, District01.ROAD_HALF],
+		[true, District01.NORTH_AVE_Z, -reach, reach, District01.ROAD_HALF],
+		[false, District01.CENTER_BLVD_X, -reach, reach, District01.ROAD_HALF],
+		# The road joining the two districts.
+		[false, District01.CENTER_BLVD_X, District02.GATEWAY_Z, -reach, District01.ROAD_HALF],
+	]
+	for node in get_tree().get_nodes_in_group(&"district"):
+		if node is District02:
+			_street_cache.append_array((node as District02).street_lines())
+	return _street_cache
+
+
+var _street_cache: Array = []
+
+
+## Whether a point is on a carriageway anywhere in the city.
 func _is_on_a_lane(where: Vector3, margin: float = 0.0) -> bool:
-	if absf(where.x) > District01.EXTENT or absf(where.z) > District01.EXTENT:
-		return false
-	var reach := District01.ROAD_HALF + margin
-	if absf(where.x - District01.CENTER_BLVD_X) <= reach:
-		return true
-	if absf(where.z - District01.MAIN_ST_Z) <= reach:
-		return true
-	return absf(where.z - District01.NORTH_AVE_Z) <= reach
+	for entry in _city_streets():
+		var east_west: bool = entry[0]
+		var centre: float = entry[1]
+		var from: float = minf(entry[2], entry[3])
+		var to: float = maxf(entry[2], entry[3])
+		var along: float = where.x if east_west else where.z
+		var across: float = where.z if east_west else where.x
+		if along < from - margin or along > to + margin:
+			continue
+		if absf(across - centre) <= float(entry[4]) + margin:
+			return true
+	return false
 
 
 ## A civilian car driven by the traffic AI, placed by hand. Used by the tests
@@ -2008,6 +2131,8 @@ func _isolate_scene() -> void:
 func _place_witness(node: Node3D, spot: Vector3, look_at_point: Vector3) -> void:
 	node.process_mode = Node.PROCESS_MODE_INHERIT
 	node.global_position = spot
+	if node.has_method("wake"):
+		node.call("wake")
 	var to_target := look_at_point - spot
 	to_target.y = 0.0
 	if to_target.length_squared() > 0.01 and node.has_node("BodyPivot"):
@@ -4649,3 +4774,745 @@ func _rebuild_empire_for_sale() -> void:
 		BusinessManager.refresh_candidates()
 		BusinessManager.hire(market, BusinessManager.get_candidates()[0], EmployeeData.Role.CASHIER)
 	await _settle(6)
+
+
+# --- Phase J: city expansion ---------------------------------------------
+
+## TEST 130 — the city is made of districts, and knows which is which.
+func _test_districts_registered() -> void:
+	var districts := WorldManager.get_districts()
+	_check(districts.size() >= 2, "the city has at least two districts (%d)" % districts.size())
+
+	var harbour := WorldManager.by_id(&"harbour_row")
+	var central := WorldManager.by_id(&"central")
+	_check(harbour != null, "Harbour Row is registered")
+	_check(central != null, "the Central District is registered")
+	if harbour == null or central == null:
+		return
+
+	_check(harbour.display_name == "Harbour Row", "Harbour Row is named for the player")
+	_check(central.display_name == "Central District", "so is the Central District")
+	_check(not central.subtitle.is_empty(), "and Central has a line describing it")
+
+	_check(
+		not harbour.world_bounds.intersects(central.world_bounds),
+		"the two districts do not overlap on the map"
+	)
+	var city := WorldManager.city_bounds()
+	_check(
+		city.encloses(harbour.world_bounds) and city.encloses(central.world_bounds),
+		"the city bounds cover both of them"
+	)
+	_check(
+		city.get_area() > harbour.world_bounds.get_area() * 1.8,
+		"which makes the city substantially bigger than one district"
+	)
+
+
+## TEST 131 — asking where something is.
+func _test_district_lookup() -> void:
+	var harbour := WorldManager.by_id(&"harbour_row")
+	var central := WorldManager.by_id(&"central")
+	if harbour == null or central == null:
+		return
+
+	var in_harbour := Vector3(harbour.center_position.x, 0.0, harbour.center_position.z)
+	var in_central := Vector3(central.center_position.x, 0.0, central.center_position.z)
+	_check(
+		WorldManager.district_at(in_harbour) == harbour,
+		"a point in Harbour Row resolves to Harbour Row"
+	)
+	_check(
+		WorldManager.district_at(in_central) == central,
+		"a point in Central resolves to Central"
+	)
+	# The road between the districts belongs to neither rectangle. It must still
+	# have an answer, or everything that asks "how busy is it here" divides by
+	# nothing halfway to town.
+	var between := Vector3(0.0, 0.0, -125.0)
+	_check(WorldManager.district_at(between) != null, "the connecting road resolves to a district")
+	_check(WorldManager.traffic_density_at(between) > 0.0, "and reports a traffic density")
+
+	WorldManager.forget_announcements()
+	_notifications.clear()
+	await _teleport(in_central + Vector3(0.0, 1.0, 0.0))
+	await _settle(60)
+	_check(
+		WorldManager.player_district() == central,
+		"walking into Central makes it the player's district"
+	)
+	_check(_said("CENTRAL DISTRICT"), "and the district announces itself on arrival")
+
+	_notifications.clear()
+	await _teleport(in_central + Vector3(3.0, 1.0, 3.0))
+	await _settle(60)
+	_check(not _said("CENTRAL DISTRICT"), "but not a second time for the same district")
+
+
+## TEST 132 — the districts are not the same place twice.
+func _test_district_character() -> void:
+	var harbour := WorldManager.by_id(&"harbour_row")
+	var central := WorldManager.by_id(&"central")
+	if harbour == null or central == null:
+		return
+
+	_check(
+		central.commercial_rent_modifier > harbour.commercial_rent_modifier,
+		"Central costs more to trade from (%.2f vs %.2f)"
+		% [central.commercial_rent_modifier, harbour.commercial_rent_modifier]
+	)
+	_check(
+		central.commercial_demand_modifier > harbour.commercial_demand_modifier,
+		"and puts more customers past the door (%.2f vs %.2f)"
+		% [central.commercial_demand_modifier, harbour.commercial_demand_modifier]
+	)
+	_check(
+		central.residential_rent_modifier > harbour.residential_rent_modifier,
+		"living there is dearer too"
+	)
+	_check(
+		central.traffic_density > harbour.traffic_density,
+		"the streets are busier (%.2f vs %.2f)" % [central.traffic_density, harbour.traffic_density]
+	)
+	_check(
+		central.pedestrian_density > harbour.pedestrian_density,
+		"and so are the pavements"
+	)
+	_check(central.police_presence > harbour.police_presence, "with more police about")
+
+	# The rent on the actual units follows the character of the district rather
+	# than being a number somebody typed twice.
+	var dearest_harbour := 0
+	var dearest_central := 0
+	for unit in PropertyManager.get_properties():
+		if unit.district_id == &"central":
+			dearest_central = maxi(dearest_central, unit.rent_amount)
+		else:
+			dearest_harbour = maxi(dearest_harbour, unit.rent_amount)
+	_check(
+		dearest_central > dearest_harbour,
+		"the priciest Central unit beats the priciest Harbour one ($%d vs $%d)"
+		% [dearest_central, dearest_harbour]
+	)
+
+
+## TEST 133 — one world, not two maps side by side.
+func _test_cross_district_travel() -> void:
+	var nav := get_tree().get_first_node_in_group(&"nav_graph") as NavGraph
+	var roads := get_tree().get_first_node_in_group(&"road_network") as RoadNetwork
+	_check(nav != null and roads != null, "the city has one nav graph and one road network")
+	if nav == null or roads == null:
+		return
+
+	var harbour := WorldManager.by_id(&"harbour_row")
+	var central := WorldManager.by_id(&"central")
+	if harbour == null or central == null:
+		return
+
+	var from := Vector3(0.0, 0.0, 40.0)
+	var to := Vector3(District02.CENTER_BLVD_X, 0.0, District02.KINGSTON_RD_Z)
+
+	var walk := nav.find_path(NavGraph.Layer.WALK, from, to)
+	_check(walk.size() > 10, "there is a walking route between the districts (%d hops)" % walk.size())
+	if walk.size() > 1:
+		_check(
+			walk[walk.size() - 1].distance_to(to) < 20.0,
+			"and it actually arrives in Central"
+		)
+		var longest := 0.0
+		for i in range(1, walk.size()):
+			longest = maxf(longest, walk[i].distance_to(walk[i - 1]))
+		_check(longest < 14.0, "with no teleporting gap in it (%.1fm)" % longest)
+
+	var road := nav.find_path(NavGraph.Layer.ROAD, from, to)
+	_check(road.size() > 10, "and a driving route as well (%d hops)" % road.size())
+
+	# The lane network is what traffic drives. It has to reach across too.
+	var start_node := roads.nearest_node(Vector3(0.0, 0.0, 60.0))
+	var end_node := roads.nearest_node(to)
+	_check(start_node >= 0 and end_node >= 0, "both districts have lane nodes")
+	_check(
+		roads.node_position(start_node).distance_to(roads.node_position(end_node)) > 150.0,
+		"which are a long way apart (%.0fm)"
+		% roads.node_position(start_node).distance_to(roads.node_position(end_node))
+	)
+
+	# And the ground is continuous: the gateway between the districts used to be
+	# a hole anything driving north fell through.
+	for z: float in [-118.0, -125.0, -130.0, -136.0]:
+		await _teleport(Vector3(District02.CENTER_BLVD_X, 1.5, z))
+		await _settle(24)
+		_check(
+			_player.global_position.y > -0.5,
+			"the ground holds at the district gateway (z=%.0f, y=%.2f)"
+			% [z, _player.global_position.y]
+		)
+
+
+## TEST 134 — traffic that belongs where it is.
+func _test_district_traffic() -> void:
+	var harbour_weights := VehicleCatalogue.weights_for(&"harbour_row")
+	var central_weights := VehicleCatalogue.weights_for(&"central")
+	_check(VehicleCatalogue.ids().size() >= 6, "there are at least six civilian models")
+	_check(harbour_weights != central_weights, "the two districts draw from different odds")
+	_check(
+		int(harbour_weights.get(&"van", 0)) > int(central_weights.get(&"van", 0)),
+		"Harbour Row runs more vans"
+	)
+	_check(
+		int(central_weights.get(&"coupe", 0)) > int(harbour_weights.get(&"coupe", 0)),
+		"and Central is where the expensive cars are"
+	)
+	for id: StringName in VehicleCatalogue.ids():
+		_check(VehicleCatalogue.scene_for(id) != null, "the %s has a scene" % id)
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	var seen: Dictionary = {}
+	for i in 200:
+		seen[VehicleCatalogue.pick_id_for_district(&"central", rng)] = true
+	_check(not seen.has(&"van"), "a van never turns up in a Central spawn")
+	_check(seen.has(&"compact"), "but compacts do")
+
+	var traffic := _traffic_manager()
+	if traffic == null:
+		return
+	var central := WorldManager.by_id(&"central")
+	if central == null:
+		return
+	await _teleport(Vector3(0.0, 1.0, 40.0))
+	await _settle(12)
+	var harbour_target := traffic.get_target_population()
+	await _teleport(Vector3(central.center_position.x, 1.0, central.center_position.z))
+	await _settle(12)
+	var central_target := traffic.get_target_population()
+	_check(
+		central_target > harbour_target,
+		"and Central keeps more cars on the road (%d vs %d)" % [central_target, harbour_target]
+	)
+
+
+## TEST 135 — the map knows what is in the city.
+func _test_map_markers() -> void:
+	var markers := MapManager.collect_markers()
+	_check(markers.size() >= 12, "the map has something to show (%d markers)" % markers.size())
+
+	var by_category: Dictionary = {}
+	for marker in markers:
+		by_category[marker.category] = int(by_category.get(marker.category, 0)) + 1
+	for category: int in [
+		MapMarker.Category.HOME,
+		MapMarker.Category.AVAILABLE_PROPERTY,
+		MapMarker.Category.JOB,
+		MapMarker.Category.SHOP,
+		MapMarker.Category.LANDMARK,
+	]:
+		_check(
+			int(by_category.get(category, 0)) > 0,
+			"the map shows %s" % MapMarker.category_name(category).to_lower()
+		)
+
+	var city := WorldManager.city_bounds().grow(30.0)
+	var outside := 0
+	var unlabelled := 0
+	for marker in markers:
+		if not city.has_point(Vector2(marker.position.x, marker.position.z)):
+			outside += 1
+		if marker.label.is_empty():
+			unlabelled += 1
+	_check(outside == 0, "every marker is inside the city (%d stray)" % outside)
+	_check(unlabelled == 0, "and every marker is labelled (%d blank)" % unlabelled)
+
+	var in_central := 0
+	for marker in markers:
+		var district := WorldManager.district_at(marker.position)
+		if district != null and district.district_id == &"central":
+			in_central += 1
+	_check(in_central >= 4, "and the new district is on it (%d markers)" % in_central)
+
+	MapManager.set_category_shown(MapMarker.Category.SHOP, false)
+	var hidden := MapManager.visible_markers()
+	var shops_left := 0
+	for marker in hidden:
+		if marker.category == MapMarker.Category.SHOP:
+			shops_left += 1
+	_check(shops_left == 0, "turning a category off hides it")
+	_check(hidden.size() < markers.size(), "and leaves the rest alone")
+	MapManager.set_category_shown(MapMarker.Category.SHOP, true)
+	_check(
+		MapManager.visible_markers().size() == markers.size(),
+		"turning it back on brings them back"
+	)
+
+
+## TEST 136 — picking somewhere to go, and getting there.
+func _test_map_destination() -> void:
+	var target: MapMarker = null
+	for marker in MapManager.collect_markers():
+		var district := WorldManager.district_at(marker.position)
+		if district != null and district.district_id == &"central":
+			target = marker
+			break
+	_check(target != null, "there is somewhere in Central to head for")
+	if target == null:
+		return
+
+	await _teleport(Vector3(0.0, 1.0, 40.0))
+	MapManager.set_destination(target)
+	_check(MapManager.has_destination(), "the destination is set")
+	_check(MapManager.get_destination() == target, "and it is the one that was picked")
+
+	var far := MapManager.distance_to_destination()
+	_check(far > 150.0, "which is a long way off (%.0fm)" % far)
+
+	var route := MapManager.route_to_destination()
+	_check(route.size() > 5, "the map can draw a route to it (%d points)" % route.size())
+
+	# A one-element array, not a bool: a GDScript lambda captures locals by
+	# value, so assigning to a captured bool changes the copy and nothing else.
+	var arrived := [false]
+	var handler := func(_marker: MapMarker) -> void: arrived[0] = true
+	MapManager.destination_reached.connect(handler)
+	await _teleport(target.position + Vector3(2.0, 1.0, 2.0))
+	await _settle(40)
+	MapManager.destination_reached.disconnect(handler)
+
+	_check(bool(arrived[0]), "arriving there fires the arrival")
+	_check(not MapManager.has_destination(), "and clears the destination")
+
+	MapManager.set_destination(target)
+	MapManager.clear_destination()
+	_check(not MapManager.has_destination(), "a destination can be given up as well")
+
+
+## TEST 137 — the better flat.
+func _test_residence_lease() -> void:
+	var studio := PropertyManager.residence_by_id(&"larkspur")
+	var flat := PropertyManager.residence_by_id(&"meridian")
+	_check(studio != null, "the starter studio is a property in its own right")
+	_check(flat != null, "and there is a second flat to move up to")
+	if studio == null or flat == null:
+		return
+
+	_check(studio.is_leased_by_player(), "the studio starts leased")
+	_check(studio.is_current_home(), "and is home")
+	_check(not flat.is_leased_by_player(), "the Central flat starts empty")
+	_check(
+		flat.rent_amount > studio.rent_amount,
+		"it is dearer than the studio ($%d vs $%d)" % [flat.rent_amount, studio.rent_amount]
+	)
+	_check(flat.district_id == &"central", "because of where it is")
+
+	EconomyManager.restore(60)
+	_check(not PropertyManager.lease_residence(flat), "it cannot be rented without the money")
+	_check(not flat.is_leased_by_player(), "and stays empty")
+
+	EconomyManager.restore(5000)
+	var before := EconomyManager.cash
+	var cost := flat.move_in_cost()
+	_check(cost == flat.deposit + flat.rent_amount, "moving in costs a deposit and the first rent")
+	_check(PropertyManager.lease_residence(flat), "with the money it can be rented")
+	_check(flat.is_leased_by_player(), "the lease is signed")
+	_check(EconomyManager.cash == before - cost, "and the money has gone ($%d)" % cost)
+	_check(_said("APARTMENT RENTED"), "the player is told")
+
+	_check(not PropertyManager.lease_residence(flat), "and it cannot be rented twice")
+
+
+## TEST 138 — moving house.
+func _test_change_home() -> void:
+	var studio := PropertyManager.residence_by_id(&"larkspur")
+	var flat := PropertyManager.residence_by_id(&"meridian")
+	if studio == null or flat == null:
+		return
+
+	var studio_bed := _bed_in("Apartment")
+	var flat_bed := _bed_in("MeridianApartment")
+	_check(studio_bed != null and flat_bed != null, "both flats have a bed")
+	if studio_bed == null or flat_bed == null:
+		return
+
+	_check(studio_bed.is_players_bed(), "the studio bed is the player's, to start with")
+	_check(not flat_bed.is_players_bed(), "and the Central one is not, lease or no lease")
+	_check(not flat_bed.can_interact(_player), "so it cannot be slept in")
+	_check(
+		flat_bed.get_prompt_text().contains("NOT YOUR HOME"),
+		"and it says why"
+	)
+
+	flat.set_as_home()
+	_check(PropertyManager.current_home() == flat, "setting the flat as home moves the player in")
+	_check(not studio.is_current_home(), "the studio stops being home")
+	_check(flat_bed.is_players_bed(), "and the flat's bed becomes the one to sleep in")
+	_check(not studio_bed.is_players_bed(), "while the studio's does not")
+
+	# And sleeping in it works exactly as it did in the studio.
+	var stats := _player.get_stats()
+	stats.restore_values(stats.health, 20.0, stats.hunger)
+	TimeManager.set_total_minutes(23.0 * 60.0)
+	flat_bed.interact(_player)
+	await _settle(6)
+	_check(TimeManager.hour == 7, "sleeping in the new bed wakes the player at 07:00")
+	_check(stats.energy > 95.0, "and restores energy (%.0f)" % stats.energy)
+
+	studio.set_as_home()
+	_check(PropertyManager.current_home() == studio, "and the player can move back")
+
+
+## TEST 139 — courier work, which is what the map is for.
+func _test_courier_run() -> void:
+	var depots := get_tree().get_nodes_in_group(&"courier_depot")
+	_check(depots.size() >= 1, "there is somewhere to pick up deliveries (%d)" % depots.size())
+
+	await _teleport(Vector3(0.0, 1.0, 40.0))
+	CourierJob.cancel_run()
+	_check(not CourierJob.has_active_run(), "no run in progress to begin with")
+
+	_check(CourierJob.offer_run(), "a run can be taken")
+	_check(CourierJob.has_active_run(), "which is now in progress")
+	var destination := MapManager.get_destination()
+	_check(destination != null, "taking one sets the map destination")
+	if destination == null:
+		return
+	_check(
+		destination.position.distance_to(_player.global_position) >= CourierJob.minimum_distance,
+		"and it is far enough away to be worth paying for (%.0fm)"
+		% destination.position.distance_to(_player.global_position)
+	)
+	var fee := CourierJob.active_fee()
+	_check(fee >= CourierJob.base_fee, "the fee covers the distance ($%d)" % fee)
+	_check(not CourierJob.active_destination_name().is_empty(), "the drop-off has a name")
+
+	var runs_before := CourierJob.runs_completed()
+	var cash_before := EconomyManager.cash
+	await _teleport(destination.position + Vector3(1.0, 1.0, 1.0))
+	await _settle(40)
+
+	_check(not CourierJob.has_active_run(), "arriving finishes the run")
+	_check(CourierJob.runs_completed() == runs_before + 1, "which is counted")
+	_check(EconomyManager.cash >= cash_before + fee, "and paid ($%d)" % (EconomyManager.cash - cash_before))
+	_check(_said("DELIVERED"), "the player is told they delivered it")
+
+	# A run that is given up pays nothing.
+	_check(CourierJob.offer_run(), "another run can be taken")
+	var cash_at_cancel := EconomyManager.cash
+	CourierJob.cancel_run()
+	_check(not CourierJob.has_active_run(), "and dropped")
+	_check(EconomyManager.cash == cash_at_cancel, "with no fee for dropping it")
+	_check(not MapManager.has_destination(), "and the destination goes with it")
+
+
+## TEST 140 — trading from the good part of town.
+func _test_central_property() -> void:
+	var units: Array[CommercialProperty] = []
+	for unit in PropertyManager.get_properties():
+		if unit.district_id == &"central":
+			units.append(unit)
+	_check(units.size() >= 4, "Central has commercial units to let (%d)" % units.size())
+	if units.is_empty():
+		return
+
+	var premium := PropertyManager.by_id(&"unit_plaza_03")
+	var small := PropertyManager.by_id(&"unit_market_12")
+	_check(premium != null and small != null, "including a premium unit and a small one")
+	if premium == null or small == null:
+		return
+
+	_check(
+		premium.size_class == CommercialProperty.SizeClass.MEDIUM,
+		"the plaza unit is the bigger of the two"
+	)
+	_check(premium.floor_area > small.floor_area, "with more floor to it")
+	_check(premium.customer_capacity > small.customer_capacity, "and room for more customers")
+	_check(premium.queue_capacity > small.queue_capacity, "and a longer queue")
+	_check(premium.rent_amount > small.rent_amount, "for more rent")
+	_check(
+		premium.location_demand_modifier > small.location_demand_modifier,
+		"because more people walk past it"
+	)
+	_check(premium.size_label() == "Medium", "the size reads as words for the player")
+	_check(premium.location_label() == "High", "and so does the footfall")
+	_check(small.location_label() == "Average", "which is only average on Market Street")
+
+	# Every property in the city has a unique id, or the save file overwrites one
+	# lease with another.
+	var seen: Dictionary = {}
+	var duplicates := 0
+	for unit in PropertyManager.get_properties():
+		if seen.has(unit.property_id):
+			duplicates += 1
+		seen[unit.property_id] = true
+	for home in PropertyManager.get_residences():
+		if seen.has(home.residence_id):
+			duplicates += 1
+		seen[home.residence_id] = true
+	_check(duplicates == 0, "every property in the city has its own id")
+
+	# The address is worth what the district is worth as well as what the pitch
+	# is: the same shop in Central should expect more people past the door than
+	# it would on a Harbour Row street, without the gap being silly.
+	var harbour_unit := PropertyManager.by_id(&"unit_main_18")
+	if harbour_unit != null:
+		var harbour_pull := harbour_unit.location_demand_modifier
+		var central_pull := (
+			premium.location_demand_modifier
+			* WorldManager.by_id(&"central").commercial_demand_modifier
+		)
+		_check(
+			central_pull > harbour_pull * 1.15,
+			"a Central plaza pitch pulls better than a Harbour Row one (x%.2f vs x%.2f)"
+			% [central_pull, harbour_pull]
+		)
+		_check(
+			central_pull < harbour_pull * 2.5,
+			"but not by an absurd margin (x%.2f)" % (central_pull / maxf(harbour_pull, 0.01))
+		)
+
+	# And it can actually be taken on.
+	EconomyManager.restore(20000)
+	_check(small.is_vacant(), "the small unit is free")
+	_check(
+		PropertyManager.lease(small) == PropertyManager.LeaseResult.OK,
+		"and can be leased"
+	)
+	_check(not small.is_vacant(), "which takes it off the market")
+	small.end_lease()
+	_check(small.is_vacant(), "and giving it up puts it back")
+
+
+## TEST 141 — heat does not stop at the district line.
+func _test_wanted_across_districts() -> void:
+	await _prepare_crime_scene()
+	await _teleport(Vector3(0.0, 0.5, 60.0))
+	EconomyManager.restore(2000)
+
+	var record := CrimeManager.report_crime(
+		CrimeManager.CrimeType.STORE_ROBBERY, _player.global_position, _player, null
+	)
+	CrimeManager.mark_witnessed(record, _player)
+	CrimeManager.mark_reported(record)
+	WantedManager.on_crime_reported(record)
+	await _settle(6)
+
+	var level := WantedManager.level
+	_check(level >= 2, "a robbery in Harbour Row raises the heat (%d stars)" % level)
+	var budget_in_harbour := WantedManager.get_response_budget()
+
+	var central := WorldManager.by_id(&"central")
+	if central == null:
+		return
+	await _teleport(Vector3(central.center_position.x, 1.0, central.center_position.z))
+	await _settle(60)
+
+	_check(
+		WorldManager.player_district() == central,
+		"running to Central changes the player's district"
+	)
+	_check(
+		WantedManager.level == level,
+		"but the wanted level crosses with them (%d)" % WantedManager.level
+	)
+	_check(WantedManager.is_wanted(), "the player is still wanted")
+	_check(
+		WantedManager.local_police_presence() > 1.0,
+		"Central is the better-policed half of the city (x%.2f)"
+		% WantedManager.local_police_presence()
+	)
+	_check(
+		WantedManager.get_response_budget() > budget_in_harbour,
+		"so the same wanted level sends more units there (%d vs %d)"
+		% [WantedManager.get_response_budget(), budget_in_harbour]
+	)
+
+	await _station_police_near(_player.global_position, 40.0)
+	await _settle(120)
+	_check(_responding_units() >= 1, "and Central's police answer the call (%d)" % _responding_units())
+
+	WantedManager.clear_wanted("")
+	await _settle(6)
+	_check(not WantedManager.is_wanted(), "and the heat clears the same way it always did")
+
+
+## TEST 142 — the bigger world through a save file.
+func _test_world_save_load() -> void:
+	var slot := 94
+	var flat := PropertyManager.residence_by_id(&"meridian")
+	var studio := PropertyManager.residence_by_id(&"larkspur")
+	if flat == null or studio == null:
+		return
+
+	EconomyManager.restore(8000)
+	if not flat.is_leased_by_player():
+		PropertyManager.lease_residence(flat)
+	flat.set_as_home()
+	var runs := CourierJob.runs_completed()
+
+	_check(SaveManager.save_to_slot(slot), "the expanded city saves")
+
+	# Undo all of it.
+	flat.end_lease()
+	studio.set_as_home()
+	_check(PropertyManager.current_home() == studio, "and the state is changed underneath it")
+
+	_check(SaveManager.load_from_slot(slot), "the save loads back")
+	await _settle(12)
+
+	_check(
+		PropertyManager.residence_by_id(&"meridian").is_leased_by_player(),
+		"the Central lease comes back"
+	)
+	_check(
+		PropertyManager.current_home() != null
+		and PropertyManager.current_home().residence_id == &"meridian",
+		"and so does where the player lives"
+	)
+	_check(CourierJob.runs_completed() == runs, "the delivery record survives (%d)" % runs)
+	_check(WorldManager.count() >= 2, "both districts are still registered after a load")
+	_check(
+		MapManager.collect_markers().size() >= 12,
+		"and the map still knows what is in the city"
+	)
+
+	var bed := _bed_in("MeridianApartment")
+	_check(bed != null and bed.is_players_bed(), "the bed in the loaded home is the player's")
+
+	# Back to the studio, so anything after this starts where it expects to.
+	PropertyManager.residence_by_id(&"larkspur").set_as_home()
+	SaveManager.delete_slot(slot)
+
+
+## TEST 143 — a save written before the city grew.
+func _test_pre_district_save() -> void:
+	var slot := 93
+	var file := FileAccess.open(SaveManager.get_slot_path(slot), FileAccess.WRITE)
+	_check(file != null, "a one-district save file can be written for the test")
+	if file == null:
+		return
+	# A save from before the city grew: no residences, no Central district, and
+	# no map state. Nothing in it knows the second district exists.
+	file.store_string(JSON.stringify({
+		"version": SaveManager.SAVE_VERSION,
+		"clock": {"total_minutes": TimeManager.total_minutes},
+		"economy": {"cash": 1234},
+		"entities": {},
+	}))
+	file.close()
+
+	_check(SaveManager.load_from_slot(slot), "a one-district save still loads")
+	await _settle(12)
+	_check(EconomyManager.cash == 1234, "the money in it is restored")
+	_check(WorldManager.count() >= 2, "the new district is still there")
+	_check(
+		PropertyManager.current_home() != null,
+		"and the player still has somewhere to live"
+	)
+	_check(
+		PropertyManager.residence_by_id(&"larkspur") != null,
+		"with the studio present as a property"
+	)
+	SaveManager.delete_slot(slot)
+
+
+## TEST 144 — the edge of the world, and the road that will leave it.
+func _test_city_edge() -> void:
+	# The top of Central Boulevard is barriered, not walled: the player can see
+	# the road carry on, and cannot drive up it.
+	await _teleport(Vector3(District02.CENTER_BLVD_X, 1.0, -318.0))
+	await _settle(20)
+	var before := _player.global_position.z
+	await _hold(["move_forward"], 90)
+	await _settle(20)
+	_check(
+		_player.global_position.z > District02.NORTH_EDGE + 1.0,
+		"the closed road at the top of Central stops the player (z %.0f -> %.0f)"
+		% [before, _player.global_position.z]
+	)
+	_check(_player.global_position.y > -0.5, "without dropping them out of the world")
+
+	# And the sides of the connecting stretch, which is a strip of ground with
+	# nothing but verge either side of the carriageway.
+	await _teleport(Vector3(District02.CORRIDOR_HALF - 4.0, 1.0, -112.0))
+	await _settle(20)
+	await _hold(["move_right"], 90)
+	await _settle(20)
+	_check(
+		_player.global_position.x < District02.CORRIDOR_HALF,
+		"the gateway is walled at its edges (x %.1f)" % _player.global_position.x
+	)
+	_check(_player.global_position.y > -0.5, "and the player is still on the ground")
+
+	# Central's car parks, which are what the district has instead of kerbside
+	# parking.
+	for spot: Vector3 in [Vector3(-102.0, 1.0, -230.0), Vector3(102.0, 1.0, -200.0)]:
+		await _teleport(spot)
+		await _settle(24)
+		_check(
+			_player.global_position.y > -0.5,
+			"there is ground under the car park at %.0f, %.0f" % [spot.x, spot.z]
+		)
+
+
+## TEST 145 — the development overlays, which must never crash the game they are
+## meant to explain.
+func _test_world_debug() -> void:
+	var overlay := _main.get_node_or_null("WorldDebug") as CanvasLayer
+	_check(overlay != null, "the world debug overlay is in the scene")
+	if overlay == null:
+		return
+	_check(not overlay.visible, "and is hidden in a normal game")
+
+	overlay.call("toggle")
+	await _settle(6)
+	_check(overlay.visible, "F11 brings it up")
+
+	var readout := overlay.get_node("Panel/Readout") as Label
+	_check(readout != null and readout.text.contains("WORLD"), "it says what it is")
+	_check(readout.text.contains("districts loaded: 2"), "and counts the districts")
+	_check(readout.text.contains("fps"), "with a frame rate on it")
+
+	# Every world view layer, drawn and cleared. This is the check that a debug
+	# draw call against a graph or a marker list has not gone stale.
+	for key: int in [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6]:
+		var event := InputEventKey.new()
+		event.keycode = key
+		event.pressed = true
+		overlay.call("_unhandled_input", event)
+		await _settle(2)
+	# The overlay draws into whatever scene is running, which under the test
+	# harness is the harness rather than main.tscn.
+	var scene := get_tree().current_scene
+	var lines := scene.get_node_or_null("WorldDebugLines")
+	var labels := scene.get_node_or_null("WorldDebugLabels")
+	_check(lines != null, "the world view draws into the world")
+	_check(
+		labels != null and labels.get_child_count() > 0,
+		"including a label per property and marker (%d)"
+		% (labels.get_child_count() if labels != null else 0)
+	)
+
+	overlay.call("toggle")
+	await _settle(6)
+	_check(not overlay.visible, "F11 puts it away again")
+	_check(
+		labels == null or labels.get_child_count() == 0,
+		"and takes its lines and labels with it"
+	)
+
+
+# --- Phase J helpers -----------------------------------------------------
+
+func _bed_in(interior_name: String) -> Bed:
+	var interior := _main.get_node_or_null("Interiors/%s" % interior_name)
+	if interior == null:
+		return null
+	return _find_bed(interior)
+
+
+func _find_bed(node: Node) -> Bed:
+	if node is Bed:
+		return node
+	for child in node.get_children():
+		var found := _find_bed(child)
+		if found != null:
+			return found
+	return null

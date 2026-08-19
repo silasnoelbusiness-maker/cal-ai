@@ -1,7 +1,8 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://world/district_01.tscn" id="2_district"]
+[ext_resource type="PackedScene" path="res://world/district_02.tscn" id="12_district2"]
 [ext_resource type="PackedScene" path="res://player/player.tscn" id="3_player"]
 [ext_resource type="PackedScene" path="res://camera/camera_rig.tscn" id="4_camera"]
 [ext_resource type="PackedScene" path="res://ui/hud.tscn" id="5_hud"]
@@ -12,11 +13,14 @@
 [ext_resource type="PackedScene" path="res://world/interiors/convenience_store.tscn" id="8_store"]
 [ext_resource type="PackedScene" path="res://world/interiors/retail_unit.tscn" id="9_retail_unit"]
 [ext_resource type="Script" path="res://equipment/placement_controller.gd" id="10_placement"]
+[ext_resource type="Script" path="res://world/world_debug.gd" id="13_world_debug"]
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1_main")
 
 [node name="District01" parent="." instance=ExtResource("2_district")]
+
+[node name="District02" parent="." instance=ExtResource("12_district2")]
 
 [node name="Interiors" type="Node3D" parent="."]
 
@@ -45,8 +49,35 @@ size_class = 1
 [node name="CentralPlazaUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 1000)
 property_id = &"unit_plaza_07"
-unit_name = "7 Central Plaza"
+unit_name = "7 Anchor Plaza"
 size_class = 1
+
+[node name="CentralBoulevardUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 1200)
+property_id = &"unit_central_88"
+unit_name = "88 Central Boulevard"
+size_class = 1
+
+[node name="MarketStreetUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 1400)
+property_id = &"unit_market_12"
+unit_name = "12 Market Street"
+
+[node name="PlazaUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 1600)
+property_id = &"unit_plaza_03"
+unit_name = "3 Central Plaza"
+size_class = 1
+
+[node name="KingstonRoadUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 1800)
+property_id = &"unit_kingston_40"
+unit_name = "40 Kingston Road"
+
+[node name="MeridianApartment" parent="Interiors" instance=ExtResource("6_apartment")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 2000)
+residence_id = &"meridian"
+spacious = true
 
 [node name="PlacementController" type="Node3D" parent="."]
 script = ExtResource("10_placement")
@@ -67,3 +98,6 @@ script = ExtResource("8_crime_debug")
 
 [node name="BusinessDebug" type="CanvasLayer" parent="."]
 script = ExtResource("11_business_debug")
+
+[node name="WorldDebug" type="CanvasLayer" parent="."]
+script = ExtResource("13_world_debug")

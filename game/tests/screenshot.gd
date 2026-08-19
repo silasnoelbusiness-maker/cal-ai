@@ -21,7 +21,12 @@ extends Node
 ##             escaping, cleared, busted, night_chase, traffic, vehicle_types,
 ##             red_light, green_light, crossing, pedestrian_reacts,
 ##             driving_traffic, traffic_crash, pursuit_traffic, police_lights,
-##             escaping_traffic, night_traffic
+##             escaping_traffic, night_traffic, city_overview, harbour_row,
+##             central_district, district_road, central_street, central_plaza,
+##             traffic_crossing, central_pedestrians, city_map, map_filters,
+##             map_route, central_property, large_interior, better_apartment,
+##             courier_delivery, vehicle_roster, harbour_business,
+##             central_business, city_empire, cross_district_chase, central_night
 ##   distance  camera distance override, for overview shots
 ##   yaw       camera yaw override
 ##   pitch     camera pitch override
@@ -296,6 +301,16 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 
 		"pursuit_traffic", "police_lights", "escaping_traffic", "night_traffic":
 			await _crime_scenario(main, scenario, false)
+
+		"city_overview", "harbour_row", "central_district", "district_road", \
+		"central_street", "central_plaza", "traffic_crossing", "central_pedestrians", \
+		"city_map", "map_filters", "map_route", "central_property", \
+		"large_interior", "better_apartment", "courier_delivery", "vehicle_roster", \
+		"central_night", "cross_district_chase":
+			await _run_city_scenario(main, scenario)
+
+		"harbour_business", "central_business", "city_empire":
+			await _run_city_business_scenario(main, scenario)
 
 		"commercial_properties", "portfolio", "market_operating", "coffee_empty", \
 		"coffee_placement", "ingredient_order", "coffee_customers", "barista", \
@@ -797,6 +812,303 @@ func _run_empire_scenario(main: Node, scenario: String) -> void:
 		coffee_spawner.spawn_customer_now()
 		await _wait(35)
 	await _wait(240)
+
+
+# --- Phase J: the wider city ---------------------------------------------
+
+## The shots of the expanded world. Nothing here fakes a view: the districts are
+## the ones the game builds, the map is the real map with the real markers on
+## it, and the police chase is the wanted system doing what it does.
+func _run_city_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: CanvasLayer = main.get_node("HUD")
+	var central := WorldManager.by_id(&"central")
+	var centre := Vector3(0.0, 0.5, -215.0) if central == null else Vector3(
+		central.center_position.x, 0.5, central.center_position.z
+	)
+
+	match scenario:
+		"city_overview":
+			# Halfway between the two districts, looking down on all of it. The
+			# camera distance comes from the command line. The wait is long
+			# enough for the district banner to fade off the top of the frame.
+			player.global_position = Vector3(0.0, 0.5, -140.0)
+			await _wait(260)
+
+		"harbour_row":
+			player.global_position = Vector3(0.0, 0.5, -10.0)
+			await _wait(180)
+
+		"central_district", "central_night":
+			player.global_position = centre
+			await _wait(240)
+
+		"district_road":
+			# On the connecting boulevard, with Harbour Row's gateway behind and
+			# Central ahead.
+			player.global_position = Vector3(
+				District02.CENTER_BLVD_X + 3.0, 0.5, District02.GATEWAY_Z + 6.0
+			)
+			await _wait(180)
+
+		"central_street":
+			player.global_position = Vector3(
+				-20.0, 0.5, District02.MARKET_ST_Z - District02.WALK_WIDTH - 3.0
+			)
+			await _wait(320)
+
+		"central_plaza":
+			player.global_position = District02.MONUMENT + Vector3(9.0, 0.5, 9.0)
+			await _wait(180)
+
+		"traffic_crossing":
+			# Cars put onto the boulevard either side of the district line, then
+			# left to drive it under their own AI.
+			_traffic_manager().prime()
+			for i in 3:
+				var lane := District02.CENTER_BLVD_X - District02.LANE_OFFSET
+				_add_traffic_car(
+					load("res://vehicles/cars/hatchback.tscn"),
+					Vector3(lane, 0.0, District02.GATEWAY_Z + 26.0 - float(i) * 13.0),
+					180.0,
+					Color(0.514, 0.463, 0.361)
+				)
+			player.global_position = Vector3(
+				District02.CENTER_BLVD_X + 12.0, 0.5, District02.GATEWAY_Z + 4.0
+			)
+			await _wait(220)
+
+		"central_pedestrians":
+			player.global_position = Vector3(
+				District02.PLAZA_ST_X + 12.0, 0.5, District02.KINGSTON_RD_Z - 9.0
+			)
+			await _wait(400)
+
+		"city_map", "map_filters", "map_route":
+			player.global_position = centre
+			await _wait(60)
+			if scenario == "map_route":
+				MapManager.set_destination(_marker_named("Silas Market", "18 Main Street"))
+			if scenario == "map_filters":
+				MapManager.set_category_shown(MapMarker.Category.SHOP, false)
+				MapManager.set_category_shown(MapMarker.Category.POLICE, false)
+			var map: Control = hud.get_node("CityMap")
+			map.open()
+			await _wait(10)
+
+		"central_property":
+			EconomyManager.restore(12000)
+			var unit := PropertyManager.by_id(&"unit_plaza_03")
+			player.global_position = unit.global_position + Vector3(0.0, 0.5, 3.2)
+			await _wait(20)
+			unit.interact(player)
+			await _wait(12)
+
+		"large_interior":
+			EconomyManager.restore(12000)
+			var unit := PropertyManager.by_id(&"unit_plaza_03")
+			PropertyManager.lease(unit)
+			await _wait(6)
+			unit.interact(player)
+			await _wait(24)
+			var room: RetailUnit = main.get_node("Interiors/PlazaUnit")
+			player.global_position = room.global_position + Vector3(0.0, 0.5, 4.0)
+			await _wait(20)
+
+		"better_apartment":
+			EconomyManager.restore(4000)
+			var flat := PropertyManager.residence_by_id(&"meridian")
+			PropertyManager.lease_residence(flat)
+			flat.set_as_home()
+			await _wait(6)
+			flat.interact(player)
+			await _wait(24)
+			player.global_position += Vector3(0.0, 0.0, -2.0)
+			await _wait(12)
+
+		"courier_delivery":
+			# A real run: the job picks its own destination and the HUD shows
+			# the distance to it.
+			player.global_position = centre
+			await _wait(20)
+			CourierJob.offer_run()
+			await _wait(10)
+			var car := _find_vehicle(true)
+			car.global_position = centre + Vector3(0.0, 0.0, 4.0)
+			car.rotation_degrees.y = 180.0
+			car.halt()
+			await _wait(10)
+			car.enter(player)
+			Input.action_press("move_forward")
+			await _wait(90)
+
+		"vehicle_roster":
+			# One of each civilian model, nose to tail down the quiet end of
+			# Central Boulevard with the traffic cleared away. Parked by hand and
+			# given no driver, so they are still there when the shot is taken.
+			var manager := _traffic_manager()
+			manager.set_active(false)
+			manager.clear()
+			await _wait(6)
+			var lane := District02.CENTER_BLVD_X - District02.LANE_OFFSET
+			var ids := VehicleCatalogue.ids()
+			var spacing := 7.0
+			var first := District02.RIVERSIDE_DR_Z + 22.0
+			for i in ids.size():
+				var model: Vehicle = VehicleCatalogue.scene_for(ids[i]).instantiate()
+				model.name = "Roster_%s" % ids[i]
+				model.position = Vector3(lane, 0.0, first - float(i) * spacing)
+				# Southbound: forward is +Z, which is a half turn from default.
+				model.rotation_degrees.y = 180.0
+				var tinted: VehicleData = model.data.duplicate()
+				tinted.body_color = Color(0.62, 0.64, 0.67)
+				model.data = tinted
+				add_child(model)
+			# Stood in the next lane along, level with the middle of the row.
+			player.global_position = Vector3(
+				lane - 3.4, 0.5, first - float(ids.size() - 1) * spacing * 0.5
+			)
+			# Long enough for the district banner to have faded off the top.
+			await _wait(220)
+
+		"cross_district_chase":
+			await _cross_district_chase(main)
+
+
+## A car stolen in Harbour Row, driven north over the district line with the
+## police still on it. Everything here is the wanted system's own doing: the
+## crime is reported through CrimeManager and the officers respond to it.
+func _cross_district_chase(_main: Node) -> void:
+	var player: Node3D = GameManager.player
+	var car := _find_vehicle(false)
+	# Northbound in the correct lane, with enough of a run-up to be travelling
+	# too fast to be pulled out of the car before it reaches the district line.
+	# The northbound lane, which is the one that leaves town: vehicles face -Z,
+	# so northbound is yaw 0 and the lane is east of the centre line.
+	var lane := District02.CENTER_BLVD_X + District02.LANE_OFFSET
+	# Started on the approach to the connecting stretch, which is the one piece
+	# of road with nothing parked on it: a stolen car that rear-ends a parked one
+	# stops dead and the shot comes back as an arrest instead of a chase.
+	car.global_position = Vector3(lane, 0.0, District02.GATEWAY_Z + 45.0)
+	car.rotation_degrees.y = 0.0
+	car.halt()
+	player.global_position = car.global_transform * Vector3(-2.1, 0.5, 0.4)
+	await _wait(10)
+	car.enter(player)
+	await _wait(10)
+
+	var record := CrimeManager.report_crime(
+		CrimeManager.CrimeType.VEHICLE_THEFT, player.global_position, player, car
+	)
+	CrimeManager.mark_witnessed(record, player)
+	CrimeManager.mark_reported(record)
+	WantedManager.on_crime_reported(record)
+	await _wait(10)
+
+	# The patrol cars start behind, in Harbour Row, and follow over the line.
+	var patrols := get_tree().get_nodes_in_group(&"police_car")
+	for i in patrols.size():
+		var unit: Node3D = patrols[i]
+		unit.process_mode = Node.PROCESS_MODE_INHERIT
+		unit.global_position = Vector3(
+			lane, 0.0, car.global_position.z + 28.0 + float(i) * 12.0
+		)
+		unit.rotation_degrees.y = 0.0
+	await _wait(10)
+
+	Input.action_press("move_forward")
+	await _wait(200)
+
+
+## Silas Market in Harbour Row, a second shop in Central, and the dashboard that
+## shows both. Built through the real systems, same as the Phase I shots.
+func _run_city_business_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	EconomyManager.restore(80000)
+
+	var market := _open_shop_at(
+		main, &"unit_main_18", "Interiors/MainStreetUnit", "Silas Market"
+	)
+	var central := _open_shop_at(
+		main, &"unit_central_88", "Interiors/CentralBoulevardUnit", "Silas Market — Central"
+	)
+
+	var unit: RetailUnit = main.get_node(
+		"Interiors/MainStreetUnit" if scenario == "harbour_business"
+		else "Interiors/CentralBoulevardUnit"
+	)
+
+	if scenario == "city_empire":
+		market.end_day(TimeManager.day_index)
+		central.end_day(TimeManager.day_index)
+		for i in 5:
+			BusinessManager.simulate_hour_now(market, 12)
+			BusinessManager.simulate_hour_now(central, 12)
+		var empire: Control = main.get_node("HUD/EmpireDashboard")
+		empire.open()
+		empire.show_tab(1)
+		await _wait(8)
+		return
+
+	var spawner := unit.get_spawner()
+	player.global_position = unit.global_position + Vector3(0.0, 0.5, 4.0)
+	await _wait(10)
+	unit.call("_refresh_staff")
+	for i in 3:
+		spawner.spawn_customer_now()
+		await _wait(40)
+	await _wait(200)
+
+
+## Leases a unit, fits it out, stocks it, staffs it and opens it. The same steps
+## the player takes, in the order the systems expect them.
+func _open_shop_at(
+	main: Node, property_id: StringName, interior_path: String, shop_name: String
+) -> BusinessInstance:
+	var door := PropertyManager.by_id(property_id)
+	PropertyManager.lease(door)
+	var business := BusinessManager.create_business(shop_name, &"convenience_store", door)
+	BusinessManager.deposit_to_business(business, 9000)
+
+	var unit: RetailUnit = main.get_node(interior_path)
+	unit.ensure_built()
+	var controller: PlacementController = main.get_node("PlacementController")
+	for id in [&"checkout_counter", &"retail_shelf", &"retail_shelf", &"storage_rack"]:
+		BusinessManager.buy_equipment(business, id)
+	controller.begin(business, unit, &"checkout_counter")
+	controller.place_at(Vector3(0.0, 0.0, 1.0), 180.0)
+	controller.begin(business, unit, &"retail_shelf")
+	controller.place_at(Vector3(-4.0, 0.0, 2.0), 90.0)
+	controller.begin(business, unit, &"retail_shelf")
+	controller.place_at(Vector3(4.0, 0.0, 2.0), 90.0)
+	controller.begin(business, unit, &"storage_rack")
+	controller.place_at(Vector3(0.0, 0.0, -4.0), 0.0)
+
+	for id in [&"bottled_water", &"soda_can", &"snack_bar"]:
+		BusinessManager.order_stock(business, id, 40)
+	BusinessManager.deliver_now(business)
+	for shelf in business.shelves():
+		business.stock_shelf(
+			shelf.slot_id, &"bottled_water" if shelf.slot_id % 2 == 0 else &"soda_can", 20
+		)
+
+	BusinessManager.refresh_candidates()
+	var candidates := BusinessManager.get_candidates()
+	BusinessManager.hire(business, candidates[0], EmployeeData.Role.CASHIER)
+	candidates[0].shift_start_hour = 0
+	candidates[0].shift_end_hour = 23
+	business.manual_override = BusinessInstance.Override.FORCE_OPEN
+	business.set_open(true)
+	return business
+
+
+## Finds one of the real map markers by name, for a shot of a route to it.
+func _marker_named(label: String, fallback_detail: String) -> MapMarker:
+	var markers := MapManager.collect_markers()
+	for marker in markers:
+		if marker.label == label or marker.detail == fallback_detail:
+			return marker
+	return markers[0] if not markers.is_empty() else null
 
 
 func _property_door() -> CommercialProperty:

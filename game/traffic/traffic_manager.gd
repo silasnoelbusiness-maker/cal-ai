@@ -33,14 +33,9 @@ const POPULATION := {Density.LOW: 6, Density.MEDIUM: 11, Density.HIGH: 16}
 ## Seconds between population checks. This does not need to be per frame.
 @export var upkeep_interval: float = 0.75
 
-## Spawn odds by body style. Data, not code: a new model is a new entry.
-@export var spawn_weights: Dictionary = {"sedan": 4, "hatchback": 4, "van": 2}
-
-const CAR_SCENES := {
-	"sedan": preload("res://vehicles/cars/sedan.tscn"),
-	"hatchback": preload("res://vehicles/cars/hatchback.tscn"),
-	"van": preload("res://vehicles/cars/van.tscn"),
-}
+## Which models turn up where lives in the catalogue, not here — a new car is an
+## entry in one table rather than an edit to this file.
+const CAR_SCENES := VehicleCatalogue.SCENES
 
 ## A small palette beats a material per car; each vehicle gets a tinted copy of
 ## its model's shared VehicleData.
@@ -81,10 +76,22 @@ func get_vehicles() -> Array[Vehicle]:
 
 
 func get_target_population() -> int:
-	var target: int = POPULATION.get(density, 11)
+	var target := float(POPULATION.get(density, 11))
 	if TimeManager.get_phase() == TimeManager.Phase.NIGHT:
-		target = int(round(float(target) * night_population_scale))
-	return maxi(target, 1)
+		target *= night_population_scale
+	# Busy districts carry more cars. The pool follows the player rather than
+	# filling the whole city, so this is the density where they actually are.
+	target *= local_traffic_density()
+	return maxi(int(round(target)), 1)
+
+
+## Traffic density of whatever part of the city the player is in. 1.0 when the
+## world has not registered any districts, so this is safe in a bare test scene.
+func local_traffic_density() -> float:
+	var player := GameManager.player
+	if player == null or WorldManager.count() == 0:
+		return 1.0
+	return WorldManager.traffic_density_at(player.global_position)
 
 
 ## Fills the roads immediately, ignoring the distance-from-player rule. Used at
@@ -145,8 +152,8 @@ func _spawn_one(ignore_player_distance: bool) -> Vehicle:
 	if node < 0:
 		return null
 
-	var style := _pick_style()
-	var vehicle: Vehicle = CAR_SCENES[style].instantiate()
+	var style := _pick_style_for(_network.node_position(node))
+	var vehicle: Vehicle = VehicleCatalogue.scene_for(style).instantiate()
 	_spawn_count += 1
 	vehicle.name = "Traffic_%s_%d" % [style, _spawn_count]
 	vehicle.controller = Vehicle.Controller.TRAFFIC_AI
@@ -225,18 +232,12 @@ func _is_occupied(position: Vector3) -> bool:
 	return player != null and player.global_position.distance_to(position) < spawn_clearance
 
 
-func _pick_style() -> String:
-	var total := 0
-	for weight in spawn_weights.values():
-		total += int(weight)
-	if total <= 0:
-		return "sedan"
-	var roll := _rng.randi_range(1, total)
-	for style in spawn_weights.keys():
-		roll -= int(spawn_weights[style])
-		if roll <= 0:
-			return String(style)
-	return "sedan"
+## What kind of car this part of the city puts on the road. Harbour Row runs
+## vans and saloons; Central runs small cars and the odd expensive one.
+func _pick_style_for(position: Vector3) -> StringName:
+	var district := WorldManager.district_at(position)
+	var id: StringName = district.district_id if district != null else &"harbour_row"
+	return VehicleCatalogue.pick_id_for_district(id, _rng)
 
 
 # --- Recycling -----------------------------------------------------------

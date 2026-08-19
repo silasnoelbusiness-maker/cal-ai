@@ -129,5 +129,68 @@ func _collect(property: CommercialProperty) -> bool:
 	return false
 
 
+# --- Residences ----------------------------------------------------------
+
+func get_residences() -> Array[ResidenceProperty]:
+	var found: Array[ResidenceProperty] = []
+	for node in get_tree().get_nodes_in_group(&"residence"):
+		var home := node as ResidenceProperty
+		if home != null:
+			found.append(home)
+	return found
+
+
+func residence_by_id(id: StringName) -> ResidenceProperty:
+	for home in get_residences():
+		if home.residence_id == id:
+			return home
+	return null
+
+
+## Where the player wakes up. There is always exactly one, which is why a home
+## cannot be given up without choosing another first.
+func current_home() -> ResidenceProperty:
+	for home in get_residences():
+		if home.is_current_home():
+			return home
+	return null
+
+
+## Signs a residential lease out of the player's own pocket. Two entries again,
+## for the same reason: a deposit comes back and rent does not.
+func lease_residence(home: ResidenceProperty) -> bool:
+	if home == null or home.is_leased_by_player():
+		return false
+	if not EconomyManager.can_afford(home.move_in_cost()):
+		GameManager.notify(
+			"NOT ENOUGH CASH\nNeed $%d" % home.move_in_cost(), GameManager.Tone.BAD
+		)
+		return false
+	EconomyManager.spend(home.deposit, "%s — deposit" % home.address)
+	EconomyManager.spend(home.rent_amount, "%s — rent" % home.address)
+	home.begin_lease()
+	GameManager.notify(
+		"APARTMENT RENTED\n%s  -$%d" % [home.address.to_upper(), home.move_in_cost()],
+		GameManager.Tone.GOOD
+	)
+	return true
+
+
+## Residential rent, on the same calendar as everything else. It comes out of the
+## player's pocket — a flat is not a business expense.
+func charge_due_residence_rent() -> void:
+	for home in get_residences():
+		if not home.is_rent_due():
+			continue
+		var paid := EconomyManager.spend(home.rent_amount, "%s — rent" % home.address)
+		home.settle_rent(paid)
+		GameManager.notify(
+			"RENT PAID\n%s  -$%d" % [home.address.to_upper(), home.rent_amount] if paid
+			else "RENT OVERDUE\n%s" % home.address.to_upper(),
+			GameManager.Tone.INFO if paid else GameManager.Tone.BAD
+		)
+
+
 func _on_day_passed(_day_index: int) -> void:
 	charge_due_rent()
+	charge_due_residence_rent()
