@@ -3452,6 +3452,38 @@ func _test_business_runs_while_away() -> void:
 		"so it is simulated rather than acted out"
 	)
 
+	# Staff and customers inherit Pedestrian, which puts the ambient crowd to
+	# sleep beyond `active_distance`. They must be exempt: a shop far enough
+	# away to be simulated is exactly the shop whose floor has to keep running,
+	# and freezing it is invisible until somebody walks back in and finds the
+	# cashier standing in the doorway.
+	#
+	# Tested on a figure placed far from the player rather than on the shop's
+	# own staff, because a shop the player has left may legitimately have no
+	# bodies in it at all — the far simulation is arithmetic.
+	var indoor := Pedestrian.new()
+	indoor.name = "AwayWorker"
+	indoor.ambient_crowd = false
+	_main.add_child(indoor)
+	indoor.global_position = _player.global_position + Vector3(400.0, 0.0, 400.0)
+	var outdoor := Pedestrian.new()
+	outdoor.name = "AwayCivilian"
+	_main.add_child(outdoor)
+	outdoor.global_position = indoor.global_position
+	await _settle(40)
+
+	_check(
+		indoor.is_active(),
+		"somebody with a job indoors keeps working however far away the player is"
+	)
+	_check(
+		not outdoor.is_active(),
+		"while an ordinary civilian that far off is asleep"
+	)
+	for node in [indoor, outdoor]:
+		node.queue_free()
+	await _settle(4)
+
 	var revenue_before := business.revenue_today
 	var customers_before := business.customer_count_today
 	BusinessManager.simulate_hour_now(business, 12)
@@ -3763,25 +3795,33 @@ func _test_simulation_consistency() -> void:
 	_check(rate > 0.0, "an open, stocked shop expects customers (%.1f/hour)" % rate)
 
 	business.end_day(TimeManager.day_index)
-	BusinessManager.order_stock(business, &"bottled_water", 60)
+	BusinessManager.order_stock(business, &"bottled_water", 240)
 	BusinessManager.deliver_now(business)
 	for shelf in business.shelves():
 		business.stock_shelf(shelf.slot_id, &"bottled_water", shelf.room_left())
 	business.set_price(water, water.get_recommended_price())
 
+	# Restocked between hours, the way a stocker or a manager would.
+	#
+	# Without it the shelf empties part-way through, the shop's range collapses
+	# and with it the rate — so the band drawn from the closing rate widened to
+	# include zero and the check could no longer fail low. Keeping the shelf
+	# full is what makes this a test of how many customers an hour produces
+	# rather than of how deep the shelves are.
 	for i in 6:
 		BusinessManager.simulate_hour_now(business, 12)
+		for shelf in business.shelves():
+			if shelf.room_left() > 0:
+				business.stock_shelf(shelf.slot_id, &"bottled_water", shelf.room_left())
 	var far_customers := business.customer_count_today
 	var far_revenue := business.revenue_today
-	# The rate is not a constant across the six hours: lost sales cost
-	# satisfaction, satisfaction moves reputation, and reputation is a term in
-	# the rate. So the band is drawn from the rate the shop actually had —
-	# lowest at the end, highest at the start — rather than from the one reading
-	# taken before it opened, which is what made this check fail on the runs
-	# where trade was busy enough to lose a few.
+	# Reputation still moves with lost sales, so the band comes from the rate
+	# the shop actually had across the six hours rather than from the single
+	# reading taken before it opened.
 	var rate_after := CustomerDemand.customers_per_hour(business, 12)
 	var floor_rate := minf(rate, rate_after)
 	var ceiling_rate := maxf(rate, rate_after)
+	_check(floor_rate > 0.0, "a restocked shop is still wanted at closing (%.1f/hour)" % floor_rate)
 	_check(
 		far_customers >= int(floor_rate * 4.0) and far_customers <= int(ceiling_rate * 8.0),
 		"six simulated hours produce about six hours of customers (%d for %.1f-%.1f/hour)"

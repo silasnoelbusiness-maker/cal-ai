@@ -40,6 +40,8 @@ var _target_shelf: BusinessEquipment = null
 
 
 func setup(worker: EmployeeData, unit: RetailUnit, entry: Vector3, exit_point: Vector3) -> void:
+	# Staff have a shift to work, for the same reason as customers above.
+	ambient_crowd = false
 	employee = worker
 	_unit = unit
 	_exit_point = exit_point

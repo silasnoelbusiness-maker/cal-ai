@@ -52,6 +52,10 @@ func setup(
 	business: BusinessInstance, unit: RetailUnit, spawner: CustomerSpawner,
 	threshold: Vector3, exit_point: Vector3, rng: RandomNumberGenerator
 ) -> void:
+	# A customer is inside a shop with something to do, so they are never put
+	# to sleep for being far from the player: that is exactly when the shop
+	# needs its floor running.
+	ambient_crowd = false
 	_business = business
 	_unit = unit
 	_spawner = spawner

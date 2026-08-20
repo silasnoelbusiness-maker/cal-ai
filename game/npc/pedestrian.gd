@@ -44,6 +44,16 @@ enum Condition { ACTIVE, INCAPACITATED }
 ## Seconds between activation checks. One distance test per civilian at this
 ## rate is nothing next to what being awake costs them.
 @export var activation_interval: float = 0.25
+## Whether this civilian is part of the ambient crowd, and so may be put to
+## sleep when nobody is near.
+##
+## False for anybody with a job to do inside a building — a customer at a till,
+## a member of staff on a shift. Those are exactly the people who must keep
+## working while the player is on the other side of the city, which is the whole
+## point of the businesses' own near/far simulation. Customers and staff both
+## inherit this class, so without the exemption a shop more than `active_distance`
+## away had its floor frozen the moment the player left the district.
+@export var ambient_crowd: bool = true
 
 @export_group("Traffic safety")
 @export var max_health: float = 100.0
@@ -174,7 +184,8 @@ func _process(delta: float) -> void:
 func _refresh_activation() -> void:
 	var player := GameManager.player
 	var active := (
-		player == null
+		not ambient_crowd
+		or player == null
 		or global_position.distance_to(player.global_position) <= active_distance
 	)
 	if active == _active:
