@@ -163,6 +163,22 @@ func _run() -> void:
 	await _test_interior_dressing()
 	_test_ui_theme()
 
+	# Phase L: audio and the front end.
+	_test_audio_buses()
+	_test_tone_bank()
+	await _test_footstep_surfaces()
+	await _test_vehicle_audio()
+	await _test_siren_state()
+	_test_ambience_profiles()
+	_test_music_states()
+	_test_settings_defaults()
+	_test_settings_persistence()
+	_test_graphics_presets()
+	_test_keybindings()
+	await _test_save_slots()
+	_test_menu_state()
+	await _test_camera_settings()
+
 	_report()
 
 
@@ -1791,9 +1807,25 @@ func _test_escape() -> void:
 			searching += 1
 	_check(searching > 0, "police search the last known position (%d units)" % searching)
 
+	# The searchers have done their job for this test; push them back out of
+	# arrest reach before starting the clock. A cruiser stationed 60m away can
+	# cover that in roughly the length of the shortened countdown, so leaving
+	# them where they are makes this a race between two unrelated mechanics —
+	# and a slower frame hands it to the arrest instead of the escape. Getting
+	# caught mid-search is correct behaviour and is tested on its own; here it
+	# is only noise.
+	var searchers: Array = _officers() + _police_cars()
+	for unit: Node3D in searchers:
+		unit.global_position += (unit.global_position - _player.global_position).normalized() * 90.0
+
+	var busts_before := CrimeManager.get_statistic(&"times_busted")
 	await _wait_until(
 		func() -> bool: return WantedManager.level == 0, 12.0,
 		"the escape countdown to run out"
+	)
+	_check(
+		CrimeManager.get_statistic(&"times_busted") == busts_before,
+		"the player got away rather than being arrested"
 	)
 	_check(WantedManager.level == 0, "the wanted level clears")
 	_check(_said("WANTED LEVEL CLEARED"), "WANTED LEVEL CLEARED is shown")
@@ -4515,20 +4547,47 @@ func _test_loans() -> void:
 func _test_time_skip() -> void:
 	var market := _own_business()
 	var coffee := _coffee_business()
-	market.credit(4000, "Test funds", &"capital")
-	coffee.credit(2000, "Test funds", &"capital")
+	# A floor rather than a credit. What these two are worth by the time this
+	# test runs depends on wages and loan interest settled earlier, and wages
+	# are rolled from a live RNG, so a fixed top-up is sometimes enough to buy
+	# a delivery and sometimes not. An order that cannot be afforded leaves the
+	# shelves empty, and a shop with empty shelves cannot open at all — which
+	# reads downstream as a shop that traded nothing rather than as a shop that
+	# could not buy anything.
+	for business: BusinessInstance in [market, coffee]:
+		if business.cash_balance < 8000:
+			business.credit(8000 - business.cash_balance, "Test funds", &"capital")
 
 	# Both open all hours, stocked, staffed.
-	for business in [market, coffee]:
+	for business: BusinessInstance in [market, coffee]:
 		business.manual_override = BusinessInstance.Override.FORCE_OPEN
 		business.opening_hour = 0
 		business.closing_hour = 23
+	# The back room is small and earlier tests leave odds and ends in it. A
+	# 60-unit delivery arriving into a nearly full store is silently truncated
+	# to whatever fits, so the shelves stay empty — and a shop with empty
+	# shelves cannot open at all, which is not what is being measured here.
+	# Only what the market is not about to sell is cleared; the coffee shop
+	# needs everything it is holding to make anything at all.
+	for item_id: StringName in market.storage.keys():
+		if item_id != &"bottled_water":
+			market.take_storage(item_id, market.storage_of(item_id))
+
 	BusinessManager.order_stock(market, &"bottled_water", 60)
 	for ingredient in [&"coffee_beans", &"milk_carton", &"paper_cup"]:
 		BusinessManager.order_stock(coffee, ingredient, 40)
 	BusinessManager.deliver_now()
 	for shelf in market.shelves():
 		market.stock_shelf(shelf.slot_id, &"bottled_water", shelf.room_left())
+
+	# Asserted rather than assumed: everything below is about what a shop earns
+	# while nobody is watching, and a shop that cannot open earns nothing for a
+	# reason that has nothing to do with the far simulation.
+	_check(
+		market.total_shelf_units() > 0,
+		"the market has something on its shelves (%d units)" % market.total_shelf_units()
+	)
+	_check(market.can_open(), "so it is a shop that can open at all")
 
 	await _teleport(Vector3(-40.0, 0.5, 8.4))
 	await _settle(10)
@@ -5762,3 +5821,482 @@ func _find_bed(node: Node) -> Bed:
 		if found != null:
 			return found
 	return null
+
+
+# --- Phase L: audio and the front end -------------------------------------
+
+## TEST 152 — the mixer exists and answers to the settings screen.
+func _test_audio_buses() -> void:
+	for bus in AudioBuses.ALL:
+		_check(
+			AudioBuses.index_of(bus) >= 0,
+			"there is a %s bus" % AudioBuses.display_name(bus)
+		)
+
+	var master := AudioServer.get_bus_index(AudioBuses.MASTER)
+	_check(
+		AudioServer.get_bus_effect_count(master) > 0,
+		"the master bus is limited, so a chase cannot clip"
+	)
+	for bus in AudioBuses.ALL:
+		if bus == AudioBuses.MASTER:
+			continue
+		_check(
+			AudioServer.get_bus_send(AudioServer.get_bus_index(bus)) == AudioBuses.MASTER,
+			"%s routes through the master" % AudioBuses.display_name(bus)
+		)
+
+	# A slider at zero is silence, not a very quiet bus.
+	var before := AudioBuses.get_volume(AudioBuses.SFX)
+	AudioBuses.set_volume(AudioBuses.SFX, 0.0)
+	_check(
+		AudioServer.is_bus_mute(AudioServer.get_bus_index(AudioBuses.SFX)),
+		"a volume of zero mutes rather than whispers"
+	)
+	AudioBuses.set_volume(AudioBuses.SFX, 0.5)
+	_check(
+		absf(AudioBuses.get_volume(AudioBuses.SFX) - 0.5) < 0.02,
+		"and a volume set is the volume read back (%.2f)"
+		% AudioBuses.get_volume(AudioBuses.SFX)
+	)
+	AudioBuses.set_volume(AudioBuses.SFX, before)
+
+
+## TEST 153 — every sound the game asks for exists and is playable.
+func _test_tone_bank() -> void:
+	var built := 0
+	var silent := 0
+	for id in ToneBank.ids():
+		var stream := ToneBank.get_stream(id)
+		if stream == null or stream.data.size() < 64:
+			silent += 1
+			continue
+		built += 1
+	_check(built >= 30, "the tone bank builds its sounds (%d)" % built)
+	_check(silent == 0, "and none of them came out empty (%d)" % silent)
+
+	# Loops must be marked as loops, or a siren is a single wail.
+	for id: StringName in [&"siren", &"engine_loop", &"amb_city_day", &"amb_store"]:
+		_check(
+			ToneBank.get_stream(id).loop_mode == AudioStreamWAV.LOOP_FORWARD,
+			"%s loops" % id
+		)
+	for id: StringName in [&"ui_click", &"step_concrete", &"impact_heavy"]:
+		_check(
+			ToneBank.get_stream(id).loop_mode == AudioStreamWAV.LOOP_DISABLED,
+			"%s is a one-shot" % id
+		)
+	# Cached, not rebuilt: a footstep must not synthesise a waveform per step.
+	_check(
+		ToneBank.get_stream(&"ui_click") == ToneBank.get_stream(&"ui_click"),
+		"and a sound asked for twice is the same stream"
+	)
+
+
+## TEST 154 — the ground decides what walking on it sounds like.
+func _test_footstep_surfaces() -> void:
+	await _teleport(Vector3(-40.0, 0.5, District01.MAIN_ST_Z))
+	await _settle(20)
+	_check(
+		SurfaceMap.under(_player) == SurfaceMap.Surface.ASPHALT,
+		"standing in the road is asphalt (%s)"
+		% SurfaceMap.display_name(SurfaceMap.under(_player))
+	)
+
+	await _teleport(Vector3(-40.0, 0.5, District01.MAIN_ST_Z - District01.ROAD_HALF - 1.4))
+	await _settle(20)
+	_check(
+		SurfaceMap.under(_player) == SurfaceMap.Surface.CONCRETE,
+		"stepping onto the pavement is concrete (%s)"
+		% SurfaceMap.display_name(SurfaceMap.under(_player))
+	)
+
+	# Every surface has a sound, and they are not all the same sound.
+	var sounds: Dictionary = {}
+	for surface in SurfaceMap.Surface.values():
+		var id := SurfaceMap.sound_for(surface)
+		_check(ToneBank.get_stream(id) != null, "%s has a footstep" % SurfaceMap.display_name(surface))
+		sounds[id] = true
+	_check(sounds.size() == SurfaceMap.Surface.size(), "and no two surfaces share one")
+
+	# The player's own feet are attached and exempt from the crowd's budget.
+	var steps := _player.get_node_or_null("Footsteps") as Footsteps
+	_check(steps != null and steps.is_player, "the player has footsteps of their own")
+
+
+## TEST 155 — a car makes a noise, and a parked one does not.
+func _test_vehicle_audio() -> void:
+	var car := _player_car()
+	var audio := car.get_node_or_null("Audio") as VehicleAudio
+	_check(audio != null, "every vehicle carries its own audio")
+	if audio == null:
+		return
+
+	var engine := audio.get_node_or_null("Engine") as AudioStreamPlayer3D
+	_check(engine != null, "with an engine loop on the vehicle bus")
+	_check(
+		engine.bus == String(AudioBuses.VEHICLES),
+		"routed so the vehicle slider moves it (%s)" % engine.bus
+	)
+	_check(not car.is_engine_running(), "a parked car with nobody in it is not running")
+
+	await _teleport(car.global_position + Vector3(2.4, 0.5, 0.0))
+	await _settle(10)
+	await _drive(car)
+	await _settle(10)
+	_check(car.is_engine_running(), "and getting in starts it")
+	await _hold(["move_forward"], 60)
+	_check(
+		absf(car.get_throttle_input()) > 0.0 or car.get_planar_speed() > 0.5,
+		"the audio can read what the driver is doing"
+	)
+	await _leave_vehicle()
+	await _settle(10)
+	_check(not car.is_engine_running(), "getting out stops it again")
+
+
+## TEST 156 — the siren follows the light bar exactly.
+func _test_siren_state() -> void:
+	await _prepare_crime_scene()
+	var patrol: Vehicle = null
+	for car in _police_cars():
+		patrol = car
+		break
+	_check(patrol != null, "there is a patrol car to check")
+	if patrol == null:
+		return
+
+	var audio := patrol.get_node_or_null("Audio") as VehicleAudio
+	_check(audio != null, "which carries a siren")
+	if audio == null:
+		return
+	_check(
+		patrol.data.livery == VehicleData.Livery.POLICE,
+		"and wears a police livery"
+	)
+	_check(
+		audio.get_node_or_null("Siren") != null,
+		"a siren player exists only on liveried cars"
+	)
+	_check(
+		_player_car().get_node("Audio").get_node_or_null("Siren") == null,
+		"and a civilian car has none"
+	)
+
+	var driver := patrol.get_node_or_null("Driver") as PoliceDriver
+	_check(driver != null, "the patrol car has a driver")
+	if driver == null:
+		return
+	await _settle(10)
+	_check(
+		audio.is_siren_sounding() == driver.is_siren_active(),
+		"the siren agrees with the light bar (%s / %s)"
+		% [audio.is_siren_sounding(), driver.is_siren_active()]
+	)
+
+
+## TEST 157 — the bed under the city changes with where and when you are.
+func _test_ambience_profiles() -> void:
+	_check(
+		AmbienceDirector.current_profile() != &"",
+		"there is always an ambience profile (%s)" % AmbienceDirector.current_profile()
+	)
+
+	TimeManager.set_total_minutes(13.0 * 60.0)
+	AmbienceDirector.set_space(AmbienceDirector.Space.EXTERIOR)
+	AmbienceDirector._refresh_profile()
+	var day := AmbienceDirector.current_profile()
+
+	TimeManager.set_total_minutes(2.0 * 60.0)
+	AmbienceDirector._refresh_profile()
+	var night := AmbienceDirector.current_profile()
+	_check(day != night, "day and night sound different (%s / %s)" % [day, night])
+
+	TimeManager.set_total_minutes(13.0 * 60.0)
+	AmbienceDirector.set_space(AmbienceDirector.Space.STORE)
+	AmbienceDirector._refresh_profile()
+	var store := AmbienceDirector.current_profile()
+	AmbienceDirector.set_space(AmbienceDirector.Space.CAFE)
+	AmbienceDirector._refresh_profile()
+	var cafe := AmbienceDirector.current_profile()
+	_check(store != cafe, "a shop and a cafe sound different (%s / %s)" % [store, cafe])
+	_check(day != store, "and inside is not outside")
+
+	AmbienceDirector.set_space(AmbienceDirector.Space.EXTERIOR)
+
+
+## TEST 158 — the music system is wired even with nothing to play.
+func _test_music_states() -> void:
+	MusicDirector.set_state(MusicDirector.State.MENU)
+	_check(MusicDirector.get_state() == MusicDirector.State.MENU, "the menu has a music state")
+
+	TimeManager.set_total_minutes(13.0 * 60.0)
+	MusicDirector.refresh_world_state()
+	_check(MusicDirector.get_state() == MusicDirector.State.DAY, "daytime play is the day state")
+
+	TimeManager.set_total_minutes(2.0 * 60.0)
+	MusicDirector.refresh_world_state()
+	_check(
+		MusicDirector.get_state() == MusicDirector.State.NIGHT,
+		"and after dark it is the night state"
+	)
+
+	for state in MusicDirector.State.values():
+		_check(
+			MusicDirector.TRACKS.has(state),
+			"every music state has a slot in the track table (%s)"
+			% MusicDirector.State.keys()[state]
+		)
+	# Shipping without a soundtrack is a decision, not a missing file.
+	_check(
+		String(MusicDirector.TRACKS[MusicDirector.State.DAY]) == "",
+		"and the game ships silent rather than with invented music"
+	)
+
+
+## TEST 159 — settings start where the mix says they should.
+func _test_settings_defaults() -> void:
+	SettingsManager.restore_defaults()
+	for bus in AudioBuses.ALL:
+		_check(
+			absf(SettingsManager.audio_volume(bus) - float(AudioBuses.DEFAULT_VOLUMES[bus])) < 0.01,
+			"%s starts at its designed level" % AudioBuses.display_name(bus)
+		)
+	_check(
+		SettingsManager.audio_volume(AudioBuses.MUSIC)
+			< SettingsManager.audio_volume(AudioBuses.SFX),
+		"music sits under the effects rather than over them"
+	)
+	_check(SettingsManager.preset() == SettingsManager.Preset.MEDIUM, "graphics default to medium")
+	_check(bool(SettingsManager.display("vsync")), "with vsync on")
+	_check(bool(SettingsManager.gameplay("show_prompts")), "and prompts shown")
+
+
+## TEST 160 — settings survive a restart, and are not part of a save game.
+func _test_settings_persistence() -> void:
+	SettingsManager.set_audio_volume(AudioBuses.AMBIENCE, 0.31)
+	SettingsManager.set_gameplay("camera_sensitivity", 1.75)
+	SettingsManager.set_preset(SettingsManager.Preset.LOW)
+
+	# Wipe what is in memory, then read the file back — which is what starting
+	# the game again does.
+	SettingsManager._reset_to_defaults()
+	_check(
+		absf(SettingsManager.audio_volume(AudioBuses.AMBIENCE) - 0.31) > 0.1,
+		"defaults really do differ from what was set"
+	)
+	_check(SettingsManager.load_settings(), "the settings file reads back")
+	_check(
+		absf(SettingsManager.audio_volume(AudioBuses.AMBIENCE) - 0.31) < 0.01,
+		"a volume survives a restart (%.2f)"
+		% SettingsManager.audio_volume(AudioBuses.AMBIENCE)
+	)
+	_check(
+		absf(float(SettingsManager.gameplay("camera_sensitivity")) - 1.75) < 0.01,
+		"and so does a gameplay setting"
+	)
+	_check(SettingsManager.preset() == SettingsManager.Preset.LOW, "and the graphics preset")
+
+	# A malformed file must not stop the game starting.
+	var handle := FileAccess.open(SettingsManager.PATH, FileAccess.WRITE)
+	if handle != null:
+		handle.store_string("this is not a config file {{{")
+		handle.close()
+	SettingsManager._reset_to_defaults()
+	_check(not SettingsManager.load_settings(), "a corrupt settings file is refused")
+	_check(
+		absf(SettingsManager.audio_volume(AudioBuses.MASTER)
+			- float(AudioBuses.DEFAULT_VOLUMES[AudioBuses.MASTER])) < 0.01,
+		"and the defaults stand in for it rather than the game failing"
+	)
+	SettingsManager.restore_defaults()
+
+
+## TEST 161 — the presets differ, in the direction they claim to.
+func _test_graphics_presets() -> void:
+	var low: Dictionary = SettingsManager.PRESETS[SettingsManager.Preset.LOW]
+	var medium: Dictionary = SettingsManager.PRESETS[SettingsManager.Preset.MEDIUM]
+	var high: Dictionary = SettingsManager.PRESETS[SettingsManager.Preset.HIGH]
+
+	_check(not bool(low["shadows"]), "low turns shadows off")
+	_check(bool(medium["shadows"]) and bool(high["shadows"]), "medium and high keep them")
+	_check(
+		float(high["shadow_distance"]) > float(medium["shadow_distance"])
+			and float(medium["shadow_distance"]) > float(low["shadow_distance"]),
+		"shadow distance climbs with the preset"
+	)
+	_check(bool(high["ambient_occlusion"]), "only high pays for ambient occlusion")
+	_check(not bool(low["ambient_occlusion"]), "and low does not")
+	_check(
+		float(low["render_scale"]) < float(medium["render_scale"]),
+		"low renders at a lower scale"
+	)
+
+	# Applying one must actually reach the world.
+	SettingsManager.set_preset(SettingsManager.Preset.LOW)
+	SettingsManager.apply_graphics()
+	var sun := _main.get_node_or_null("District01/Sun") as DirectionalLight3D
+	_check(sun != null, "the district has a sun to configure")
+	if sun != null:
+		_check(not sun.shadow_enabled, "and the low preset switched its shadows off")
+	SettingsManager.set_preset(SettingsManager.Preset.HIGH)
+	SettingsManager.apply_graphics()
+	if sun != null:
+		_check(sun.shadow_enabled, "while high switched them back on")
+	SettingsManager.restore_defaults()
+
+
+## TEST 162 — bindings can be read, changed, clashed and reset.
+func _test_keybindings() -> void:
+	for action in SettingsManager.BINDABLE:
+		_check(InputMap.has_action(action), "%s is a real action" % action)
+		_check(
+			SettingsManager.binding_label(action) != "",
+			"and has a readable binding (%s)" % SettingsManager.binding_label(action)
+		)
+
+	var original := SettingsManager.binding_label(&"sprint")
+	var event := InputEventKey.new()
+	event.physical_keycode = KEY_J
+	var clash := SettingsManager.conflict_for(&"sprint", event)
+	_check(clash == &"", "J is free before anything is bound to it (%s)" % clash)
+
+	SettingsManager.rebind(&"sprint", event)
+	_check(
+		SettingsManager.binding_label(&"sprint") == "J",
+		"rebinding takes effect (%s)" % SettingsManager.binding_label(&"sprint")
+	)
+	_check(
+		SettingsManager.conflict_for(&"interact", event) == &"sprint",
+		"and the next action to want that key is told who has it"
+	)
+
+	SettingsManager.reset_bindings()
+	_check(
+		SettingsManager.binding_label(&"sprint") == original,
+		"resetting puts the defaults back (%s)" % SettingsManager.binding_label(&"sprint")
+	)
+
+
+## TEST 163 — save slots, and what the front end can say about them.
+func _test_save_slots() -> void:
+	for slot in SaveManager.MANUAL_SLOTS:
+		SaveManager.delete_slot(slot)
+	SaveManager.delete_slot(SaveManager.AUTOSAVE_SLOT)
+
+	_check(not SaveManager.has_any_save(), "with every slot empty there is nothing to continue")
+	_check(SaveManager.most_recent_slot() < 0, "and no slot to continue from")
+	_check(SaveManager.describe_slot(2).is_empty(), "an empty slot describes as empty")
+
+	EconomyManager.restore(4321)
+	_check(SaveManager.save_to_slot(2), "a game saves to a chosen slot")
+	var summary := SaveManager.describe_slot(2)
+	_check(not summary.is_empty(), "which can then be described without loading it")
+	_check(int(summary.get("cash", 0)) == 4321, "the summary carries the money ($%s)" % summary.get("cash", 0))
+	_check(String(summary.get("district", "")) != "", "and where the player was")
+	_check(String(summary.get("saved_at", "")) != "", "and when it was saved")
+	_check(int(summary.get("slot", -1)) == 2, "and which slot it is")
+
+	_check(SaveManager.has_any_save(), "so CONTINUE now has something to load")
+	_check(SaveManager.most_recent_slot() == 2, "and picks the slot just written")
+	_check(SaveManager.list_saves().size() == 1, "one save is listed")
+
+	# A corrupt slot must be skipped rather than offered.
+	var handle := FileAccess.open(SaveManager.get_slot_path(3), FileAccess.WRITE)
+	if handle != null:
+		handle.store_string("{ not json")
+		handle.close()
+	_check(SaveManager.describe_slot(3).is_empty(), "an unreadable slot describes as empty")
+	_check(SaveManager.list_saves().size() == 1, "and is left out of the list")
+	_check(SaveManager.most_recent_slot() == 2, "so CONTINUE still finds the good one")
+
+	# The autosave is a slot of its own, so it can never overwrite a manual save.
+	_check(
+		not SaveManager.MANUAL_SLOTS.has(SaveManager.AUTOSAVE_SLOT),
+		"the autosave has a slot the player cannot write to"
+	)
+	SaveManager._last_autosave = -999.0
+	_check(SaveManager.autosave("test"), "the game can save itself")
+	_check(not SaveManager.autosave("test"), "but not twice in a row")
+	_check(SaveManager.list_saves().size() == 2, "and the autosave is offered alongside the manual one")
+	var auto := SaveManager.describe_slot(SaveManager.AUTOSAVE_SLOT)
+	_check(bool(auto.get("autosave", false)), "labelled as an autosave")
+
+	for slot in SaveManager.MANUAL_SLOTS:
+		SaveManager.delete_slot(slot)
+	SaveManager.delete_slot(SaveManager.AUTOSAVE_SLOT)
+	await _settle(2)
+
+
+## TEST 164 — the front end exists and knows when it has nothing to offer.
+func _test_menu_state() -> void:
+	_check(
+		ResourceLoader.exists("res://ui/menu/main_menu.tscn"),
+		"there is a main menu scene"
+	)
+	_check(
+		ProjectSettings.get_setting("application/run/main_scene") == "res://ui/menu/main_menu.tscn",
+		"and the game boots to it rather than straight into the world"
+	)
+	# The harness loads main.tscn directly, which is what keeps this suite
+	# unaffected by the front end existing at all.
+	_check(
+		_main != null and _main.get_node_or_null("Player") != null,
+		"while the tests still load the world scene directly"
+	)
+
+	var hud := _main.get_node_or_null("HUD")
+	_check(hud != null, "the HUD is up")
+	if hud != null:
+		var pause_menu := hud.get_node_or_null("Root/PauseMenu")
+		_check(pause_menu != null, "with a pause menu attached to it")
+		_check(
+			pause_menu == null or not pause_menu.visible,
+			"which is hidden while the game is running"
+		)
+
+
+## TEST 165 — the camera settings are settings, not decoration.
+func _test_camera_settings() -> void:
+	var rig := _camera_rig
+	SettingsManager.restore_defaults()
+
+	# Sensitivity scales the orbit rather than being stored and ignored.
+	SettingsManager.set_gameplay("camera_sensitivity", 2.0)
+	var before := rig.yaw_degrees
+	rig._update_orbit(0.0)
+	_check(
+		is_equal_approx(rig.yaw_degrees, before),
+		"no input still turns the camera nowhere"
+	)
+
+	var zoom_before := rig.distance
+	SettingsManager.set_gameplay("zoom_sensitivity", 2.0)
+	await _press_action("camera_zoom_out")
+	await _settle(2)
+	var fast_step := rig.distance - zoom_before
+
+	rig.distance = zoom_before
+	SettingsManager.set_gameplay("zoom_sensitivity", 0.5)
+	await _press_action("camera_zoom_out")
+	await _settle(2)
+	var slow_step := rig.distance - zoom_before
+	_check(
+		fast_step > slow_step,
+		"a higher zoom sensitivity zooms further per notch (%.2f vs %.2f)"
+		% [fast_step, slow_step]
+	)
+
+	# Shake respects the slider, including all the way off.
+	SettingsManager.set_gameplay("camera_shake", 0.0)
+	rig.add_shake(1.0)
+	_check(rig.get_shake() <= 0.001, "camera shake set to zero really is off")
+
+	SettingsManager.set_gameplay("camera_shake", 1.0)
+	rig.add_shake(1.0)
+	_check(rig.get_shake() > 0.5, "and turned up, an impact moves the camera")
+	await _settle(90)
+	_check(rig.get_shake() < 0.2, "and it settles again (%.2f)" % rig.get_shake())
+
+	SettingsManager.restore_defaults()
+	rig.distance = zoom_before

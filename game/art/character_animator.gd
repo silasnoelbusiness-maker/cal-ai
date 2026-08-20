@@ -50,6 +50,13 @@ func set_state(state: State) -> void:
 	_state = state
 
 
+## How many strides have been taken. Whatever wants to put a footstep under a
+## foot reads this rather than guessing from speed, so a sound lands when the
+## leg is actually down and the cadence follows the walk cycle for free.
+func stride_count() -> int:
+	return int(_phase / PI)
+
+
 func get_state() -> State:
 	return _state
 

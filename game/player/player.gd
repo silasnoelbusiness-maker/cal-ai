@@ -73,6 +73,14 @@ func _build_figure() -> void:
 	add_child(_animator)
 	_animator.setup(rig)
 
+	# The player's own feet: always audible, and never counted against the
+	# crowd's shared footstep budget.
+	var steps := Footsteps.new()
+	steps.name = "Footsteps"
+	steps.is_player = true
+	add_child(steps)
+	steps.setup(self, _animator)
+
 
 ## Puts the player into a pose their movement cannot express — behind a till,
 ## carrying stock. Cleared by passing IDLE.

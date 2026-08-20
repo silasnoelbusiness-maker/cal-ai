@@ -128,6 +128,14 @@ var _theft_reported: bool = false
 ## Where this car was parked at load, so a stolen one can be put back.
 var _spawn_transform: Transform3D
 var _impact_timer: float = 0.0
+## The last inputs actually applied, so the audio can follow the car without
+## re-deriving what the driver or the AI asked for.
+var _audio: VehicleAudio = null
+
+var _last_throttle: float = 0.0
+var _last_steer: float = 0.0
+var _last_handbrake: bool = false
+
 var _ai_throttle: float = 0.0
 var _ai_steer: float = 0.0
 var _ai_handbrake: bool = false
@@ -146,6 +154,12 @@ func _ready() -> void:
 		add_to_group(&"saveable")
 
 	_build_body()
+
+	# The car's own noise: engine, tyres, and a siren if it is a patrol car.
+	_audio = VehicleAudio.new()
+	_audio.name = "Audio"
+	add_child(_audio)
+	_audio.setup(self)
 	_build_collision()
 	_build_impact_zone()
 	_door.setup(self)
@@ -160,6 +174,24 @@ func get_driver() -> Node3D:
 
 func has_driver() -> bool:
 	return _driver != null
+
+
+## True while the car is running: somebody is in it, or an AI is driving it, and
+## it is not wrecked. What the engine audio keys off.
+func is_engine_running() -> bool:
+	return not is_disabled() and (_driver != null or is_ai_controlled())
+
+
+func get_throttle_input() -> float:
+	return _last_throttle
+
+
+func get_steer_input() -> float:
+	return _last_steer
+
+
+func is_handbrake_down() -> bool:
+	return _last_handbrake
 
 
 func is_disabled() -> bool:
@@ -280,6 +312,7 @@ func enter(driver: Node3D) -> bool:
 	# owns whether this particular car's lights are on at all.
 	_headlights.light_energy = HEADLIGHT_ENERGY
 
+	AudioManager.play_at(&"car_door", global_position, AudioBuses.VEHICLES, -10.0)
 	_hand_camera_to(self)
 	_report_theft_if_needed(driver)
 	driver_entered.emit(driver)
@@ -304,6 +337,7 @@ func exit_driver(force: bool = false) -> bool:
 	_door.available = true
 	_headlights.light_energy = 0.0
 
+	AudioManager.play_at(&"car_door", global_position, AudioBuses.VEHICLES, -12.0)
 	leaving.call("exit_vehicle", spot)
 	_hand_camera_to(leaving)
 	driver_exited.emit(leaving)
@@ -363,6 +397,10 @@ func _physics_process(delta: float) -> void:
 			throttle = Input.get_axis("move_back", "move_forward")
 			steer = Input.get_axis("move_right", "move_left")
 			handbrake = Input.is_action_pressed("handbrake")
+
+	_last_throttle = throttle
+	_last_steer = steer
+	_last_handbrake = handbrake
 
 	_update_speed(throttle, handbrake, delta)
 	_update_steering(steer, handbrake, delta)
@@ -458,6 +496,16 @@ func _resolve_collisions(speed_before: float, delta: float) -> void:
 	_forward_speed = lerpf(actual_forward, _forward_speed * data.impact_speed_retention, 0.5)
 
 	collided.emit(hardest_impact)
+	# Graded by how hard the hit was, and rate-limited inside the audio, so
+	# scraping along a wall is one thump rather than one per physics frame.
+	if _audio != null:
+		_audio.report_impact(hardest_impact)
+	# And a knock to the camera, but only for the car the player is in: a
+	# traffic shunt three streets away should not move the view.
+	if _driver != null and _driver == GameManager.player:
+		var rig := get_tree().get_first_node_in_group(&"camera_rig") as TopDownCamera
+		if rig != null:
+			rig.add_shake(clampf(hardest_impact / 18.0, 0.0, 1.0))
 	if hardest_impact > data.damage_speed_threshold:
 		apply_damage((hardest_impact - data.damage_speed_threshold) * data.damage_per_impact_speed)
 

@@ -45,6 +45,7 @@ func room() -> Rect2:
 
 
 func _ready() -> void:
+	add_to_group(&"interior_room")
 	_build_palette()
 	_build_shell()
 	_build_bed()
@@ -99,7 +100,10 @@ func _build_shell() -> void:
 	for i in apron.size():
 		CityKit.add_slab(shell, "Apron%d" % i, apron[i], -0.4, 0.4, _mat("surround"), true, false)
 
-	CityKit.add_slab(shell, "Floor", footprint, -0.4, 0.4, _mat("floor"))
+	var floor_slab := CityKit.add_slab(shell, "Floor", footprint, -0.4, 0.4, _mat("floor"))
+	# Boards underfoot, so walking round the flat sounds like a home rather than
+	# like the pavement outside it.
+	SurfaceMap.tag(floor_slab, SurfaceMap.Surface.WOOD)
 	CityKit.add_slab(
 		shell,
 		"Rug",

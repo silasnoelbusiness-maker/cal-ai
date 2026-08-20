@@ -34,6 +34,10 @@ func _perform(interactor: Node3D) -> void:
 		push_warning("Portal '%s' has no destination in group '%s'." % [name, destination_group])
 		return
 
+	# A door, heard where the player was rather than where they are going: the
+	# sound belongs to the doorway they just used.
+	AudioManager.play_at(&"door", global_position, AudioBuses.SFX, -8.0)
+
 	if travel_minutes > 0:
 		TimeManager.advance_minutes(travel_minutes)
 

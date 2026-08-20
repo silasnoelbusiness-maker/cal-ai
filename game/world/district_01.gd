@@ -273,6 +273,7 @@ func _add_grass(node_name: String, rect: Rect2) -> void:
 	CityKit.add_slab(
 		_geometry, node_name, rect, GRASS_BASE, GRASS_THICKNESS, _mat("grass"), false, false
 	)
+	SurfaceMap.probe(_geometry, rect, GRASS_BASE + GRASS_THICKNESS, SurfaceMap.Surface.GRASS)
 
 
 # --- Streets -------------------------------------------------------------
@@ -301,6 +302,10 @@ func _add_road(node_name: String, rect: Rect2) -> void:
 	CityKit.add_slab(
 		_geometry, node_name, rect, ROAD_BASE, ROAD_THICKNESS, _mat("asphalt"), false, false
 	)
+	# A road is a decorative slab with no collision, so footsteps get a probe
+	# over it instead. Moving a street moves the sound of walking on it, because
+	# both come from the same rect.
+	SurfaceMap.probe(_geometry, rect, ROAD_BASE + ROAD_THICKNESS, SurfaceMap.Surface.ASPHALT)
 
 
 func _build_road_markings() -> void:
@@ -485,7 +490,7 @@ func _build_sidewalks() -> void:
 func _add_sidewalk(rect: Rect2, kerb: Kerb = Kerb.NONE) -> void:
 	if rect.size.x <= 0.01 or rect.size.y <= 0.01:
 		return
-	CityKit.add_slab(
+	var slab := CityKit.add_slab(
 		_geometry,
 		"Sidewalk%d" % _sidewalk_index,
 		rect,
@@ -496,6 +501,7 @@ func _add_sidewalk(rect: Rect2, kerb: Kerb = Kerb.NONE) -> void:
 		true,
 		CURB_LAYER
 	)
+	SurfaceMap.tag(slab, SurfaceMap.Surface.CONCRETE)
 	_add_kerb(rect, kerb)
 	_sidewalk_index += 1
 

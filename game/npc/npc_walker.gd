@@ -124,6 +124,7 @@ func _build_body() -> void:
 	_animator.name = "Animator"
 	add_child(_animator)
 	_animator.setup(rig)
+	_attach_footsteps()
 
 
 ## Re-dresses a figure that is already in the tree.
@@ -156,6 +157,25 @@ func restyle(top: Color, accent: Color, category: CharacterLook.Category) -> voi
 	_animator.name = "Animator"
 	add_child(_animator)
 	_animator.setup(rig)
+	_attach_footsteps()
+
+
+## Footsteps for a walker, replacing any previous set. Nearby civilians are
+## audible; the distance test and the shared voice limit live in Footsteps
+## itself, so a crowd of forty does not become forty sources.
+func _attach_footsteps() -> void:
+	var existing := get_node_or_null("Footsteps")
+	if existing != null:
+		existing.queue_free()
+	var steps := Footsteps.new()
+	steps.name = "Footsteps"
+	add_child(steps)
+	steps.setup(self, _animator)
+
+
+## The animator, for anything that needs to read the stride.
+func get_animator() -> CharacterAnimator:
+	return _animator
 
 
 ## What the figure should be doing. Overridden by anything with a better idea —

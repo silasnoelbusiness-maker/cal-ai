@@ -491,7 +491,14 @@ func _build_shell() -> void:
 	for i in apron.size():
 		CityKit.add_slab(shell, "Apron%d" % i, apron[i], -0.4, 0.4, _mat("surround"), true, false)
 
-	CityKit.add_slab(shell, "Floor", footprint, -0.4, 0.4, _mat("floor"))
+	var floor_slab := CityKit.add_slab(shell, "Floor", footprint, -0.4, 0.4, _mat("floor"))
+	# A shop is tiled and a cafe is boarded, and the floor sounds like whichever
+	# it is — the cheapest possible reinforcement that these are different kinds
+	# of business.
+	SurfaceMap.tag(
+		floor_slab,
+		SurfaceMap.Surface.WOOD if _style_id() == &"coffee_shop" else SurfaceMap.Surface.TILE
+	)
 	# The store room reads as a different room from above without a doorway shot.
 	CityKit.add_slab(
 		shell, "BackFloor",

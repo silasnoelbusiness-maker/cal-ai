@@ -58,7 +58,7 @@ func deposit(amount: int, reason: String = "Income", source: Source = Source.LEG
 
 
 func get_cash_string() -> String:
-	return "$%s" % _with_thousands_separator(cash)
+	return "$%s" % with_thousands_separator(cash)
 
 
 func get_history() -> Array[Dictionary]:
@@ -92,7 +92,7 @@ func _record(category: Category, amount: int, reason: String, source: Source) ->
 	transaction_recorded.emit(entry)
 
 
-func _with_thousands_separator(value: int) -> String:
+func with_thousands_separator(value: int) -> String:
 	var digits := str(absi(value))
 	var out := ""
 	var count := 0

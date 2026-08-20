@@ -220,6 +220,10 @@ func _build_roads() -> void:
 			_geometry, "Road_%s_%d" % ["EW" if east_west else "NS", int(centre)],
 			rect, ROAD_BASE, ROAD_THICKNESS, _mat("asphalt"), false, false
 		)
+		# A probe for footsteps, same as Harbour Row's roads.
+		SurfaceMap.probe(
+			_geometry, rect, ROAD_BASE + ROAD_THICKNESS, SurfaceMap.Surface.ASPHALT
+		)
 		if half > SERVICE_HALF:
 			_paint_centre_line(east_west, centre, from, to)
 
@@ -285,12 +289,13 @@ func _build_pavements() -> void:
 				CityKit.rect_from_bounds(from, minf(near, far), to, maxf(near, far)) if east_west
 				else CityKit.rect_from_bounds(minf(near, far), from, maxf(near, far), to)
 			)
-			CityKit.add_slab(
+			var walk := CityKit.add_slab(
 				_geometry, "Walk_%s_%d_%d" % [
 					"EW" if east_west else "NS", int(centre), int(side)
 				],
 				rect, 0.0, CURB_HEIGHT, _mat("paving"), true, false, 1 << 5
 			)
+			SurfaceMap.tag(walk, SurfaceMap.Surface.CONCRETE)
 
 
 # --- Blocks --------------------------------------------------------------

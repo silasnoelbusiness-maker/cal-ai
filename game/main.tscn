@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://world/district_01.tscn" id="2_district"]
@@ -14,6 +14,7 @@
 [ext_resource type="PackedScene" path="res://world/interiors/retail_unit.tscn" id="9_retail_unit"]
 [ext_resource type="Script" path="res://equipment/placement_controller.gd" id="10_placement"]
 [ext_resource type="Script" path="res://world/world_debug.gd" id="13_world_debug"]
+[ext_resource type="Script" path="res://audio/audio_debug.gd" id="14_audio_debug"]
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1_main")
@@ -98,6 +99,9 @@ script = ExtResource("8_crime_debug")
 
 [node name="BusinessDebug" type="CanvasLayer" parent="."]
 script = ExtResource("11_business_debug")
+
+[node name="AudioDebug" type="CanvasLayer" parent="."]
+script = ExtResource("14_audio_debug")
 
 [node name="WorldDebug" type="CanvasLayer" parent="."]
 script = ExtResource("13_world_debug")

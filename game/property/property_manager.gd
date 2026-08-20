@@ -81,6 +81,8 @@ func lease(property: CommercialProperty, tenant: StringName = &"player") -> Leas
 		GameManager.Tone.GOOD
 	)
 	property_leased.emit(property)
+	# Signing for a unit is a decision worth not losing.
+	SaveManager.autosave("leased a unit")
 	return LeaseResult.OK
 
 

@@ -77,6 +77,8 @@ func _ready() -> void:
 	GameManager.screen_requested.connect(_on_screen_requested)
 	GameManager.menus_close_requested.connect(close_screens)
 	GameManager.player_teleported.connect(_on_player_teleported)
+	SaveManager.autosave_started.connect(_on_autosave_started)
+	SaveManager.autosave_finished.connect(_on_autosave_finished)
 
 	WantedManager.level_changed.connect(_on_wanted_level_changed)
 	WantedManager.escaping_started.connect(_on_escaping_started)
@@ -112,6 +114,7 @@ func _ready() -> void:
 	_prompt_panel.visible = false
 	_toast_panel.modulate.a = 0.0
 	_pause_overlay.visible = false
+	_build_pause_menu()
 	_speed_panel.visible = false
 	_wanted_label.visible = false
 	_escape_label.visible = false
@@ -583,5 +586,33 @@ func _show_toast(message: String, tone: int) -> void:
 	_toast_tween.tween_property(_toast_panel, "modulate:a", 0.0, TOAST_FADE_SECONDS)
 
 
-func _on_game_state_changed(state: int) -> void:
-	_pause_overlay.visible = state == GameManager.State.PAUSED
+## A quiet line in the corner while the game saves itself. Deliberately a toast
+## rather than anything modal: an autosave the player has to acknowledge is
+## worse than no autosave.
+func _on_autosave_started(_reason: String) -> void:
+	_show_toast("SAVING…", GameManager.Tone.INFO)
+
+
+func _on_autosave_finished(succeeded: bool) -> void:
+	if not succeeded:
+		_show_toast("AUTOSAVE FAILED", GameManager.Tone.BAD)
+
+
+## The pause menu, added to the HUD rather than given its own scene: pausing
+## should not cost a scene change, and everything it needs is already here.
+func _build_pause_menu() -> void:
+	if get_node_or_null("Root/PauseMenu") != null:
+		return
+	var menu := PauseMenu.new()
+	menu.name = "PauseMenu"
+	var root := get_node_or_null("Root")
+	if root == null:
+		add_child(menu)
+	else:
+		root.add_child(menu)
+
+
+func _on_game_state_changed(_state: int) -> void:
+	# The old overlay was a dim and the word PAUSED. The pause menu replaces it,
+	# and manages its own visibility from the same signal.
+	_pause_overlay.visible = false

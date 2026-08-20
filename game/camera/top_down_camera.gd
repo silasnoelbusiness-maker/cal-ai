@@ -69,6 +69,13 @@ extends Node3D
 @export var mouse_sensitivity: float = 0.22
 @export var zoom_step: float = 2.0
 
+@export_group("Shake")
+## How far the camera is knocked by a hard impact, before the player's own
+## preference scales it. Restrained on purpose: this is a management game with
+## chases in it, not a shooter.
+@export var shake_metres: float = 0.35
+@export var shake_decay: float = 6.0
+
 @onready var _spring_arm: SpringArm3D = $SpringArm3D
 @onready var camera: Camera3D = $SpringArm3D/Camera3D
 
@@ -78,6 +85,8 @@ var _look_ahead: Vector3 = Vector3.ZERO
 var _follow_blend: float = 1.0
 ## The exported framing, remembered so a temporary interior view can be undone.
 var _default_distance: float = 0.0
+var _shake: float = 0.0
+var _shake_offset: Vector3 = Vector3.ZERO
 var _default_pitch: float = 0.0
 var _default_yaw: float = 0.0
 
@@ -156,19 +165,57 @@ func get_yaw() -> float:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("camera_zoom_in"):
-		distance = clampf(distance - zoom_step, min_distance, max_distance)
+		distance = clampf(distance - zoom_step * _zoom_scale(), min_distance, max_distance)
 	elif event.is_action_pressed("camera_zoom_out"):
-		distance = clampf(distance + zoom_step, min_distance, max_distance)
+		distance = clampf(distance + zoom_step * _zoom_scale(), min_distance, max_distance)
 	elif event.is_action_pressed("camera_reset"):
 		# R turns the equipment while a placement is running.
 		if GameManager.placement_active:
 			return
 		reset_orientation()
 	elif event is InputEventMouseMotion and Input.is_action_pressed("camera_look"):
-		yaw_degrees -= event.relative.x * mouse_sensitivity
+		yaw_degrees -= event.relative.x * mouse_sensitivity * _look_scale()
+
+
+## The player's own sensitivity, from settings. Read rather than cached so a
+## change in the pause menu takes effect without leaving the menu.
+func _look_scale() -> float:
+	return float(SettingsManager.gameplay("camera_sensitivity"))
+
+
+func _zoom_scale() -> float:
+	return float(SettingsManager.gameplay("zoom_sensitivity"))
+
+
+## Knocks the camera, scaled by the player's preference — which may be zero, and
+## then this does nothing at all.
+func add_shake(strength: float) -> void:
+	var allowance := float(SettingsManager.gameplay("camera_shake"))
+	if allowance <= 0.001:
+		return
+	_shake = maxf(_shake, clampf(strength, 0.0, 1.0) * allowance)
+
+
+func _update_shake(delta: float) -> void:
+	if _shake <= 0.001:
+		# The offset is re-applied from scratch every frame rather than
+		# accumulated, so clearing it is all that settling takes.
+		_shake_offset = Vector3.ZERO
+		return
+	_shake = move_toward(_shake, 0.0, shake_decay * delta * _shake)
+	# Applied to the pivot rather than the camera, so the shake survives the
+	# spring arm doing its own smoothing.
+	_shake_offset = Vector3(
+		randf_range(-1.0, 1.0), randf_range(-0.4, 0.4), randf_range(-1.0, 1.0)
+	) * _shake * shake_metres
+
+
+func get_shake() -> float:
+	return _shake
 
 
 func _process(delta: float) -> void:
+	_update_shake(delta)
 	_update_orbit(delta)
 	_update_speed_zoom(delta)
 	_update_look_ahead(delta)
@@ -184,7 +231,7 @@ func get_look_ahead_distance() -> float:
 func _update_orbit(delta: float) -> void:
 	var orbit := Input.get_axis("camera_rotate_right", "camera_rotate_left")
 	if not is_zero_approx(orbit):
-		yaw_degrees += orbit * key_orbit_speed * delta
+		yaw_degrees += orbit * key_orbit_speed * _look_scale() * delta
 	yaw_degrees = wrapf(yaw_degrees, -180.0, 180.0)
 	rotation_degrees.y = yaw_degrees
 
@@ -207,7 +254,7 @@ func _update_follow(delta: float) -> void:
 	var sharpness := lerpf(handover_sharpness, follow_sharpness, _follow_blend)
 	global_position = global_position.lerp(
 		_desired_pivot_position(), _smoothing(sharpness, delta)
-	)
+	) + _shake_offset
 
 
 ## The lead comes from the target's own `get_facing()` — the player's body pivot

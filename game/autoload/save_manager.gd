@@ -16,6 +16,11 @@ signal game_saved(slot: int)
 signal game_loaded(slot: int)
 signal save_failed(reason: String)
 
+## Emitted around an autosave so the HUD can show that it happened without the
+## save system knowing anything about the HUD.
+signal autosave_started(reason: String)
+signal autosave_finished(succeeded: bool)
+
 const SAVE_VERSION := 1
 const SAVE_PATH := "user://meridian_save_%d.json"
 const SAVEABLE_GROUP := &"saveable"
@@ -27,16 +32,84 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Quick-load retired with Phase L: loading is a considered choice made from
+	# the pause menu against a named slot, not a keystroke that silently throws
+	# away everything since the last save.
 	if event.is_action_pressed("quick_save"):
 		save_to_slot(1)
-		get_viewport().set_input_as_handled()
-	elif event.is_action_pressed("quick_load"):
-		load_from_slot(1)
 		get_viewport().set_input_as_handled()
 
 
 func get_slot_path(slot: int) -> String:
 	return SAVE_PATH % slot
+
+
+## Slots the front end offers. Three manual, plus one the game writes itself.
+const MANUAL_SLOTS: Array[int] = [1, 2, 3]
+const AUTOSAVE_SLOT := 0
+
+
+## What is in a slot, without loading it: the summary written at save time plus
+## the file's own timestamp. Returns an empty dictionary for an empty slot, and
+## for a corrupt one — a slot that cannot be described is a slot the player
+## should not be offered.
+func describe_slot(slot: int) -> Dictionary:
+	var path := get_slot_path(slot)
+	if not FileAccess.file_exists(path):
+		return {}
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return {}
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	file.close()
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return {}
+	var payload: Dictionary = parsed
+	if int(payload.get("version", 0)) > SAVE_VERSION:
+		return {}
+	var summary: Dictionary = payload.get("summary", {})
+	summary["slot"] = slot
+	summary["saved_at"] = payload.get("saved_at", "")
+	summary["autosave"] = slot == AUTOSAVE_SLOT
+	return summary
+
+
+## Every slot with something readable in it, newest first. What CONTINUE picks
+## from, and what the load screen lists.
+func list_saves() -> Array[Dictionary]:
+	var found: Array[Dictionary] = []
+	for slot in ([AUTOSAVE_SLOT] + MANUAL_SLOTS):
+		var summary := describe_slot(slot)
+		if not summary.is_empty():
+			found.append(summary)
+	found.sort_custom(
+		func(a: Dictionary, b: Dictionary) -> bool:
+			return String(a.get("saved_at", "")) > String(b.get("saved_at", ""))
+	)
+	return found
+
+
+## The slot CONTINUE should load, or -1 when there is nothing valid to continue.
+func most_recent_slot() -> int:
+	var saves := list_saves()
+	return int(saves[0].get("slot", -1)) if not saves.is_empty() else -1
+
+
+func has_any_save() -> bool:
+	return most_recent_slot() >= 0
+
+
+## A one-line description of the game as it stands, stored with the save.
+func _describe_current_game() -> Dictionary:
+	var district := WorldManager.player_district()
+	return {
+		"cash": EconomyManager.cash,
+		"day": TimeManager.day_index + 1,
+		"time": TimeManager.get_time_string(),
+		"district": district.display_name if district != null else "Harbour Row",
+		"businesses": BusinessManager.owned_count(),
+		"net_worth": BusinessManager.net_worth(),
+	}
 
 
 func has_save(slot: int = 1) -> bool:
@@ -47,6 +120,9 @@ func save_to_slot(slot: int = 1) -> bool:
 	var payload := {
 		"version": SAVE_VERSION,
 		"saved_at": Time.get_datetime_string_from_system(),
+		# A summary the load screen reads without restoring anything: enough to
+		# tell one slot from another at a glance.
+		"summary": _describe_current_game(),
 		"clock": {"total_minutes": TimeManager.total_minutes},
 		"economy": {
 			"cash": EconomyManager.cash,
@@ -162,3 +238,27 @@ func _eject_driver() -> void:
 func _save_id_of(node: Node) -> String:
 	var id: Variant = node.get("save_id")
 	return "" if id == null else String(id)
+
+
+# --- Autosave --------------------------------------------------------------
+
+## The game saving itself, at moments that are already a natural break.
+##
+## Deliberately event-driven rather than on a timer: a save every five minutes
+## lands mid-chase as often as not, and a save when the player goes to bed or
+## signs a lease is one they would have made themselves. The cooldown stops a
+## flurry of events becoming a flurry of writes.
+const AUTOSAVE_COOLDOWN := 90.0
+
+var _last_autosave: float = -999.0
+
+
+func autosave(reason: String = "") -> bool:
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - _last_autosave < AUTOSAVE_COOLDOWN:
+		return false
+	_last_autosave = now
+	autosave_started.emit(reason)
+	var saved := save_to_slot(AUTOSAVE_SLOT)
+	autosave_finished.emit(saved)
+	return saved

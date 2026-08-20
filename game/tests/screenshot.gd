@@ -26,7 +26,8 @@ extends Node
 ##             traffic_crossing, central_pedestrians, city_map, map_filters,
 ##             map_route, central_property, large_interior, better_apartment,
 ##             courier_delivery, vehicle_roster, harbour_business,
-##             central_business, city_empire, cross_district_chase, central_night
+##             central_business, city_empire, cross_district_chase, central_night,
+##             pause_menu, loaded_game
 ##   distance  camera distance override, for overview shots
 ##   yaw       camera yaw override
 ##   pitch     camera pitch override
@@ -304,6 +305,9 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 
 		"police_officer", "police_close", "business_exterior", "hero":
 			await _phase_k_scenario(main, scenario)
+
+		"pause_menu", "loaded_game":
+			await _phase_l_scenario(main, scenario)
 
 		"characters":
 			# The five people the game draws, lined up at reading distance:
@@ -827,6 +831,30 @@ func _run_empire_scenario(main: Node, scenario: String) -> void:
 ## The shots the visual pass exists for. Each drives the real systems: the
 ## officer is a real PoliceOfficer, the light bar is the pursuit light bar, and
 ## the shop exterior is the sign the business actually puts up.
+## Phase L: the front end seen from inside a running game.
+func _phase_l_scenario(_main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	await _wait(30)
+
+	if scenario == "loaded_game":
+		# The HUD as it looks on arriving from the menu: a real save, restored
+		# through the same path CONTINUE uses, rather than a fresh world
+		# photographed and called a load.
+		EconomyManager.restore(6400)
+		SaveManager.save_to_slot(1)
+		await _wait(4)
+		EconomyManager.restore(50)
+		SaveManager.load_from_slot(1)
+		await _wait(40)
+		return
+
+	SaveManager.save_to_slot(1)
+	await _wait(4)
+	GameManager.toggle_pause()
+	await _wait(20)
+
+
 func _phase_k_scenario(main: Node, scenario: String) -> void:
 	var player: Node3D = GameManager.player
 

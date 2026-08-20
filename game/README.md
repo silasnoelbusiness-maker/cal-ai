@@ -76,8 +76,10 @@ confiscated.
 
 ## Running
 
-Open `game/project.godot` in Godot 4.3 (or newer 4.x) and press Play. The main
-scene is `res://main.tscn`.
+Open `game/project.godot` in Godot 4.3 (or newer 4.x) and press Play. The game
+boots to its title screen (`res://ui/menu/main_menu.tscn`); the world itself is
+`res://main.tscn`, which is what the headless tests load directly so the front
+end never stands between a test and the game.
 
 ## Controls
 
@@ -114,7 +116,7 @@ Development keys, to be removed before release:
 | --- | --- |
 | `F1` | Show / hide the traffic overlay |
 | `F2` | Cycle traffic density (low / medium / high) |
-| `F5` / `F12` | Quick save / quick load (until the pause menu lands) |
+| `F5` | Quick save to slot 1 |
 | `F8` | Unstick the current vehicle |
 | `F6` / `F7` | Set wanted level 1 / 2 |
 | `F9` | Clear the wanted level |
@@ -124,12 +126,15 @@ Development keys, to be removed before release:
 | `1`–`0`, `Q`–`I` | Business debug commands, only while that overlay is up |
 | `F11` | Show / hide the world overlay (district, populations, graphs, FPS) |
 | `1`–`6`, `0` | World debug view layers, only while that overlay is up |
+| `F12` | Show / hide the audio overlay (voices, ambience, buses, surface) |
 
 Every overlay is hidden by default and draws nothing until it is switched on, so
 none of them intrudes on ordinary play or on a screenshot.
 
-`F9` was quick-load in Phase D; it is now clear-wanted, and quick-load moved to
-`F12`.
+`F9` was quick-load in Phase D and is now clear-wanted. Quick-load has been
+retired altogether: loading is a considered choice made from the pause menu
+against a named slot, rather than a keystroke that silently discards everything
+since the last save. `F12` is now the audio overlay.
 
 ## Running a business
 
@@ -360,6 +365,76 @@ Whichever place is set as `CURRENT HOME` is the one you sleep in. The other
 bed says `NOT YOUR HOME` and will not let you, and ending a lease does not
 happen by itself when you take on another.
 
+## How it sounds
+
+There are no audio files in this repository, for the same reason there are no
+image files: the project generates what it needs at load. Every sound is
+synthesised by `audio/tone_bank.gd` — filtered noise bursts for footsteps and
+impacts, sine blips and sweeps for the interface, whole-cycle saw loops for
+engines, a two-note loop for the siren, cross-faded noise for the ambience beds.
+Nothing is sampled from anything, so there is no provenance to document and no
+licence to honour.
+
+Six buses sit under the master — Music, SFX, Ambience, Interface, Vehicles,
+Voice — each with its own slider, and a limiter on the master so a chase with
+sirens, engines, traffic, a collision and music at once compresses instead of
+clipping. Settings live in `user://settings.cfg`, entirely separate from save
+games: changing the music volume needs no save slot, and loading an old save
+cannot reset your resolution.
+
+Everything plays through one pooled manager, which is what makes concurrency
+enforceable: a fixed pool of flat and positional players, a per-sound cooldown
+so a shower of tiny collisions is one thump, and voice stealing that takes from
+whatever is furthest away. A cashier in Harbour Row is inaudible from Central
+because the falloff says so, not because anything special-cases it.
+
+Footsteps are driven by the walk cycle rather than a timer — the animator counts
+strides, so cadence follows the animation for free and standing still is silent.
+What you are standing on comes from groups the geometry joins when it is built,
+so moving a street moves the sound of walking on it: asphalt in the road,
+concrete on the pavement, grass on the verges, tile in a shop, boards in a cafe
+or a flat. Nearby pedestrians get footsteps too, capped at six voices city-wide.
+
+Cars carry their own audio: one pitched engine loop whose loudness follows
+throttle and speed, tyres that only scrub under the handbrake or a hard corner,
+graded impacts, and — on a patrol car — a siren that follows the light bar
+exactly, so what you hear and what you see can never disagree. A parked car with
+nobody in it is silent, and so is any car more than 55m away, which is what
+keeps a city of traffic down to the handful of engines actually near you.
+
+The music system is architecture with silence in it. Shipping invented music
+for a game meant to be played for hours would be worse than shipping none, so
+the state machine — menu, day, night, wanted — is wired to the real events and
+crossfades between states, and every track slot is empty. The day one exists it
+is one line in a table.
+
+## The front end
+
+`ui/menu/main_menu.tscn` is what the game boots to: title, CONTINUE, NEW GAME,
+LOAD GAME, SETTINGS, QUIT. CONTINUE is disabled rather than hidden when there is
+nothing to continue, so the menu does not change shape. LOAD GAME lists every
+readable slot with the day, the time, the money and the district, read from a
+summary written into the save rather than by restoring it — and a slot that
+cannot be parsed is left out of the list rather than offered and then failing.
+
+There are three manual slots plus an autosave slot the player cannot write to,
+so the game saving itself can never overwrite a save you made. Autosaves happen
+at natural breaks — waking up, signing a lease, founding a business — with a
+cooldown, and show a quiet SAVING… toast rather than anything modal.
+
+Settings are four tabs: audio (a slider per bus), graphics (three presets,
+display mode, vsync), gameplay (camera and zoom sensitivity, camera shake,
+prompts) and controls (every major binding, click to rebind, conflicts named
+rather than silently allowed, reset to defaults). The pause menu is the same
+screens again with RESUME, SAVE, LOAD, SETTINGS, MAIN MENU and QUIT.
+
+The gameplay sliders are wired to the camera rather than stored and ignored:
+sensitivity scales both the keyboard orbit and the mouse drag, zoom sensitivity
+scales the step per notch, and the shake slider scales a knock the camera takes
+when the car the player is driving hits something — all the way down to nothing
+at zero, which is the setting that matters most for anybody who cannot tolerate
+it.
+
 ## Layout
 
 ```
@@ -378,6 +453,10 @@ traffic/      road_network, traffic_light, traffic_driver, traffic_manager,
 art/          palette, character_look, character_kit, character_animator,
               building_kit, prop_kit
 ui/theme/     ui_theme
+audio/        audio_buses, tone_bank, audio_manager, surface_map, footsteps,
+              vehicle_audio, ambience_director, music_director, game_audio,
+              audio_debug
+ui/menu/      main_menu, settings_screen, pause_menu, menu_kit
 vehicles/     vehicle_base, vehicle_data, vehicle_door, vehicle_catalogue
               + cars/*.tres  (compact, sedan, hatchback, van, suv, coupe)
 world/        world_manager, district_data, district_01, district_02,
@@ -603,12 +682,39 @@ that makes them lived-in. And the interface is checked to be themed once, at the
 window root, with money and losses reading the same colour there as everywhere
 else.
 
+The audio and front end are tested for the things a headless machine can
+actually know, which is not whether anything sounds good. The mixer is checked
+to exist, to route every bus through a limited master, and to mute rather than
+whisper at zero. Every sound in the bank is built and checked to be non-empty,
+with loops marked as loops and one-shots as one-shots, and a sound asked for
+twice proved to be the same cached stream rather than a waveform synthesised per
+footstep. Standing in the road reports asphalt and stepping onto the pavement
+reports concrete; every surface has a footstep and no two share one. A parked
+car is proved not to be running, getting in starts it and getting out stops it;
+a patrol car has a siren and a civilian car does not, and the siren is proved to
+agree with the light bar. Ambience is checked to differ between day and night,
+between a shop and a cafe, and between inside and out. The music states are
+checked to be wired, and the track table to be deliberately empty rather than
+missing.
+
+Settings are checked to start where the mix says, to survive being wiped and
+read back — which is what restarting the game does — and to fall back to
+defaults rather than failing when the file is corrupt. The three graphics
+presets are checked to differ in the direction they claim to, and applying one
+is proved to reach the sun's shadows. Bindings are read, rebound, clashed
+against another action and reset. Save slots are checked empty, written,
+described without being loaded, listed, and — for a deliberately corrupted slot
+— skipped rather than offered; the autosave is proved to have a slot the player
+cannot write to, to fire once and refuse to fire twice in a row. Finally the
+front end is checked to exist, to be what the game boots to, and to leave the
+test harness loading the world directly.
+
 ```sh
 godot --headless --path game res://tests/smoke_test.tscn
 ```
 
-It exits non-zero if any check fails. As of the visual pass it runs 1,125
-checks.
+It exits non-zero if any check fails. As of the audio and front-end pass it runs
+1,280 checks.
 
 A screenshot tool renders the game to a PNG without a desktop, for eyeballing
 the district:
@@ -642,13 +748,39 @@ Args after `++` are `key=value` pairs, all optional: `out`, `hour`, `scenario`
 `central_property`, `large_interior`, `better_apartment`, `courier_delivery`,
 `vehicle_roster`, `harbour_business`, `central_business`, `city_empire`,
 `cross_district_chase`, `characters`, `police_officer`, `police_close`,
-`business_exterior`, `hero`) and camera `distance` / `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
+`business_exterior`, `hero`, `pause_menu`, `loaded_game`) and camera `distance` /
+`yaw` / `pitch` for overview shots. Scenarios drive the real interactables
 rather than faking their results. It runs under the Compatibility renderer, so
 lighting is close to but not identical to the Forward+ game.
 
+The menus are their own scene, so they have their own small harness:
+
+```sh
+xvfb-run -a godot --rendering-driver opengl3 --path game \
+    res://tests/menu_shot.tscn ++ out=shot.png screen=settings tab=1
+```
+
+`screen` is `menu`, `settings` or `load`, `tab` picks a settings tab, and
+`saves=1` plays the world briefly first so the load screen has real slots to
+list rather than photographing an empty one.
+
 ## What is next
 
-Nothing is started. The visual pass left its own threads. The characters and
+Nothing is started. The audio and front-end pass left the most obvious thread of
+all: there is no music. The director, the states and the crossfades are wired to
+the real events with silence in every slot, because inventing a soundtrack for a
+game meant to be played for hours would be worse than shipping none — the day
+tracks exist, they are a line each in one table.
+
+The sound bank is synthesised, which has a ceiling of its own. Filtered noise
+makes a convincing footstep and a passable engine; it does not make a convincing
+crowd, and there is no voice work at all — the Voice bus exists and carries
+nothing. Pedestrian reactions are architecture only for the same reason.
+`Mute when unfocused` is not implemented. And loading is fast enough that a
+loading screen would flash rather than inform, so the tips live on the title
+screen instead; that changes the day a district takes real time to build.
+
+The visual pass left its own threads. The characters and
 cars are assembled primitives, which has a ceiling: going further — real
 cloth, faces, curved bodywork, wheels that are not cylinders — means modelled
 meshes rather than more code, and the kits are shaped so that swapping one part
@@ -656,8 +788,7 @@ for a mesh does not disturb the rest. Animation is procedural and has no upper
 body work beyond a lean and an arm lift; a proper AnimationTree would buy
 gestures, but only once there are rigs to drive. Interiors are roofless by
 necessity and so cannot have ceiling fittings, which is why the light strips run
-along the wall tops. And there is no main menu yet for the title to sit in — the
-UI theme is ready for one.
+along the wall tops.
 
 The city expansion left its own threads. Population is still
 built at load rather than streamed: both districts spawn their pedestrians and

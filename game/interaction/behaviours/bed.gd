@@ -66,7 +66,10 @@ func _perform(interactor: Node3D) -> void:
 		stats.add_energy(energy_restore)
 		stats.add_health(health_restore)
 
+	AudioManager.play(&"sleep", AudioBuses.SFX, -6.0)
 	slept.emit(minutes)
+	# Waking up is the most natural break there is, so the game saves itself.
+	SaveManager.autosave("slept")
 	GameManager.notify(
 		"SLEPT %dH %02dM\nWoke at %s" % [
 			minutes / 60, minutes % 60, TimeManager.get_time_string()

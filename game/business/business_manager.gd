@@ -163,6 +163,7 @@ func create_business(
 		"BUSINESS CREATED\n%s" % business.business_name.to_upper(), GameManager.Tone.GOOD
 	)
 	business_created.emit(business)
+	SaveManager.autosave("founded a business")
 	return business
 
 
