@@ -33,6 +33,8 @@ func collect_markers() -> Array[MapMarker]:
 	markers.append_array(_job_markers())
 	markers.append_array(_service_markers())
 	markers.append_array(_vehicle_markers())
+	markers.append_array(_for_sale_markers())
+	markers.append_array(_owned_property_markers())
 	return markers
 
 
@@ -68,6 +70,48 @@ func _property_markers() -> Array[MapMarker]:
 		markers.append(MapMarker.make(
 			MapMarker.Category.AVAILABLE_PROPERTY, unit.address, unit.global_position,
 			"AVAILABLE · $%d rent" % unit.rent_amount, unit.property_id
+		))
+	return markers
+
+
+## Everything on the market that the player has actually walked past. A board
+## has to have been read before the address appears here — the city is meant to
+## be driven around rather than browsed from a menu.
+func _for_sale_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	for listing in RealEstate.discovered_listings():
+		var door := RealEstate.door_for(listing.property_id)
+		if door == null:
+			continue
+		markers.append(MapMarker.make(
+			MapMarker.Category.FOR_SALE, listing.address, door.global_position,
+			"FOR SALE · $%s · %s" % [
+				EconomyManager.with_thousands_separator(listing.asking_price),
+				listing.yield_label()
+			],
+			listing.property_id
+		))
+	return markers
+
+
+## What the player owns, whether it is let, empty or lived in. Rentals read as
+## rentals: the detail line is the money, because that is what the owner of a
+## let flat is looking for on a map.
+func _owned_property_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	for record in RealEstate.portfolio():
+		var door := RealEstate.door_for(record.property_id)
+		if door == null:
+			continue
+		var rent := 0
+		for tenant in RealEstate.tenants_in(record.property_id):
+			rent += tenant.rent_amount
+		var detail := record.use_label().to_upper()
+		if rent > 0:
+			detail += " · $%s per 7 days" % EconomyManager.with_thousands_separator(rent)
+		markers.append(MapMarker.make(
+			MapMarker.Category.MY_PROPERTY, record.address, door.global_position,
+			detail, record.property_id
 		))
 	return markers
 

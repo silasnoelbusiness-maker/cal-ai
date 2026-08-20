@@ -46,6 +46,8 @@ var _furniture_store_panel: FurnitureStorePanel = null
 var _furnishing_panel: FurnishingPanel = null
 var _home_storage_panel: HomeStoragePanel = null
 var _profile_panel: ProfilePanel = null
+var _property_sale_panel: PropertySalePanel = null
+var _real_estate_panel: RealEstatePanel = null
 @onready var _store_panel: PanelContainer = %StorePanel
 @onready var _store_name: Label = %StoreName
 @onready var _store_status: Label = %StoreStatus
@@ -341,6 +343,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			_profile_panel.open()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("real_estate"):
+		if _real_estate_panel.is_open():
+			close_screens()
+		else:
+			close_screens()
+			_real_estate_panel.open()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("business_menu"):
 		# One key, and it opens whichever answer the player is standing in front
 		# of: the shop they are inside, or the company as a whole.
@@ -449,6 +459,10 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 				_home_storage_panel.open(cupboard.residence_id)
 		&"profile":
 			_profile_panel.open()
+		&"property_sale":
+			_property_sale_panel.open(_property_id_of(context))
+		&"real_estate":
+			_real_estate_panel.open(_property_id_of(context))
 		_:
 			push_warning("HUD has no screen for '%s'." % screen_id)
 
@@ -645,7 +659,8 @@ func _on_autosave_finished(succeeded: bool) -> void:
 
 
 ## The ownership screens: the dealership, the mechanic, the garage, the
-## furniture shop, the furnishing list, the cupboard and the profile.
+## furniture shop, the furnishing list, the cupboard, the profile and the two
+## property screens.
 ##
 ## Built in code and parented here for the same reason the pause menu is —
 ## their contents are lists whose length depends on what the player owns, so
@@ -671,6 +686,10 @@ func _build_phase_m_screens() -> void:
 	_home_storage_panel.name = "HomeStoragePanel"
 	_profile_panel = ProfilePanel.new()
 	_profile_panel.name = "ProfilePanel"
+	_property_sale_panel = PropertySalePanel.new()
+	_property_sale_panel.name = "PropertySalePanel"
+	_real_estate_panel = RealEstatePanel.new()
+	_real_estate_panel.name = "RealEstatePanel"
 
 	for screen in _phase_m_screens():
 		host.add_child(screen)
@@ -686,7 +705,20 @@ func _phase_m_screens() -> Array:
 	return [
 		_dealership_panel, _vehicle_detail_panel, _repair_panel, _garage_panel,
 		_furniture_store_panel, _furnishing_panel, _home_storage_panel, _profile_panel,
+		_property_sale_panel, _real_estate_panel,
 	]
+
+
+## Which property a screen request is about. A for-sale board carries the id of
+## the address it stands outside; a block of flats is its own id.
+func _property_id_of(context: Node) -> StringName:
+	var board := context as PropertySign
+	if board != null:
+		return board.property_id
+	var block := context as MultiUnitBuilding
+	if block != null:
+		return block.building_id
+	return &""
 
 
 func _on_compare_requested(_model_id: StringName) -> void:

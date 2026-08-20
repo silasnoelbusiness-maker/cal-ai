@@ -18,7 +18,9 @@ const MARKER_RADIUS := 6.0
 
 @onready var _canvas: Control = %MapCanvas
 @onready var _title: Label = %MapTitle
-@onready var _filters: HBoxContainer = %MapFilters
+## An HFlowContainer rather than a row: there are ten categories now, and ten
+## buttons in one line is wider than the map they filter.
+@onready var _filters: HFlowContainer = %MapFilters
 @onready var _selection: Label = %MapSelection
 @onready var _actions: HBoxContainer = %MapActions
 
@@ -285,6 +287,15 @@ func _draw_glyph(at: Vector2, category: int, colour: Color) -> void:
 		MapMarker.Category.POLICE:
 			_canvas.draw_rect(Rect2(at + Vector2(-1.1, -3.4), Vector2(2.2, 6.8)), ink)
 			_canvas.draw_rect(Rect2(at + Vector2(-3.4, -1.1), Vector2(6.8, 2.2)), ink)
+		MapMarker.Category.FOR_SALE:
+			# A board on two posts.
+			_canvas.draw_rect(Rect2(at + Vector2(-3.2, -3.2), Vector2(6.4, 3.6)), ink)
+			_canvas.draw_rect(Rect2(at + Vector2(-2.2, 0.4), Vector2(1.0, 2.8)), ink)
+			_canvas.draw_rect(Rect2(at + Vector2(1.2, 0.4), Vector2(1.0, 2.8)), ink)
+		MapMarker.Category.MY_PROPERTY:
+			# A key: the same block as an available unit, filled in and locked.
+			_canvas.draw_rect(Rect2(at + Vector2(-3.0, -3.0), Vector2(6.0, 6.0)), ink)
+			_canvas.draw_rect(Rect2(at + Vector2(-1.2, -1.2), Vector2(2.4, 2.4)), colour)
 		MapMarker.Category.LANDMARK:
 			_canvas.draw_circle(at, 2.6, ink)
 			_canvas.draw_circle(at, 1.2, colour)
@@ -304,6 +315,10 @@ func _label_priority(marker: MapMarker) -> int:
 			return 1
 		MapMarker.Category.OWNED_BUSINESS:
 			return 2
+		MapMarker.Category.MY_PROPERTY:
+			return 2
+		MapMarker.Category.FOR_SALE:
+			return 3
 		MapMarker.Category.AVAILABLE_PROPERTY:
 			return 3
 		MapMarker.Category.LANDMARK:
@@ -422,7 +437,7 @@ func _build_filters() -> void:
 	for child in _filters.get_children():
 		child.queue_free()
 	for category in MapMarker.Category.values():
-		var button := BusinessUIKit.button(MapMarker.category_name(category).to_upper(), 130.0)
+		var button := BusinessUIKit.button(MapMarker.category_name(category).to_upper(), 112.0)
 		button.toggle_mode = true
 		button.button_pressed = MapManager.is_category_shown(category)
 		button.pressed.connect(_on_filter_toggled.bind(category))

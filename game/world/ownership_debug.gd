@@ -14,6 +14,8 @@ const COMMANDS := [
 	"8 condition to 40%", "9 rent both garages", "0 store the nearest",
 	"Q retrieve everything", "W give a room of furniture", "E deliver now",
 	"R rent the premium flat", "T lifestyle recalculated",
+	"Y discover every listing", "U buy the cheapest", "I sign a tenant",
+	"J skip 7 days", "K wear a property out",
 ]
 
 var _label: Label = null
@@ -86,6 +88,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_E: HomeManager.deliver_now()
 		KEY_R: _rent_premium()
 		KEY_T: LifestyleManager.refresh()
+		KEY_Y: _discover_listings()
+		KEY_U: _buy_cheapest()
+		KEY_I: _sign_a_tenant()
+		KEY_J: TimeManager.advance_minutes(7 * 1440)
+		KEY_K: _wear_property()
 		_: return
 	get_viewport().set_input_as_handled()
 	_refresh()
@@ -199,6 +206,65 @@ func _rent_premium() -> void:
 		home.set_as_home()
 
 
+## Puts every board on the map without walking the city, which is the only
+## reason the market screen is ever empty in a test.
+func _discover_listings() -> void:
+	for listing in RealEstate.listings():
+		RealEstate.discover(listing.property_id)
+
+
+func _buy_cheapest() -> void:
+	var cheapest: PropertyListing = null
+	for listing in RealEstate.listings():
+		if cheapest == null or listing.asking_price < cheapest.asking_price:
+			cheapest = listing
+	if cheapest == null:
+		return
+	RealEstate.discover(cheapest.property_id)
+	if not EconomyManager.can_afford(cheapest.asking_price):
+		EconomyManager.deposit(cheapest.asking_price, "Debug funds")
+	RealEstate.buy_with_cash(cheapest.property_id)
+
+
+## Lets the first thing that can be let, at the going rate, to an applicant
+## invented on the spot. Saves waiting days for one to turn up.
+func _sign_a_tenant() -> void:
+	for record in RealEstate.portfolio():
+		var unit_index := -1
+		if record.is_multi_unit():
+			unit_index = -1
+			for i in record.unit_count():
+				if record.unit_uses[i] != int(PropertyRecord.Use.TENANTED):
+					unit_index = i
+					break
+			if unit_index < 0:
+				continue
+		elif record.use == PropertyRecord.Use.TENANTED:
+			continue
+		elif record.use == PropertyRecord.Use.OWNER_OCCUPIED:
+			continue
+		elif record.use == PropertyRecord.Use.BUSINESS_OCCUPIED:
+			continue
+
+		var rent := RealEstate.unit_market_rent(record)
+		RealEstate.list_for_rent(record, rent, unit_index)
+		var kind := (
+			TenantData.Kind.COMMERCIAL if record.kind == PropertyRecord.Kind.COMMERCIAL
+			else TenantData.Kind.RESIDENTIAL
+		)
+		var rng := RandomNumberGenerator.new()
+		rng.randomize()
+		var applicant := TenantData.generate(kind, rent, rng, rng.randi_range(900, 9999))
+		RealEstate.accept_tenant(record, applicant, unit_index)
+		return
+
+
+func _wear_property() -> void:
+	for record in RealEstate.portfolio():
+		record.condition = 45.0
+	RealEstate.portfolio_changed.emit()
+
+
 # --- Readout -------------------------------------------------------------
 
 func _refresh() -> void:
@@ -250,6 +316,32 @@ func _refresh() -> void:
 			garage.display_name,
 			garage.occupancy_label() if garage.is_leased_by_player() else "TO LET",
 			"  OVERDUE" if garage.is_overdue() else "",
+		])
+
+	lines.append("")
+	var books := RealEstate.portfolio_summary()
+	lines.append("PROPERTY (%d owned, %d for sale)" % [
+		int(books["properties"]), RealEstate.listings().size(),
+	])
+	lines.append("  value $%s   debt $%s   equity $%s   cash flow $%d/7d" % [
+		EconomyManager.with_thousands_separator(int(books["market_value"])),
+		EconomyManager.with_thousands_separator(int(books["debt"])),
+		EconomyManager.with_thousands_separator(int(books["equity"])),
+		int(books["cash_flow"]),
+	])
+	for record in RealEstate.portfolio():
+		var loan := RealEstate.mortgage_for(record.property_id)
+		lines.append("  %-20s %-18s cond %3d%%  val $%-9s %s" % [
+			record.address, record.use_label(), roundi(record.condition),
+			EconomyManager.with_thousands_separator(record.market_value),
+			"owes $%s" % EconomyManager.with_thousands_separator(loan.remaining_principal)
+			if loan != null else "outright",
+		])
+	for listing in RealEstate.listings():
+		lines.append("  %-20s FOR SALE $%-9s %s%s" % [
+			listing.address,
+			EconomyManager.with_thousands_separator(listing.asking_price),
+			listing.yield_label(), "" if listing.discovered else "  (unseen)",
 		])
 
 	lines.append("")

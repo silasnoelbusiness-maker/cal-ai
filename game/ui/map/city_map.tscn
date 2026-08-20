@@ -55,7 +55,7 @@ theme_override_colors/font_color = Color(0.898039, 0.92549, 0.960784, 1)
 theme_override_font_sizes/font_size = 22
 text = "CITY MAP"
 
-[node name="MapFilters" type="HBoxContainer" parent="Center/Frame/Box"]
+[node name="MapFilters" type="HFlowContainer" parent="Center/Frame/Box"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 6

@@ -32,7 +32,14 @@ extends Node
 ##             purchase_confirm, player_vehicle, my_vehicles, repair_shop,
 ##             repair_screen, garage_exterior, garage_stored,
 ##             premium_apartment, furniture_store, furniture_buying,
-##             furniture_placing, furnished_apartment, profile, night_premium
+##             furniture_placing, furnished_apartment, profile, night_premium,
+##             for_sale_board, property_sale_screen, mortgage_offer,
+##             property_purchase_confirm, dockside_court, dockside_court_let,
+##             property_portfolio, property_detail, letting_screen,
+##             tenant_applicants, tenant_signed, mortgage_tab, income_tab,
+##             renovation_screen, property_sale_confirm, property_map,
+##             property_profile, owned_shop_unit, multi_unit_detail,
+##             property_empire
 ##   distance  camera distance override, for overview shots
 ##   yaw       camera yaw override
 ##   pitch     camera pitch override
@@ -320,6 +327,15 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"premium_apartment", "furniture_store", "furniture_buying", \
 		"furniture_placing", "furnished_apartment", "profile", "night_premium":
 			await _phase_m_scenario(main, scenario)
+
+		"for_sale_board", "property_sale_screen", "mortgage_offer", \
+		"property_purchase_confirm", "dockside_court", "dockside_court_let", \
+		"property_portfolio", "property_detail", "letting_screen", \
+		"tenant_applicants", "tenant_signed", "mortgage_tab", "income_tab", \
+		"renovation_screen", "property_sale_confirm", "property_map", \
+		"property_profile", "owned_shop_unit", "multi_unit_detail", \
+		"property_empire":
+			await _phase_n_scenario(main, scenario)
 
 		"characters":
 			# The five people the game draws, lined up at reading distance:
@@ -1721,3 +1737,208 @@ func _number(key: String, fallback: float) -> float:
 	if not _args.has(key):
 		return fallback
 	return String(_args[key]).to_float()
+
+
+# --- Phase N: the property ladder ----------------------------------------
+
+## The landlord shots. Everything here starts from a cleared portfolio and a
+## known amount of money, because a shot of the portfolio screen is only worth
+## taking if what is on it was put there deliberately.
+func _phase_n_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	RealEstate.clear()
+	await _wait(4)
+	EconomyManager.restore(650000)
+	for listing in RealEstate.listings():
+		RealEstate.discover(listing.property_id)
+	# Long enough for the money toast that setting the cash throws up to fade,
+	# so it is not sitting over every property shot.
+	await _wait(150)
+
+	match scenario:
+		"for_sale_board":
+			await _stand_at_board(player, &"larkspur", 3.2, 2.8)
+
+		"property_sale_screen", "mortgage_offer", "property_purchase_confirm":
+			var address := &"larkspur" if scenario == "property_sale_screen" else &"unit_main_18"
+			await _stand_at_board(player, address, 4.0)
+			var panel: Node = _hud_screen(hud, "PropertySalePanel")
+			panel.call("open", address)
+			await _wait(8)
+			if scenario == "mortgage_offer":
+				panel.set("_showing_mortgage", true)
+				panel.call("_rebuild")
+			elif scenario == "property_purchase_confirm":
+				panel.call("_confirm_cash", RealEstate.listing_for(address))
+			await _wait(12)
+
+		"dockside_court", "dockside_court_let":
+			if scenario == "dockside_court_let":
+				RealEstate.buy_with_cash(&"dockside_block")
+				_let_units(&"dockside_block", 3)
+			# On the pavement across the frontage rather than out in the road:
+			# the block fronts Main Street, and its own forward points at the
+			# kerb. Stepped west along it as well, because the block is the
+			# last address before the district edge and standing level with its
+			# middle puts the edge of the world in frame.
+			await _stand_at_board(player, &"dockside_block", 7.0, 9.0)
+
+		"property_portfolio", "mortgage_tab", "income_tab", "property_empire":
+			_build_a_portfolio()
+			# Two of the four flats let, so the books have rent in them as well
+			# as debt and the income tab is not a column of zeroes.
+			_let_units(&"dockside_block", 2)
+			await _wait(10)
+			if scenario == "property_empire":
+				_hud_screen(hud, "EmpireDashboard").call("open")
+				await _wait(14)
+				return
+			var books: Node = _hud_screen(hud, "RealEstatePanel")
+			books.call("open")
+			await _wait(6)
+			books.set("_tab", (
+				RealEstatePanel.Tab.MORTGAGES if scenario == "mortgage_tab"
+				else RealEstatePanel.Tab.INCOME if scenario == "income_tab"
+				else RealEstatePanel.Tab.PORTFOLIO
+			))
+			books.set("_focus_id", &"")
+			books.call("_rebuild")
+			await _wait(12)
+
+		"property_detail", "multi_unit_detail", "tenant_signed":
+			_build_a_portfolio()
+			if scenario == "tenant_signed":
+				_let_units(&"larkspur", 1)
+			if scenario == "multi_unit_detail":
+				_let_units(&"dockside_block", 2)
+			await _wait(10)
+			var books: Node = _hud_screen(hud, "RealEstatePanel")
+			books.call(
+				"open",
+				&"dockside_block" if scenario == "multi_unit_detail" else &"larkspur"
+			)
+			await _wait(14)
+
+		"letting_screen", "tenant_applicants":
+			RealEstate.buy_with_cash(&"larkspur")
+			var flat := RealEstate.record_for(&"larkspur")
+			flat.use = PropertyRecord.Use.VACANT
+			if scenario == "tenant_applicants":
+				RealEstate.list_for_rent(flat, RealEstate.unit_market_rent(flat), -1)
+				_invite_applicants(flat, 2)
+			await _wait(10)
+			_hud_screen(hud, "RealEstatePanel").call("open", &"larkspur")
+			await _wait(14)
+
+		"renovation_screen", "property_sale_confirm":
+			RealEstate.buy_with_cash(&"larkspur")
+			var worn := RealEstate.record_for(&"larkspur")
+			worn.use = PropertyRecord.Use.VACANT
+			worn.condition = 42.0
+			await _wait(10)
+			var books: Node = _hud_screen(hud, "RealEstatePanel")
+			books.call("open", &"larkspur")
+			await _wait(10)
+			if scenario == "property_sale_confirm":
+				books.call("_confirm_sale", worn)
+			else:
+				# The works are the last section on the screen, which is where
+				# they belong and not where a shot of them wants them.
+				await _scroll_to_bottom(books)
+			await _wait(12)
+
+		"owned_shop_unit":
+			var unit := PropertyManager.by_id(&"unit_main_18")
+			if unit.is_vacant():
+				PropertyManager.lease(unit)
+			if BusinessManager.business_for_property(&"unit_main_18") == null:
+				BusinessManager.create_business("Main Street Market", &"convenience_store", unit)
+			EconomyManager.restore(650000)
+			RealEstate.buy_with_cash(&"unit_main_18")
+			await _wait(10)
+			_hud_screen(hud, "RealEstatePanel").call("open", &"unit_main_18")
+			await _wait(14)
+
+		"property_map":
+			_build_a_portfolio()
+			_let_units(&"dockside_block", 2)
+			await _wait(10)
+			_hud_screen(hud, "CityMap").call("open")
+			await _wait(16)
+
+		"property_profile":
+			_build_a_portfolio()
+			_let_units(&"dockside_block", 3)
+			await _wait(10)
+			_hud_screen(hud, "ProfilePanel").call("open")
+			await _wait(14)
+
+
+## Winds one of the property screens down to its last section.
+func _scroll_to_bottom(panel: Node) -> void:
+	var list: Node = panel.get("_list")
+	if list == null:
+		return
+	var scroll := (list as Node).get_parent() as ScrollContainer
+	if scroll == null:
+		return
+	await _wait(4)
+	scroll.scroll_vertical = int(scroll.get_v_scroll_bar().max_value)
+	await _wait(4)
+
+
+## Puts the player on the pavement in front of an address, facing its door.
+## `sideways` steps along the frontage, which is where the FOR SALE board is.
+func _stand_at_board(
+	player: Node3D, property_id: StringName, back_off: float, sideways: float = 0.0
+) -> void:
+	var door := RealEstate.door_for(property_id)
+	if door == null:
+		return
+	var facing := door.global_transform.basis.z
+	var beside := door.global_transform.basis.x
+	player.global_position = (
+		door.global_position + facing * back_off + beside * sideways + Vector3(0.0, 0.4, 0.0)
+	)
+	await _wait(24)
+
+
+## A flat owned outright and a block on a mortgage: enough for the portfolio to
+## have something to say about equity, debt and occupancy at once.
+func _build_a_portfolio() -> void:
+	RealEstate.buy_with_cash(&"larkspur")
+	RealEstate.buy_with_mortgage(&"dockside_block")
+
+
+func _let_units(property_id: StringName, count: int) -> void:
+	var record := RealEstate.record_for(property_id)
+	if record == null:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260820
+	var rent := RealEstate.unit_market_rent(record)
+	for i in count:
+		var unit_index := i if record.is_multi_unit() else -1
+		if not record.is_multi_unit():
+			record.use = PropertyRecord.Use.VACANT
+		RealEstate.list_for_rent(record, rent, unit_index)
+		var tenant := TenantData.generate(
+			TenantData.Kind.COMMERCIAL if record.kind == PropertyRecord.Kind.COMMERCIAL
+			else TenantData.Kind.RESIDENTIAL,
+			rent, rng, 3000 + i
+		)
+		tenant.reliability = 88
+		RealEstate.accept_tenant(record, tenant, unit_index)
+
+
+## Applicants waiting on the player's answer, without waiting the days out.
+func _invite_applicants(record: PropertyRecord, count: int) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 606060
+	var waiting: Array = []
+	for i in count:
+		waiting.append(TenantData.generate(
+			TenantData.Kind.RESIDENTIAL, record.asking_rent, rng, 4000 + i
+		))
+	RealEstate._candidates[RealEstate._candidate_key(record.property_id, -1)] = waiting

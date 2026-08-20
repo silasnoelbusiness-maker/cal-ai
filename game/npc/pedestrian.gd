@@ -468,12 +468,25 @@ func _choose_wander() -> void:
 	var destination := nav.random_point_away_from(
 		NavGraph.Layer.WALK, global_position, min_wander_distance, _rng
 	)
-	if walk_to(destination):
-		_set_state(State.WALKING)
-		_state_timer = 1.0
-	else:
+	if not send_to(destination):
 		# Nowhere to go from here; wait and try again rather than spin.
 		_state_timer = 1.5
+
+
+## Sends this civilian somewhere and puts them in the state that keeps them
+## going there.
+##
+## walk_to on its own only hands over a route. The idle timer is still running
+## underneath it, and when it expires the civilian picks somewhere of their own
+## and walks off — which is right for a crowd and wrong for anybody who has
+## actually been sent somewhere. Everything that wants a civilian to go to one
+## particular place goes through here.
+func send_to(destination: Vector3) -> bool:
+	if not walk_to(destination):
+		return false
+	_set_state(State.WALKING)
+	_state_timer = 1.0
+	return true
 
 
 func _begin_fleeing() -> void:

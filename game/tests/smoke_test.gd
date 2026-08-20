@@ -201,6 +201,34 @@ func _run() -> void:
 	await _test_trade_in()
 	await _test_ownership_venues()
 
+	# Phase N: the property ladder.
+	await _test_property_market()
+	await _test_boards_do_not_block_doors()
+	_test_property_valuation()
+	await _test_property_discovery()
+	await _test_cash_purchase()
+	await _test_mortgage_creation()
+	await _test_credit_eligibility()
+	await _test_mortgage_payments()
+	await _test_missed_mortgage_payment()
+	await _test_early_payoff()
+	await _test_property_condition()
+	await _test_renovation()
+	_test_tenant_generation()
+	await _test_letting()
+	await _test_rental_income()
+	await _test_multi_unit()
+	await _test_property_sale()
+	await _test_mortgaged_sale()
+	await _test_owned_business_property()
+	await _test_buying_your_home()
+	await _test_property_net_worth()
+	await _test_portfolio_cash_flow()
+	await _test_property_map_markers()
+	await _test_property_screens()
+	await _test_property_save_load()
+	await _test_pre_property_save()
+
 	_report()
 
 
@@ -664,18 +692,79 @@ func _test_park_navigation() -> void:
 	)
 	_check(east.size() >= 2, "the east gate joins the park to the boulevard")
 
+	# Routing along the path is not the same as being able to walk it. A block
+	# of flats was once built straight across it, and the graph — which is laid
+	# out from the paths rather than swept for obstacles — routed happily
+	# through the middle of the building.
+	var space := _player.get_world_3d().direct_space_state
+	var probe := PhysicsShapeQueryParameters3D.new()
+	var body_shape := CapsuleShape3D.new()
+	body_shape.radius = 0.4
+	body_shape.height = 1.6
+	probe.shape = body_shape
+	probe.collision_mask = 1
+	var blocked: Array[String] = []
+	for step in 21:
+		var z := 16.0 + float(step) * 2.0
+		# The fountain is the one thing that is meant to be in the way, and the
+		# graph goes round it — see the waypoint check above.
+		if absf(z - District01.PARK_PATH_Z) < District01.FOUNTAIN_RING:
+			continue
+		probe.transform = Transform3D(
+			Basis.IDENTITY, Vector3(District01.PARK_PATH_X, 1.3, z)
+		)
+		for hit in space.intersect_shape(probe, 4):
+			var body := hit.get("collider") as Node
+			if body != null:
+				blocked.append("%s at z=%.0f" % [body.name, z])
+	_check(
+		blocked.is_empty(),
+		"and the path is walkable from end to end (%s)" % ", ".join(blocked)
+	)
+
 	# And a civilian can actually walk it, not just route it. The player stands
 	# where they can see it happen, because a civilian nobody is near is asleep
 	# by design.
-	var walker := get_tree().get_nodes_in_group(&"pedestrian")[0] as Pedestrian
+	# A civilian off this district's own graph, rather than whichever one the
+	# group happens to list first. There are two districts and two graphs now,
+	# and a Central civilian dropped into the park routes itself back towards
+	# Central — away from the destination, on a route that is perfectly valid
+	# on the graph it belongs to.
+	var walker: Pedestrian = null
+	for node in get_tree().get_nodes_in_group(&"pedestrian"):
+		var civilian := node as Pedestrian
+		if civilian != null and civilian.nav == nav:
+			walker = civilian
+			break
+	_check(walker != null, "there is a civilian who walks this district's graph")
+	if walker == null:
+		return
 	await _teleport(Vector3(District01.PARK_PATH_X + 8.0, 0.5, 20.0))
 	walker.global_position = Vector3(District01.PARK_PATH_X, 0.4, 12.0)
 	await _settle(6)
 	var into_park := Vector3(District01.PARK_PATH_X, 0.0, 30.0)
 	var before := walker.global_position.distance_to(into_park)
-	_check(walker.walk_to(into_park), "a pedestrian accepts a destination inside the park")
-	await _settle(300)
-	var after := walker.global_position.distance_to(into_park)
+	# send_to rather than walk_to: walk_to hands over a route and leaves the
+	# idle timer running underneath it, so a second later the civilian picks
+	# somewhere of their own and wanders off instead. That is what this check
+	# kept catching, depending on how far through their idle they happened to
+	# be when the test found them.
+	_check(walker.send_to(into_park), "a pedestrian accepts a destination inside the park")
+	# The closest approach is what is recorded, not the distance at the end: a
+	# civilian who arrives goes back to wandering and would be walking away
+	# again by the time the check read them.
+	#
+	# Sampled in a plain loop rather than through _wait_until, and deliberately.
+	# A lambda captures the locals it closes over by value, so the obvious
+	# version of this — a _wait_until whose condition narrows `after` — updates
+	# the callable's own copy and leaves the outer one at its starting value,
+	# which reads as a civilian who never moved however far they walked.
+	var after := before
+	for tick in 30:
+		await _settle(30)
+		after = minf(after, walker.global_position.distance_to(into_park))
+		if after < before - 6.0:
+			break
 	_check(after < before - 6.0, "and gets there (%.1fm -> %.1fm)" % [before, after])
 
 
@@ -7295,3 +7384,1226 @@ func _home_room(residence_id: StringName) -> ApartmentInterior:
 
 func _furniture_placement() -> FurniturePlacement:
 	return get_tree().get_first_node_in_group(&"furniture_placement") as FurniturePlacement
+
+
+# --- Phase N: the property ladder ----------------------------------------
+#
+# The property system is arithmetic wrapped around a decision, and the two are
+# tested differently. The arithmetic — a level payment, a yield, an amortisation
+# schedule, a selling fee — is checked directly, because a formula is either
+# right or it is not and playing it out proves nothing extra. The decisions —
+# buying, letting, renovating, selling — are driven through the same public
+# calls the screens make, so a screen that cannot reach an outcome is a screen
+# with a bug rather than a test that passes anyway.
+#
+# Every test in this section starts from a cleared portfolio. The phases before
+# this one leave a home leased, businesses trading and cars parked, and a
+# landlord test that quietly depended on which of those was true would be a
+# test of the previous phase.
+
+## Puts the property system back to a known state: nothing owned, everything on
+## the market seen, and a stated amount of cash in the player's pocket.
+func _reset_property(cash: int) -> void:
+	RealEstate.clear()
+	await _settle(2)
+	EconomyManager.restore(cash)
+	for listing in RealEstate.listings():
+		RealEstate.discover(listing.property_id)
+
+
+## TEST 186 — the market is built from the city's own doors, and priced.
+func _test_property_market() -> void:
+	await _reset_property(50000)
+	var listings := RealEstate.listings()
+	_check(listings.size() >= 10, "%d addresses are on the market" % listings.size())
+
+	var kinds: Dictionary = {}
+	for listing in listings:
+		kinds[listing.kind] = true
+	_check(kinds.has(PropertyRecord.Kind.RESIDENTIAL), "flats are for sale")
+	_check(kinds.has(PropertyRecord.Kind.COMMERCIAL), "so are shop units")
+	_check(kinds.has(PropertyRecord.Kind.MULTI_UNIT), "and one block of flats")
+
+	var ascending := true
+	for i in range(1, listings.size()):
+		if listings[i].asking_price < listings[i - 1].asking_price:
+			ascending = false
+	_check(ascending, "the market is listed cheapest first")
+
+	var cheapest := listings[0]
+	_check(
+		cheapest.asking_price < 60000,
+		"the first rung costs $%s" % EconomyManager.with_thousands_separator(cheapest.asking_price)
+	)
+	_check(
+		listings[listings.size() - 1].asking_price > 300000,
+		"and the top of the market is out of reach for a long time"
+	)
+
+	# Every listing needs a door to stand outside, and a board outside the door.
+	var missing := 0
+	for listing in listings:
+		if RealEstate.door_for(listing.property_id) == null:
+			missing += 1
+	_check(missing == 0, "every listing has an address in the world")
+	_check(
+		get_tree().get_nodes_in_group(&"property_sign").size() >= listings.size(),
+		"and a FOR SALE board outside it"
+	)
+
+
+## TEST 187 — what a building is worth, and what that says about the rent.
+func _test_property_valuation() -> void:
+	var small := RealEstate.value_of(PropertyRecord.Kind.RESIDENTIAL, 40, 50, &"harbour_row", 85.0)
+	var large := RealEstate.value_of(PropertyRecord.Kind.RESIDENTIAL, 80, 50, &"harbour_row", 85.0)
+	_check(large > small * 1.8, "twice the floor area is worth nearly twice as much")
+
+	var fringe := RealEstate.value_of(PropertyRecord.Kind.RESIDENTIAL, 60, 20, &"harbour_row", 85.0)
+	var prime := RealEstate.value_of(PropertyRecord.Kind.RESIDENTIAL, 60, 90, &"harbour_row", 85.0)
+	_check(prime > fringe, "a better pitch is worth more ($%d against $%d)" % [prime, fringe])
+
+	var tired := RealEstate.value_of(PropertyRecord.Kind.RESIDENTIAL, 60, 50, &"harbour_row", 30.0)
+	var kept := RealEstate.value_of(PropertyRecord.Kind.RESIDENTIAL, 60, 50, &"harbour_row", 95.0)
+	_check(kept > tired, "and so is a building somebody has looked after")
+
+	var suburb := RealEstate.value_of(PropertyRecord.Kind.COMMERCIAL, 90, 50, &"harbour_row", 85.0)
+	var centre := RealEstate.value_of(PropertyRecord.Kind.COMMERCIAL, 90, 50, &"central", 85.0)
+	_check(centre > suburb, "the central district carries a premium")
+
+	# Yield has to vary, or every purchase is the same purchase.
+	var cheap_yield := RealEstate.rent_for_value(100000, 20) * 52.0 / 100000.0
+	var dear_yield := RealEstate.rent_for_value(100000, 90) * 52.0 / 100000.0
+	_check(
+		cheap_yield > dear_yield * 1.3,
+		"a fringe address yields more than a prime one (%.0f%% against %.0f%%)"
+		% [cheap_yield * 100.0, dear_yield * 100.0]
+	)
+	_check(
+		RealEstate.market_trend() >= RealEstate.TREND_FLOOR
+		and RealEstate.market_trend() <= RealEstate.TREND_CEILING,
+		"the market trend stays inside its band"
+	)
+
+
+## TEST 188 — a board has to be read before the address is on the map.
+func _test_property_discovery() -> void:
+	RealEstate.clear()
+	await _settle(2)
+	for listing in RealEstate.listings():
+		listing.discovered = false
+	_check(RealEstate.discovered_listings().is_empty(), "nothing is known before it is seen")
+
+	var target := RealEstate.listings()[0]
+	RealEstate.discover(target.property_id)
+	_check(RealEstate.discovered_listings().size() == 1, "reading one board discovers one address")
+	_check(
+		RealEstate.discovered_listings()[0].property_id == target.property_id,
+		"and it is the one that was read"
+	)
+
+	# An undiscovered address cannot be bought sight unseen.
+	var other := RealEstate.listings()[1]
+	EconomyManager.restore(900000)
+	_check(
+		RealEstate.buy_with_cash(other.property_id) == RealEstate.BuyResult.NOT_DISCOVERED,
+		"an address nobody has been to cannot be bought"
+	)
+
+
+## TEST 189 — buying outright: the money leaves once and the door changes hands.
+func _test_cash_purchase() -> void:
+	await _reset_property(120000)
+	var listing := RealEstate.listing_for(&"larkspur")
+	var boards_before := get_tree().get_nodes_in_group(&"property_sign").size()
+	var before := EconomyManager.cash
+
+	_check(
+		RealEstate.buy_with_cash(&"larkspur") == RealEstate.BuyResult.OK,
+		"a flat within reach can be bought outright"
+	)
+	var record := RealEstate.record_for(&"larkspur")
+	_check(record != null, "and it goes on the books")
+	_check(
+		before - EconomyManager.cash == listing.asking_price,
+		"the asking price left the account exactly once"
+	)
+	_check(RealEstate.listing_for(&"larkspur") == null, "the listing is gone")
+	_check(not RealEstate.is_for_sale(&"larkspur"), "and the address is off the market")
+	_check(RealEstate.owns(&"larkspur"), "the player owns it")
+	_check(record.purchase_price == listing.asking_price, "at the price they paid")
+	_check(record.mortgage_id == &"", "with nothing owed on it")
+	await _settle(4)
+	_check(
+		get_tree().get_nodes_in_group(&"property_sign").size() < boards_before,
+		"and the board outside has come down"
+	)
+
+	var home := PropertyManager.residence_by_id(&"larkspur")
+	_check(home.owned_by_player, "the door knows who owns it")
+	_check(not home.has_landlord(), "and there is nobody left to pay rent to")
+	_check(
+		RealEstate.buy_with_cash(&"larkspur") == RealEstate.BuyResult.ALREADY_OWNED,
+		"it cannot be bought twice"
+	)
+
+	await _reset_property(500)
+	RealEstate.discover(&"larkspur")
+	_check(
+		RealEstate.buy_with_cash(&"larkspur") == RealEstate.BuyResult.CANNOT_AFFORD,
+		"and not at all without the money"
+	)
+
+
+## TEST 190 — the mortgage offer: deposit, principal, level payment, term.
+func _test_mortgage_creation() -> void:
+	await _reset_property(400000)
+	var listing := RealEstate.listing_for(&"unit_main_18")
+	var deposit := listing.required_down_payment()
+	_check(
+		deposit == roundi(float(listing.asking_price) * 0.25),
+		"a lender wants a quarter down on a commercial unit"
+	)
+	_check(
+		listing.financed_amount() == listing.asking_price - deposit,
+		"and lends the rest"
+	)
+
+	var before := EconomyManager.cash
+	_check(
+		RealEstate.buy_with_mortgage(&"unit_main_18") == RealEstate.BuyResult.OK,
+		"the unit can be bought on a mortgage"
+	)
+	_check(before - EconomyManager.cash == deposit, "only the deposit leaves the account")
+
+	var loan := RealEstate.mortgage_for(&"unit_main_18")
+	_check(loan != null, "a mortgage exists against it")
+	_check(loan.original_principal == listing.financed_amount(), "for the amount financed")
+	_check(loan.remaining_principal == loan.original_principal, "with nothing paid off yet")
+	_check(loan.down_payment == deposit, "and the deposit on record")
+	_check(loan.term_payments == RealEstate.MORTGAGE_TERM_PAYMENTS, "over the full term")
+	_check(loan.status == MortgageData.Status.ACTIVE, "and it is active")
+
+	var expected := MortgageData.level_payment(
+		loan.original_principal, loan.interest_rate / 52.0, loan.term_payments
+	)
+	_check(loan.payment_amount == expected, "the payment is the level payment for the term")
+	_check(
+		loan.payment_amount * loan.term_payments > loan.original_principal,
+		"and the payments add up to more than was borrowed, because interest is real"
+	)
+
+	var record := RealEstate.record_for(&"unit_main_18")
+	_check(
+		RealEstate.equity_of(record) == record.market_value - loan.remaining_principal,
+		"equity is what it is worth less what is owed"
+	)
+	_check(
+		RealEstate.equity_of(record) < record.market_value,
+		"which on day one is roughly the deposit"
+	)
+
+
+## TEST 191 — a lender will not deal with somebody with nothing behind them.
+func _test_credit_eligibility() -> void:
+	await _reset_property(200)
+	# The fleet and the furniture are assets and count towards net worth, so
+	# they go before the refusal can be tested at all.
+	VehicleRegistry.clear()
+	HomeManager.clear()
+	await _settle(2)
+	EconomyManager.restore(200)
+
+	_check(
+		BusinessManager.net_worth() < RealEstate.MIN_NET_WORTH_FOR_CREDIT,
+		"with nothing to their name the player is worth $%d" % BusinessManager.net_worth()
+	)
+	_check(not RealEstate.is_credit_eligible(), "a broke player is refused credit")
+	_check(
+		not RealEstate.credit_refusal_reason().is_empty(),
+		"and told why in plain words"
+	)
+	_check(
+		RealEstate.buy_with_mortgage(&"larkspur") == RealEstate.BuyResult.NOT_ELIGIBLE,
+		"the purchase is refused rather than half made"
+	)
+	_check(not RealEstate.owns(&"larkspur"), "and nothing changed hands")
+
+	EconomyManager.restore(400000)
+	_check(RealEstate.is_credit_eligible(), "money behind them changes the answer")
+	_check(RealEstate.credit_refusal_reason().is_empty(), "with nothing left to explain")
+
+
+## TEST 192 — interest first, principal second, week after week.
+func _test_mortgage_payments() -> void:
+	await _reset_property(400000)
+	RealEstate.buy_with_mortgage(&"unit_main_18")
+	var loan := RealEstate.mortgage_for(&"unit_main_18")
+	var opening := loan.remaining_principal
+	var first_interest := loan.period_interest()
+	_check(first_interest > 0, "the first period charges interest")
+	_check(
+		first_interest < loan.payment_amount,
+		"and the payment covers it with something left for the principal"
+	)
+
+	EconomyManager.restore(400000)
+	var cash_before := EconomyManager.cash
+	TimeManager.advance_minutes(RealEstate.MORTGAGE_INTERVAL_DAYS * 1440)
+	await _settle(4)
+
+	_check(loan.payments_made >= 1, "a payment falls due on the schedule")
+	_check(loan.remaining_principal < opening, "the balance goes down")
+	_check(loan.interest_paid > 0, "interest is recorded separately")
+	_check(loan.principal_paid > 0, "and so is principal")
+	_check(
+		loan.interest_paid + loan.principal_paid == loan.payment_amount * loan.payments_made,
+		"and the two together are exactly what was paid"
+	)
+	_check(
+		opening - loan.remaining_principal == loan.principal_paid,
+		"the balance fell by the principal and not by the whole payment"
+	)
+	_check(cash_before > EconomyManager.cash, "the money came out of the player's pocket")
+
+	# Later payments carry more principal, because the balance is smaller.
+	var early := loan.payment_amount - first_interest
+	for week in 6:
+		TimeManager.advance_minutes(RealEstate.MORTGAGE_INTERVAL_DAYS * 1440)
+		await _settle(2)
+	var late := loan.payment_amount - loan.period_interest()
+	_check(late > early, "the schedule tips towards principal as the balance falls")
+	_check(
+		loan.payments_remaining() == loan.term_payments - loan.payments_made,
+		"and the term counts down"
+	)
+
+
+## TEST 193 — a payment that cannot be met is missed, not silently forgiven.
+func _test_missed_mortgage_payment() -> void:
+	await _reset_property(400000)
+	RealEstate.buy_with_mortgage(&"unit_main_18")
+	var loan := RealEstate.mortgage_for(&"unit_main_18")
+	var owed := loan.remaining_principal
+
+	EconomyManager.restore(0)
+	_notifications.clear()
+	TimeManager.advance_minutes(RealEstate.MORTGAGE_INTERVAL_DAYS * 1440)
+	await _settle(4)
+
+	_check(loan.missed_payments >= 1, "a payment with no money behind it is missed")
+	_check(loan.remaining_principal >= owed, "and nothing comes off the balance")
+	_check(loan.status == MortgageData.Status.OVERDUE, "the mortgage reads OVERDUE")
+	_check(
+		_notification_matching("MORTGAGE") != "",
+		"and the player is told about it"
+	)
+
+	for week in MortgageData.AT_RISK_MISSES + 1:
+		TimeManager.advance_minutes(RealEstate.MORTGAGE_INTERVAL_DAYS * 1440)
+		await _settle(2)
+	_check(
+		loan.missed_payments >= MortgageData.AT_RISK_MISSES,
+		"missing it repeatedly is counted"
+	)
+	_check(loan.status == MortgageData.Status.AT_RISK, "and the mortgage is flagged AT RISK")
+	_check(not RealEstate.is_credit_eligible(), "no lender will offer a second one")
+
+	# Nothing is repossessed. That system does not exist yet, and pretending it
+	# does by quietly deleting the record would be worse than not having it.
+	_check(RealEstate.owns(&"unit_main_18"), "but the property is not taken away")
+
+
+## TEST 194 — paying early costs less, and clears the debt for good.
+func _test_early_payoff() -> void:
+	await _reset_property(400000)
+	RealEstate.buy_with_mortgage(&"unit_main_18")
+	var loan := RealEstate.mortgage_for(&"unit_main_18")
+	var opening := loan.remaining_principal
+	var interest_before := loan.period_interest()
+
+	EconomyManager.restore(400000)
+	var cash_before := EconomyManager.cash
+	var paid := RealEstate.pay_extra(loan, 20000)
+	_check(paid == 20000, "an overpayment goes through in full")
+	_check(cash_before - EconomyManager.cash == 20000, "and costs exactly that")
+	_check(loan.remaining_principal == opening - 20000, "straight off the principal")
+	_check(
+		loan.period_interest() < interest_before,
+		"so the next period's interest is smaller"
+	)
+
+	var payoff := loan.payoff_amount()
+	EconomyManager.restore(payoff + 1000)
+	_check(RealEstate.pay_off(loan) == payoff, "the balance can be cleared in one go")
+	_check(loan.is_settled(), "the mortgage is settled")
+	_check(RealEstate.mortgage_for(&"unit_main_18") == null, "and gone from the book")
+	_check(RealEstate.total_mortgage_debt() == 0, "with nothing owed on anything")
+
+	var record := RealEstate.record_for(&"unit_main_18")
+	_check(not record.has_mortgage(), "the property is owned outright")
+	_check(
+		RealEstate.equity_of(record) == record.market_value,
+		"and all of it is equity now"
+	)
+
+
+## TEST 195 — buildings wear out, and keeping them costs money every week.
+func _test_property_condition() -> void:
+	await _reset_property(400000)
+	RealEstate.buy_with_cash(&"larkspur")
+	var record := RealEstate.record_for(&"larkspur")
+	record.use = PropertyRecord.Use.VACANT
+	var condition := record.condition
+
+	for day in 6:
+		TimeManager.advance_minutes(1440)
+		await _settle(2)
+	_check(record.condition < condition, "an empty building ages")
+	_check(
+		condition - record.condition < 2.0,
+		"slowly enough that neglect is a decision rather than an accident"
+	)
+
+	var kept := PropertyRecord.new()
+	kept.base_maintenance = 100
+	kept.condition = 95.0
+	var neglected := PropertyRecord.new()
+	neglected.base_maintenance = 100
+	neglected.condition = 30.0
+	_check(
+		neglected.maintenance_cost() > kept.maintenance_cost(),
+		"a tired building costs more to keep standing ($%d against $%d)"
+		% [neglected.maintenance_cost(), kept.maintenance_cost()]
+	)
+
+	# The weekly bill lands, and lands once.
+	EconomyManager.restore(400000)
+	var before := EconomyManager.cash
+	var paid_before: int = int(RealEstate.income_report()["maintenance_paid"])
+	for day in RealEstate.RENT_INTERVAL_DAYS:
+		TimeManager.advance_minutes(1440)
+		await _settle(2)
+	_check(EconomyManager.cash < before, "upkeep is charged")
+	_check(
+		int(RealEstate.income_report()["maintenance_paid"]) > int(paid_before),
+		"and shows up in the income report"
+	)
+
+
+## TEST 196 — the works: quotes, blocking, and what the money buys.
+func _test_renovation() -> void:
+	await _reset_property(400000)
+	RealEstate.buy_with_cash(&"larkspur")
+	var record := RealEstate.record_for(&"larkspur")
+	record.use = PropertyRecord.Use.VACANT
+	record.condition = 45.0
+	var value_before := record.market_value
+
+	var repair := RealEstate.renovation_quote(record, &"repair")
+	var premium := RealEstate.renovation_quote(record, &"premium")
+	_check(repair > 0, "a tired flat has a repair quote")
+	_check(premium > repair, "and a premium finish costs more than a patch-up")
+	_check(RealEstate.renovation_days(&"premium") > RealEstate.renovation_days(&"repair"),
+		"and takes longer")
+
+	var day_before := TimeManager.day_index
+	var cash_before := EconomyManager.cash
+	_check(RealEstate.renovate(record, &"renovation"), "the work can be commissioned")
+	_check(cash_before > EconomyManager.cash, "and it is paid for")
+	_check(
+		record.condition >= RealEstate.renovation_target(&"renovation"),
+		"the building comes up to standard (%d%%)" % roundi(record.condition)
+	)
+	_check(TimeManager.day_index > day_before, "the days pass while it is done")
+	_check(record.market_value > value_before, "and it is worth more afterwards")
+	_check(
+		RealEstate.renovation_quote(record, &"renovation") == 0,
+		"there is nothing left to quote for"
+	)
+
+	# A tenant in the place stops the work rather than being renovated around.
+	var rent := RealEstate.unit_market_rent(record)
+	RealEstate.list_for_rent(record, rent, -1)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	var tenant := TenantData.generate(TenantData.Kind.RESIDENTIAL, rent, rng, 501)
+	RealEstate.accept_tenant(record, tenant, -1)
+	_check(
+		not RealEstate.renovation_blocked_reason(record).is_empty(),
+		"a tenanted flat cannot be gutted around them"
+	)
+	_check(not RealEstate.renovate(record, &"premium"), "so the work is refused")
+
+
+## TEST 197 — the applicants: invented names, invented budgets, no celebrities.
+func _test_tenant_generation() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 99
+	var residential: Array[TenantData] = []
+	for i in 24:
+		residential.append(TenantData.generate(TenantData.Kind.RESIDENTIAL, 500, rng, i))
+
+	var names: Dictionary = {}
+	var malformed := 0
+	for tenant in residential:
+		names[tenant.tenant_name] = true
+		var parts := tenant.tenant_name.split(" ")
+		if parts.size() != 2 or not TenantData.FIRST_NAMES.has(parts[0]):
+			malformed += 1
+	_check(malformed == 0, "every private tenant has a first and last name from the lists")
+	_check(names.size() > 8, "and %d different people turned up in 24 draws" % names.size())
+
+	var commercial := TenantData.generate(TenantData.Kind.COMMERCIAL, 900, rng, 900)
+	_check(commercial.is_commercial(), "a commercial tenancy generates a business")
+	_check(
+		TenantData.TRADE_NAMES.has(commercial.tenant_name),
+		"trading under one of the invented shop names"
+	)
+
+	var stretched := 0
+	var careful := 0
+	for tenant in residential:
+		if tenant.rent_budget > 500:
+			stretched += 1
+		if tenant.reliability >= 80:
+			careful += 1
+	_check(stretched > 0, "some applicants can pay above the going rate")
+	_check(stretched < residential.size(), "and some cannot")
+	_check(careful > 0, "reliability varies between them")
+
+	var solid := TenantData.new()
+	solid.reliability = 95
+	var flaky := TenantData.new()
+	flaky.reliability = 40
+	_check(solid.payment_chance() > flaky.payment_chance(), "a reliable tenant pays more often")
+	_check(solid.wear_per_period() < flaky.wear_per_period(), "and is easier on the place")
+	_check(not solid.would_accept(999999), "nobody signs for a rent they cannot afford")
+
+
+## TEST 198 — letting: asking rent, interest, and signing somebody.
+func _test_letting() -> void:
+	await _reset_property(400000)
+	RealEstate.buy_with_cash(&"larkspur")
+	var record := RealEstate.record_for(&"larkspur")
+	record.use = PropertyRecord.Use.VACANT
+	record.condition = 85.0
+	RealEstate._revalue(record)
+	var going := RealEstate.unit_market_rent(record)
+	_check(going > 0, "the flat has a going rate of $%d" % going)
+
+	_check(RealEstate.list_for_rent(record, going, -1), "it can be put on the rental market")
+	_check(record.use == PropertyRecord.Use.LISTED_FOR_RENT, "and reads as listed")
+	_check(record.asking_rent == going, "at the rent that was asked")
+
+	var fair := RealEstate.demand_chance(record, going)
+	var greedy := RealEstate.demand_chance(record, going * 2)
+	var cheap := RealEstate.demand_chance(record, roundi(going * 0.6))
+	_check(cheap > fair, "asking under the going rate brings more interest")
+	_check(fair > greedy, "and asking twice the going rate brings almost none")
+
+	# Applicants arrive over days rather than on demand.
+	# Applicants arrive on a per-day chance, so this waits two months rather
+	# than one: at the going rate the chance is around one in nine a day, and a
+	# test that fails one run in thirty is worse than no test.
+	var seen := 0
+	for day in 60:
+		TimeManager.advance_minutes(1440)
+		await _settle(1)
+		seen = RealEstate.candidates_for(record, -1).size()
+		if seen > 0:
+			break
+	_check(seen > 0, "somebody applies while the flat is listed")
+
+	var applicant: TenantData = RealEstate.candidates_for(record, -1)[0]
+	_check(
+		applicant.would_accept(record.asking_rent),
+		"nobody applies for a rent they could not pay"
+	)
+	_check(RealEstate.accept_tenant(record, applicant, -1), "the applicant can be signed")
+	_check(record.use == PropertyRecord.Use.TENANTED, "and the flat is let")
+	_check(applicant.rent_amount == record.asking_rent, "at the asking rent")
+	_check(
+		applicant.lease_end_day == applicant.lease_start_day + RealEstate.LEASE_DAYS,
+		"on a %d day lease" % RealEstate.LEASE_DAYS
+	)
+	_check(RealEstate.tenant_for(&"larkspur", -1) == applicant, "and the tenancy is on the books")
+	_check(
+		RealEstate.candidates_for(record, -1).is_empty(),
+		"the other applicants go away"
+	)
+
+	RealEstate.end_tenancy(applicant)
+	_check(record.use == PropertyRecord.Use.VACANT, "ending a tenancy empties the flat")
+	_check(RealEstate.tenant_for(&"larkspur", -1) == null, "and takes the tenant off the books")
+
+
+## TEST 199 — rent arrives on a schedule, and an empty flat does not.
+func _test_rental_income() -> void:
+	await _reset_property(400000)
+	RealEstate.buy_with_cash(&"larkspur")
+	var record := RealEstate.record_for(&"larkspur")
+	record.use = PropertyRecord.Use.VACANT
+	record.condition = 90.0
+	RealEstate._revalue(record)
+
+	var rent := RealEstate.unit_market_rent(record)
+	RealEstate.list_for_rent(record, rent, -1)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1234
+	var tenant := TenantData.generate(TenantData.Kind.RESIDENTIAL, rent, rng, 700)
+	# A dependable tenant, so the schedule is being tested and not the dice.
+	tenant.reliability = 98
+	RealEstate.accept_tenant(record, tenant, -1)
+
+	EconomyManager.restore(400000)
+	var income_before := EconomyManager.total_income
+	var collected_before := int(RealEstate.income_report()["rent_collected"])
+	var condition_before := record.condition
+	# Three rent periods, not one. Even a dependable tenant misses one payment
+	# in a hundred, and a test that turns on a single dice roll is a test that
+	# fails for no reason once in a while.
+	for day in RealEstate.RENT_INTERVAL_DAYS * 3 + 1:
+		TimeManager.advance_minutes(1440)
+		await _settle(2)
+
+	var collected := int(RealEstate.income_report()["rent_collected"]) - collected_before
+	_check(collected >= rent * 2, "the rent arrives week after week ($%d)" % collected)
+	# Against the ledger's income rather than the balance: three weeks of the
+	# whole game pass in that loop, and the wages, the stock and the rents on
+	# everything else the player holds are all coming out of the same pocket.
+	_check(
+		EconomyManager.total_income - income_before >= collected,
+		"and lands in the player's account as income"
+	)
+	_check(record.condition < condition_before, "a tenant puts a little wear on the place")
+	_check(tenant.missed_payments <= 1, "a dependable tenant keeps up")
+
+	# Now empty it and prove the money stops.
+	RealEstate.end_tenancy(tenant)
+	var vacancy_before := int(RealEstate.income_report()["vacancy_lost"])
+	var quiet := int(RealEstate.income_report()["rent_collected"])
+	for day in RealEstate.RENT_INTERVAL_DAYS + 1:
+		TimeManager.advance_minutes(1440)
+		await _settle(2)
+	_check(
+		int(RealEstate.income_report()["rent_collected"]) == quiet,
+		"an empty flat earns nothing"
+	)
+	_check(
+		int(RealEstate.income_report()["vacancy_lost"]) > vacancy_before,
+		"and the report says what the vacancy cost"
+	)
+
+
+## TEST 200 — four flats under one roof, let one at a time.
+func _test_multi_unit() -> void:
+	await _reset_property(400000)
+	_check(
+		RealEstate.buy_with_cash(&"dockside_block") == RealEstate.BuyResult.OK,
+		"the block of flats can be bought"
+	)
+	var block := RealEstate.record_for(&"dockside_block")
+	_check(block.is_multi_unit(), "it is a multi-unit building")
+	_check(
+		block.unit_count() == PropertyRecord.MULTI_UNIT_COUNT,
+		"with %d flats in it" % block.unit_count()
+	)
+	_check(block.rentable_units() == block.unit_count(), "every one of them can be let")
+	_check(block.occupied_units() == 0, "and none of them is, to start with")
+	_check(is_zero_approx(block.occupancy_fraction()), "so occupancy is zero")
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77
+	var per_unit := RealEstate.unit_market_rent(block)
+	_check(per_unit < block.market_rent, "one flat lets for less than the whole building")
+
+	for i in 3:
+		RealEstate.list_for_rent(block, per_unit, i)
+		var tenant := TenantData.generate(TenantData.Kind.RESIDENTIAL, per_unit, rng, 800 + i)
+		tenant.reliability = 95
+		RealEstate.accept_tenant(block, tenant, i)
+	_check(block.occupied_units() == 3, "three of the four can be let separately")
+	_check(
+		absf(block.occupancy_fraction() - 0.75) < 0.01,
+		"which is 75% occupancy"
+	)
+	_check(block.use_label() == "3 of 4 let", "and the portfolio says so in words")
+	_check(RealEstate.tenants_in(&"dockside_block").size() == 3, "three tenancies on the books")
+	_check(
+		RealEstate.tenant_for(&"dockside_block", 1) != null,
+		"each one against its own flat"
+	)
+	_check(
+		RealEstate.tenant_for(&"dockside_block", 3) == null,
+		"and the empty one has nobody in it"
+	)
+
+	# One tenant leaving is a dent, not a disaster: that is the point of a block.
+	var leaving := RealEstate.tenant_for(&"dockside_block", 0)
+	RealEstate.end_tenancy(leaving)
+	_check(block.occupied_units() == 2, "one leaving takes the block to half full")
+	_check(
+		block.unit_uses[0] == int(PropertyRecord.Use.VACANT),
+		"and only their flat goes empty"
+	)
+	_check(
+		RealEstate.tenant_for(&"dockside_block", 1) != null,
+		"the others stay exactly where they were"
+	)
+
+	var summary := RealEstate.portfolio_summary()
+	_check(int(summary["rentable"]) == 4, "the portfolio counts four lettable units")
+	_check(int(summary["occupied"]) == 2, "of which two are let")
+
+
+## TEST 201 — selling: the fee, the proceeds, and the address going back up.
+func _test_property_sale() -> void:
+	await _reset_property(400000)
+	RealEstate.buy_with_cash(&"larkspur")
+	var record := RealEstate.record_for(&"larkspur")
+	record.use = PropertyRecord.Use.VACANT
+
+	var price := RealEstate.sale_price(record)
+	var fees := RealEstate.selling_cost(record)
+	_check(price == record.market_value, "a sale is at market value")
+	_check(
+		fees == roundi(float(price) * RealEstate.SELLING_COST_FRACTION),
+		"less a %d%% selling fee" % roundi(RealEstate.SELLING_COST_FRACTION * 100.0)
+	)
+	_check(
+		RealEstate.net_proceeds(record) == price - fees,
+		"and with nothing owed, the rest is the player's"
+	)
+	_check(RealEstate.sale_blocked_reason(record).is_empty(), "nothing is stopping the sale")
+
+	var expected := RealEstate.net_proceeds(record)
+	var before := EconomyManager.cash
+	_check(RealEstate.sell(record) == RealEstate.SellResult.OK, "the flat sells")
+	_check(EconomyManager.cash - before == expected, "for exactly the net proceeds")
+	_check(not RealEstate.owns(&"larkspur"), "it is off the books")
+	_check(RealEstate.is_for_sale(&"larkspur"), "and back on the market")
+	await _settle(4)
+	_check(
+		PropertyManager.residence_by_id(&"larkspur").owned_by_player == false,
+		"the door belongs to somebody else again"
+	)
+
+
+## TEST 202 — selling something with a mortgage on it clears the debt first.
+func _test_mortgaged_sale() -> void:
+	await _reset_property(400000)
+	# Deliberately not 18 Main Street: the player's own shop trades from there
+	# by this point in the run, and a building with your own business in it is
+	# unsellable on purpose. That case is TEST 203.
+	var empty: PropertyListing = null
+	for listing in RealEstate.listings():
+		if listing.kind != PropertyRecord.Kind.COMMERCIAL:
+			continue
+		if BusinessManager.business_for_property(listing.property_id) != null:
+			continue
+		if empty == null or listing.asking_price < empty.asking_price:
+			empty = listing
+	_check(empty != null, "there is a shop unit for sale with nobody trading from it")
+	if empty == null:
+		return
+	var address := empty.property_id
+
+	RealEstate.buy_with_mortgage(address)
+	var record := RealEstate.record_for(address)
+	var loan := RealEstate.mortgage_for(address)
+	var owed := loan.remaining_principal
+
+	var price := RealEstate.sale_price(record)
+	var fees := RealEstate.selling_cost(record)
+	_check(
+		RealEstate.net_proceeds(record) == price - fees - owed,
+		"the proceeds are the price less the fee less what is owed"
+	)
+	_check(
+		RealEstate.net_proceeds(record) < price,
+		"which is a lot less than the sticker"
+	)
+
+	var expected := RealEstate.net_proceeds(record)
+	var before := EconomyManager.cash
+	_check(RealEstate.sell(record) == RealEstate.SellResult.OK, "it sells anyway")
+	_check(EconomyManager.cash - before == expected, "and the player gets what is left")
+	_check(RealEstate.mortgage_for(address) == null, "the mortgage is gone with it")
+	_check(RealEstate.total_mortgage_debt() == 0, "with no debt left behind")
+
+	# A tenancy goes with the building rather than staying on the player's books.
+	await _reset_property(400000)
+	RealEstate.buy_with_cash(&"larkspur")
+	var flat := RealEstate.record_for(&"larkspur")
+	flat.use = PropertyRecord.Use.VACANT
+	var rent := RealEstate.unit_market_rent(flat)
+	RealEstate.list_for_rent(flat, rent, -1)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 31
+	var tenant := TenantData.generate(TenantData.Kind.RESIDENTIAL, rent, rng, 601)
+	RealEstate.accept_tenant(flat, tenant, -1)
+	_check(RealEstate.tenants().size() == 1, "a let flat has a tenant")
+	RealEstate.sell(flat)
+	_check(RealEstate.tenants().is_empty(), "and selling it takes them with it")
+
+
+## TEST 203 — owning the building your own shop trades from.
+func _test_owned_business_property() -> void:
+	await _reset_property(600000)
+	var unit := PropertyManager.by_id(&"unit_quay_40")
+	_check(unit != null, "the unit exists")
+
+	# Take it on as a tenant first, and put a business in it.
+	if unit.is_vacant():
+		EconomyManager.restore(600000)
+		PropertyManager.lease(unit)
+	var business := BusinessManager.business_for_property(&"unit_quay_40")
+	if business == null:
+		business = BusinessManager.create_business("Quayside Test", &"convenience_store", unit)
+	_check(business != null, "with a business trading from it")
+	_check(unit.has_landlord(), "which pays rent to a landlord")
+
+	EconomyManager.restore(600000)
+	RealEstate.discover(&"unit_quay_40")
+	_check(
+		RealEstate.buy_with_cash(&"unit_quay_40") == RealEstate.BuyResult.OK,
+		"the player can buy the building out from under their own shop"
+	)
+	var record := RealEstate.record_for(&"unit_quay_40")
+	_check(
+		record.use == PropertyRecord.Use.BUSINESS_OCCUPIED,
+		"the portfolio says the business occupies it"
+	)
+	_check(
+		BusinessManager.business_for_property(&"unit_quay_40") == business,
+		"the business is untouched by the purchase"
+	)
+	_check(unit.is_leased_by_player(), "and still has its premises")
+	_check(not unit.has_landlord(), "but there is no landlord left to pay")
+
+	# Rent day comes and goes without money moving between the player's pockets.
+	unit.next_rent_due_day = TimeManager.day_index
+	var before := EconomyManager.cash
+	var account_before: int = business.cash
+	PropertyManager.charge_due_rent()
+	_check(EconomyManager.cash == before, "rent day costs the player nothing")
+	_check(business.cash == account_before, "and the business nothing either")
+	_check(unit.arrears == 0, "with no arrears invented")
+
+	_check(record.rentable_units() == 0, "a unit the player trades from is not lettable")
+	_check(
+		not RealEstate.sale_blocked_reason(record).is_empty(),
+		"and it cannot be sold with the shop still in it"
+	)
+	_check(
+		RealEstate.sell(record) == RealEstate.SellResult.BUSINESS_OCCUPIES,
+		"the sale is refused rather than destroying the business"
+	)
+
+
+## TEST 204 — a bought home stays home, and stops costing rent.
+func _test_buying_your_home() -> void:
+	await _reset_property(400000)
+	var home := PropertyManager.residence_by_id(&"larkspur")
+	if not home.is_leased_by_player():
+		EconomyManager.restore(400000)
+		PropertyManager.lease_residence(home)
+		home.set_as_home()
+	_check(home.is_current_home(), "the player lives in the flat they rent")
+
+	EconomyManager.restore(400000)
+	RealEstate.discover(&"larkspur")
+	_check(RealEstate.buy_with_cash(&"larkspur") == RealEstate.BuyResult.OK, "and then buys it")
+	var record := RealEstate.record_for(&"larkspur")
+	_check(record.use == PropertyRecord.Use.OWNER_OCCUPIED, "the portfolio calls it their home")
+	_check(home.is_current_home(), "they still live there")
+	_check(not home.is_leased_by_player(), "the lease has ended")
+	_check(not home.has_landlord(), "because there is nobody to pay")
+
+	home.next_rent_due_day = TimeManager.day_index
+	var before := EconomyManager.cash
+	PropertyManager.charge_due_residence_rent()
+	_check(EconomyManager.cash == before, "so rent day costs nothing")
+	_check(home.arrears == 0, "and no arrears are invented")
+	_check(record.rentable_units() == 0, "a home is not a rental")
+
+
+## TEST 205 — property equity in the net worth the rest of the game reads.
+func _test_property_net_worth() -> void:
+	await _reset_property(400000)
+	var opening := BusinessManager.net_worth()
+
+	var listing := RealEstate.listing_for(&"larkspur")
+	RealEstate.buy_with_cash(&"larkspur")
+	var record := RealEstate.record_for(&"larkspur")
+	_check(
+		absi(BusinessManager.net_worth() - opening) < listing.asking_price / 10,
+		"paying cash for a building moves money sideways, not away"
+	)
+	_check(
+		RealEstate.total_market_value() == record.market_value,
+		"the portfolio is worth what the building is worth"
+	)
+	_check(RealEstate.total_equity() == RealEstate.total_market_value(), "and all of it is equity")
+
+	var summary := BusinessManager.portfolio_summary()
+	_check(
+		int(summary["property_equity"]) == RealEstate.total_equity(),
+		"the empire screen reads the same equity"
+	)
+	_check(
+		int(summary["property_value"]) == RealEstate.total_market_value(),
+		"and the same market value"
+	)
+
+	# A mortgage adds an asset and a debt at the same time.
+	EconomyManager.restore(400000)
+	var unit_listing := RealEstate.listing_for(&"unit_main_18")
+	var before := BusinessManager.net_worth()
+	RealEstate.buy_with_mortgage(&"unit_main_18")
+	var after := BusinessManager.net_worth()
+	_check(
+		absi(after - before) < unit_listing.asking_price / 5,
+		"a mortgage buys an asset and a debt of nearly the same size (moved $%d)"
+		% absi(after - before)
+	)
+	_check(
+		RealEstate.total_equity() == RealEstate.total_market_value() - RealEstate.total_mortgage_debt(),
+		"equity is value less debt across the whole portfolio"
+	)
+	_check(
+		int(BusinessManager.portfolio_summary()["mortgage_debt"]) == RealEstate.total_mortgage_debt(),
+		"and the debt is reported alongside it"
+	)
+
+
+## TEST 206 — the portfolio's own arithmetic.
+func _test_portfolio_cash_flow() -> void:
+	await _reset_property(600000)
+	RealEstate.buy_with_cash(&"larkspur")
+	RealEstate.buy_with_mortgage(&"dockside_block")
+	var flat := RealEstate.record_for(&"larkspur")
+	flat.use = PropertyRecord.Use.VACANT
+	var block := RealEstate.record_for(&"dockside_block")
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 512
+	var per_unit := RealEstate.unit_market_rent(block)
+	for i in 2:
+		RealEstate.list_for_rent(block, per_unit, i)
+		var tenant := TenantData.generate(TenantData.Kind.RESIDENTIAL, per_unit, rng, 300 + i)
+		RealEstate.accept_tenant(block, tenant, i)
+
+	var summary := RealEstate.portfolio_summary()
+	_check(int(summary["properties"]) == 2, "two properties on the books")
+	_check(
+		int(summary["market_value"]) == flat.market_value + block.market_value,
+		"worth what the two of them are worth"
+	)
+	_check(
+		int(summary["debt"]) == RealEstate.mortgage_for(&"dockside_block").remaining_principal,
+		"owing what the one mortgage owes"
+	)
+	_check(
+		int(summary["equity"]) == int(summary["market_value"]) - int(summary["debt"]),
+		"and equity is the difference"
+	)
+
+	var expected_rent := 0
+	for tenant in RealEstate.tenants():
+		expected_rent += tenant.rent_amount
+	_check(int(summary["rent"]) == expected_rent, "the rent is the sum of the tenancies")
+	_check(
+		int(summary["maintenance"]) == flat.maintenance_cost() + block.maintenance_cost(),
+		"the upkeep is the sum of the buildings"
+	)
+	_check(
+		int(summary["cash_flow"])
+		== int(summary["rent"]) - int(summary["maintenance"]) - int(summary["mortgage_payments"]),
+		"and the cash flow is what is left of the rent"
+	)
+	_check(int(summary["rentable"]) == 5, "five lettable units between them")
+	_check(int(summary["occupied"]) == 2, "of which two are let")
+	_check(
+		absf(float(summary["occupancy"]) - 0.4) < 0.01,
+		"which is 40% occupancy"
+	)
+
+	var report := RealEstate.income_report()
+	_check(
+		int(report["net_cash"])
+		== int(report["rent_collected"]) - int(report["maintenance_paid"])
+			- int(report["interest_paid"]) - int(report["principal_paid"]),
+		"the income report adds up"
+	)
+
+
+## TEST 207 — the map tells the three kinds of property apart.
+func _test_property_map_markers() -> void:
+	await _reset_property(600000)
+	RealEstate.buy_with_cash(&"larkspur")
+
+	var for_sale := 0
+	var mine := 0
+	var seen_addresses: Dictionary = {}
+	for marker in MapManager.collect_markers():
+		if marker.category == MapMarker.Category.FOR_SALE:
+			for_sale += 1
+		elif marker.category == MapMarker.Category.MY_PROPERTY:
+			mine += 1
+			seen_addresses[marker.target_id] = marker.detail
+	_check(for_sale > 0, "%d addresses on the market are marked" % for_sale)
+	_check(mine == 1, "and the one the player owns is marked differently")
+	_check(seen_addresses.has(&"larkspur"), "by its own id, so the screen can open it")
+
+	_check(
+		MapMarker.category_colour(MapMarker.Category.FOR_SALE)
+		!= MapMarker.category_colour(MapMarker.Category.MY_PROPERTY),
+		"the two are different colours"
+	)
+	_check(
+		MapMarker.category_colour(MapMarker.Category.FOR_SALE)
+		!= MapMarker.category_colour(MapMarker.Category.AVAILABLE_PROPERTY),
+		"and neither is the colour of a unit to rent"
+	)
+	_check(
+		MapMarker.category_name(MapMarker.Category.FOR_SALE) == "For sale",
+		"the filter row names them"
+	)
+
+	# A rental reads as a rental: the detail line carries the money.
+	var record := RealEstate.record_for(&"larkspur")
+	record.use = PropertyRecord.Use.VACANT
+	var rent := RealEstate.unit_market_rent(record)
+	RealEstate.list_for_rent(record, rent, -1)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 8
+	RealEstate.accept_tenant(
+		record, TenantData.generate(TenantData.Kind.RESIDENTIAL, rent, rng, 42), -1
+	)
+	var detail := ""
+	for marker in MapManager.collect_markers():
+		if marker.category == MapMarker.Category.MY_PROPERTY and marker.target_id == &"larkspur":
+			detail = marker.detail
+	_check(detail.contains("$"), "a let property shows what it earns (%s)" % detail)
+
+	# Filters still work with the two new categories in the list.
+	MapManager.set_category_shown(MapMarker.Category.FOR_SALE, false)
+	var hidden := 0
+	for marker in MapManager.visible_markers():
+		if marker.category == MapMarker.Category.FOR_SALE:
+			hidden += 1
+	_check(hidden == 0, "turning the FOR SALE filter off hides them")
+	MapManager.set_category_shown(MapMarker.Category.FOR_SALE, true)
+	_check(
+		MapManager.is_category_shown(MapMarker.Category.FOR_SALE),
+		"and turning it back on brings them back"
+	)
+
+
+## TEST 208 — a portfolio survives a save and a load.
+func _test_property_save_load() -> void:
+	var slot := 9
+	await _reset_property(600000)
+	RealEstate.buy_with_cash(&"larkspur")
+	RealEstate.buy_with_mortgage(&"dockside_block")
+	var block := RealEstate.record_for(&"dockside_block")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 606
+	var per_unit := RealEstate.unit_market_rent(block)
+	RealEstate.list_for_rent(block, per_unit, 2)
+	var tenant := TenantData.generate(TenantData.Kind.RESIDENTIAL, per_unit, rng, 111)
+	RealEstate.accept_tenant(block, tenant, 2)
+
+	var owed := RealEstate.mortgage_for(&"dockside_block").remaining_principal
+	var equity := RealEstate.total_equity()
+	var tenant_name := tenant.tenant_name
+	var flat_condition := RealEstate.record_for(&"larkspur").condition
+
+	_check(SaveManager.save_to_slot(slot), "a game with a portfolio in it saves")
+	RealEstate.clear()
+	await _settle(2)
+	_check(RealEstate.count() == 0, "the portfolio can be emptied")
+	_check(SaveManager.load_from_slot(slot), "and the save loads")
+
+	_check(RealEstate.count() == 2, "with both properties back")
+	_check(RealEstate.owns(&"larkspur"), "the flat")
+	_check(RealEstate.owns(&"dockside_block"), "and the block")
+	_check(
+		absf(RealEstate.record_for(&"larkspur").condition - flat_condition) < 0.01,
+		"in the condition they were left in"
+	)
+	var back := RealEstate.mortgage_for(&"dockside_block")
+	_check(back != null, "the mortgage came back")
+	_check(back.remaining_principal == owed, "owing exactly what it owed")
+	_check(RealEstate.total_equity() == equity, "and the equity is unchanged")
+
+	var loaded := RealEstate.record_for(&"dockside_block")
+	_check(loaded.occupied_units() == 1, "the block is still one quarter let")
+	_check(
+		RealEstate.tenant_for(&"dockside_block", 2) != null,
+		"with the tenancy against the right flat"
+	)
+	_check(
+		RealEstate.tenant_for(&"dockside_block", 2).tenant_name == tenant_name,
+		"and the same tenant in it"
+	)
+	_check(
+		not RealEstate.is_for_sale(&"larkspur"),
+		"nothing the player owns is back on the market"
+	)
+	_check(
+		PropertyManager.residence_by_id(&"larkspur").owned_by_player,
+		"and the doors know who owns them again"
+	)
+	SaveManager.delete_slot(slot)
+
+
+## TEST 209 — a save written before any of this existed still loads.
+func _test_pre_property_save() -> void:
+	var slot := 9
+	await _reset_property(50000)
+	var path := SaveManager.get_slot_path(slot)
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(JSON.stringify({
+		"version": SaveManager.SAVE_VERSION,
+		"entities": {},
+	}))
+	file.close()
+
+	_check(SaveManager.load_from_slot(slot), "a Phase M save loads without a property section")
+	_check(RealEstate.count() == 0, "with nothing owned that was never bought")
+	_check(RealEstate.total_mortgage_debt() == 0, "and no debt invented for it")
+	_check(not RealEstate.listings().is_empty(), "the market is still there to buy from")
+	_check(
+		RealEstate.buy_with_cash(RealEstate.listings()[0].property_id)
+		!= RealEstate.BuyResult.NO_LISTING,
+		"and buying still works afterwards"
+	)
+	SaveManager.delete_slot(slot)
+	await _reset_property(50000)
+
+
+## TEST 210 — the screens can be opened and driven without falling over.
+func _test_property_screens() -> void:
+	await _reset_property(600000)
+	var portfolio := _find_control("RealEstatePanel") as RealEstatePanel
+	var sale := _find_control("PropertySalePanel") as PropertySalePanel
+	_check(portfolio != null, "the portfolio screen is built into the HUD")
+	_check(sale != null, "and so is the sale screen")
+	if portfolio == null or sale == null:
+		return
+
+	sale.open(&"larkspur")
+	_check(sale.is_open(), "a FOR SALE board opens the sale screen")
+	sale._showing_mortgage = true
+	sale._rebuild()
+	await _settle(2)
+	_check(sale.is_open(), "and the mortgage terms can be read on it")
+	sale.close()
+	_check(not sale.is_open(), "it closes again")
+
+	RealEstate.buy_with_cash(&"larkspur")
+	RealEstate.buy_with_mortgage(&"dockside_block")
+	portfolio.open()
+	await _settle(2)
+	_check(portfolio.is_open(), "the portfolio screen opens")
+	for tab in [
+		RealEstatePanel.Tab.PORTFOLIO, RealEstatePanel.Tab.MORTGAGES, RealEstatePanel.Tab.INCOME
+	]:
+		portfolio._tab = tab
+		portfolio._focus_id = &""
+		portfolio._rebuild()
+		await _settle(2)
+	_check(portfolio.is_open(), "and all three tabs draw")
+
+	portfolio.open(&"dockside_block")
+	await _settle(2)
+	_check(portfolio.is_open(), "a building the player owns opens on its own detail")
+	portfolio.close()
+	_check(not portfolio.is_open(), "and the screen closes")
+	_check(not GameManager.menu_open, "leaving the world unfrozen")
+
+
+## TEST 211 — a board on the pavement must not answer for the door beside it.
+##
+## The bug this exists for: the first FOR SALE boards were given a focus bonus
+## and stood a metre from the doorway, so pressing E at the player's own front
+## door opened an estate agent's listing instead of the flat. Every door in the
+## city with a board outside it is checked, because there are twelve of them and
+## one is the door the whole life loop starts at.
+func _test_boards_do_not_block_doors() -> void:
+	await _reset_property(50000)
+	var stolen: Array[String] = []
+	var unreachable: Array[String] = []
+
+	for listing in RealEstate.listings():
+		var door := RealEstate.door_for(listing.property_id)
+		if door == null:
+			continue
+		var facing := door.global_transform.basis.z
+		var beside := door.global_transform.basis.x
+
+		# Standing where a player stands to use the door.
+		await _teleport(door.global_position + facing * 2.0 + Vector3(0.0, 0.4, 0.0))
+		await _settle(12)
+		if _player.interaction.get_focused() is PropertySign:
+			stolen.append(listing.address)
+
+		# And standing at the board itself.
+		await _teleport(
+			door.global_position + facing * 2.4 + beside * 2.8 + Vector3(0.0, 0.4, 0.0)
+		)
+		await _settle(12)
+		if not (_player.interaction.get_focused() is PropertySign):
+			unreachable.append(listing.address)
+
+	_check(stolen.is_empty(), "no board answers for its own door (%s)" % ", ".join(stolen))
+	_check(
+		unreachable.is_empty(),
+		"and every board can still be read from the pavement (%s)" % ", ".join(unreachable)
+	)
+
+	# The board's own interaction is what puts the address on the market screen.
+	var board: PropertySign = null
+	for node in get_tree().get_nodes_in_group(&"property_sign"):
+		var candidate := node as PropertySign
+		if candidate != null and candidate.property_id == &"larkspur":
+			board = candidate
+	_check(board != null, "the flat has a board outside it")
+	if board == null:
+		return
+	for listing in RealEstate.listings():
+		listing.discovered = false
+	_check(RealEstate.discovered_listings().is_empty(), "which nobody has read yet")
+	board.interact(_player)
+	_check(
+		RealEstate.discovered_listings().size() == 1,
+		"and reading it puts the address on the market screen"
+	)
+	GameManager.close_menus()
+	await _settle(4)
+
+
+## Finds a screen the HUD built in code, by node name.
+func _find_control(node_name: String) -> Control:
+	var found := _walk_for(get_tree().root, node_name)
+	return found as Control
+
+
+func _walk_for(node: Node, node_name: String) -> Node:
+	if node.name == node_name:
+		return node
+	for child in node.get_children():
+		var hit := _walk_for(child, node_name)
+		if hit != null:
+			return hit
+	return null
+
+
+## The most recent notification containing `fragment`, or "" if there is none.
+func _notification_matching(fragment: String) -> String:
+	for i in range(_notifications.size() - 1, -1, -1):
+		if _notifications[i].contains(fragment):
+			return _notifications[i]
+	return ""

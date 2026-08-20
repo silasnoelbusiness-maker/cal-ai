@@ -105,6 +105,13 @@ func charge_due_rent() -> void:
 	for property in get_properties():
 		if not property.is_rent_due():
 			continue
+		# Nobody to pay. The player bought the building, so the business that
+		# trades from it keeps its takings — its landlord is now itself, and
+		# billing one of the player's pockets from another would be inventing
+		# money rather than moving it.
+		if not property.has_landlord():
+			property.settle_rent(true)
+			continue
 		var paid := _collect(property)
 		property.settle_rent(paid)
 		if paid:
@@ -183,6 +190,9 @@ func lease_residence(home: ResidenceProperty) -> bool:
 func charge_due_residence_rent() -> void:
 	for home in get_residences():
 		if not home.is_rent_due():
+			continue
+		if not home.has_landlord():
+			home.settle_rent(true)
 			continue
 		var paid := EconomyManager.spend(home.rent_amount, "%s — rent" % home.address)
 		home.settle_rent(paid)

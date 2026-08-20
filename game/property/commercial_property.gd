@@ -69,6 +69,11 @@ enum SizeClass { SMALL, MEDIUM }
 
 ## Stable id for the save file. Defaults from property_id in _ready.
 @export var save_id: StringName = &""
+## Set by RealEstate when the player buys the building. A unit the player owns
+## still has all its lease machinery — the business trading from it is still
+## its tenant — but there is no longer a landlord to pay, which is the whole
+## economics of owning your own premises.
+@export var owned_by_player: bool = false
 
 
 func _ready() -> void:
@@ -156,6 +161,17 @@ func is_vacant() -> bool:
 	return status == Status.VACANT
 
 
+## Whether rent is owed to anybody. Owning the freehold means it is not.
+func has_landlord() -> bool:
+	return not owned_by_player
+
+
+## Rebuilds the door's prompt and sign after ownership changed.
+func refresh_state() -> void:
+	_refresh_prompt()
+	_refresh_sign()
+
+
 func is_leased_by_player() -> bool:
 	return status == Status.LEASED and tenant_id == &"player"
 
@@ -192,6 +208,22 @@ func begin_lease(new_tenant: StringName) -> void:
 	arrears = 0
 	_refresh_prompt()
 	leased.emit(new_tenant)
+
+
+## Occupancy without a lease, for a unit the player has bought outright. There
+## is no deposit and no rent because there is no landlord; what it grants is the
+## right to trade from the unit, which is what the door and BusinessManager both
+## check for. Rent day skips it — see PropertyManager.charge_due_rent.
+func occupy_as_owner() -> void:
+	if not owned_by_player or status == Status.LEASED:
+		return
+	status = Status.LEASED
+	tenant_id = &"player"
+	next_rent_due_day = -1
+	arrears = 0
+	_refresh_prompt()
+	_refresh_sign()
+	leased.emit(tenant_id)
 
 
 func end_lease() -> void:
@@ -270,7 +302,7 @@ func _tenant_name() -> String:
 func _status_line() -> String:
 	var business := BusinessManager.business_for_property(property_id)
 	if business == null:
-		return "leased"
+		return "yours" if owned_by_player else "leased"
 	return business.status_text()
 
 

@@ -157,6 +157,7 @@ func _ready() -> void:
 	_build_park()
 	_build_parking()
 	_build_services()
+	_build_dockside_court()
 	_build_street_lights()
 	_build_streetscape()
 	_build_warehouse_yard()
@@ -624,7 +625,8 @@ func _add_building(
 	height: float,
 	material: StandardMaterial3D,
 	roof_style: String,
-	roof_material: StandardMaterial3D
+	roof_material: StandardMaterial3D,
+	window_material: StandardMaterial3D = null
 ) -> void:
 	var holder := Node3D.new()
 	holder.name = node_name
@@ -650,9 +652,14 @@ func _add_building(
 	# material is still shared and still faded by the day/night cycle, so the
 	# skyline reads after dark for the same cost — but by day a facade now has
 	# windows in it instead of a band of dark paint.
+	# `window_material` overrides the shared lit glass, for the one building
+	# whose lights mean something: Dockside Court lights a window per let flat,
+	# and a facade that lights every window after dark regardless would drown
+	# that out completely.
 	BuildingKit.add_window_grid(
 		holder, node_name, rect, 4.2, height - 1.2,
-		_mat("windows"), _mat("plinth"), 3.4, 1.5, 1.8
+		window_material if window_material != null else _mat("windows"),
+		_mat("plinth"), 3.4, 1.5, 1.8
 	)
 
 	# The roof the camera actually looks at.
@@ -1006,6 +1013,76 @@ func _build_parking() -> void:
 	for i in 7:
 		var x := 10.0 + float(i) * 5.4
 		_add_bay(container, "CivicBay%d" % i, CityKit.rect_from_bounds(x, -78.0, x + 4.6, -68.0))
+
+
+## Dockside Court: a small block of flats south of Main Street, and the only
+## property in the game that is more than one tenancy.
+##
+## Four storeys, four flats, one front door. There is no interior — a landlord
+## does not walk into their tenants' homes, and four furnished rooms nobody
+## visits would be four rooms of geometry for nothing.
+func _build_dockside_court() -> void:
+	# The east end of Main Street's south side, which is the only frontage in
+	# Harbour Row with room for it: the warehouse has the west end, and the
+	# whole middle is the park. It was briefly built in the park, straight
+	# across the path pedestrians route along, which is what the walkable-path
+	# check in the smoke test now exists for.
+	var rect := CityKit.rect_from_bounds(72.0, 16.0, 86.0, 40.0)
+	var height := 13.0
+	# Dark glass rather than the shared lit material: the only lights on this
+	# building are the flats that are let, which is the whole point of it.
+	_add_building(
+		_make_container("DocksideCourt"), "DocksideCourt", rect, height,
+		_mat("brick_b"), "flat", _mat("roof"),
+		CityKit.make_material(Color(0.106, 0.129, 0.169))
+	)
+
+	var block := MultiUnitBuilding.new()
+	block.name = "DocksideCourt"
+	block.building_id = &"dockside_block"
+	block.address = "Dockside Court"
+	block.district_id = &"harbour_row"
+	block.unit_count = 4
+	block.floor_area = 168
+	block.location_quality = 48
+	block.condition = 78.0
+	CityKit.attach_interactable(
+		_interactables, block, Vector3(rect.get_center().x, 1.1, rect.position.y - 1.2), 2.6
+	)
+	# Turned to face the street. Everything that stands something outside a door
+	# — the FOR SALE board, the camera for a screenshot — works from the door's
+	# own forward, and an unrotated node points its forward into the building.
+	block.rotation_degrees.y = 180.0
+
+	# A door on the front, and a window per flat above it. The windows are
+	# handed to the block so it can light the ones that are let.
+	var front := rect.position.y - 0.15
+	CityKit.add_box(
+		_props, "DocksideDoor", Vector3(rect.get_center().x, 1.35, front),
+		Vector3(2.2, 2.7, 0.3), _mat("door"), false
+	)
+	CityKit.add_box(
+		_props, "DocksideCanopy", Vector3(rect.get_center().x, 2.85, front - 0.5),
+		Vector3(3.4, 0.22, 1.2), _mat("concrete_a"), false
+	)
+	var glow := CityKit.make_emissive_material(WINDOW_GLOW, 1.4)
+	for i in 4:
+		var storey := 3.4 + float(i) * 2.6
+		var lit := CityKit.add_box(
+			_props, "DocksideWindow%d" % i,
+			Vector3(rect.get_center().x - 3.4 + float(i % 2) * 6.8, storey, front),
+			Vector3(1.8, 1.3, 0.14), glow, false, false
+		)
+		lit.visible = false
+		block.register_window(lit)
+	# House numbers down the frontage, so it reads as flats rather than an
+	# office block with the lights off.
+	for i in 4:
+		CityKit.add_box(
+			_props, "DocksidePlate%d" % i,
+			Vector3(rect.get_center().x + 1.4, 3.4 + float(i) * 2.6, front - 0.06),
+			Vector3(0.34, 0.34, 0.04), _mat("sand"), false, false
+		)
 
 
 ## The service quarter behind the civic hall: somewhere to keep a car and

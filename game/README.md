@@ -11,7 +11,7 @@ generated from primitives at load; what changed in the visual pass is that the
 primitives are now assembled into people, cars, facades and rooms rather than
 standing in for them.
 
-**V0.1 phases A–K are complete** — eleven milestones, because two of them were
+**V0.1 phases A–N are complete** — eleven milestones, because two of them were
 called G (the art pass and the crime expansion) and the naming is kept here as
 it happened. The full life/economy loop is playable end to end — wake up in your
 flat, sleep off the night, walk to the warehouse for a paid shift, buy food at
@@ -99,6 +99,7 @@ end never stands between a test and the game.
 | `B` | Open the business dashboard, or the company view outside a shop |
 | `M` | Open the city map |
 | `P` | Open your profile: net worth, vehicles, home, lifestyle |
+| `H` | Open the property portfolio: holdings, mortgages, income |
 | Left mouse | Attack with whatever is in your hand · place equipment · place furniture |
 | `R` | Rotate the equipment or furniture being placed |
 
@@ -130,6 +131,7 @@ Development keys, to be removed before release:
 | `F12` | Show / hide the audio overlay (voices, ambience, buses, surface) |
 | `O` | Show / hide the ownership overlay (fleet, home, garages, lifestyle) |
 | `1`–`0`, `Q`–`T` | Ownership debug commands, only while that overlay is up |
+| `Y` `U` `I` `J` `K` | Property debug commands, only while that overlay is up |
 
 Every overlay is hidden by default and draws nothing until it is switched on, so
 none of them intrudes on ordinary play or on a screenshot.
@@ -500,6 +502,96 @@ Only the best two things in each category count towards lifestyle. That is the
 whole answer to buying twenty identical plants, and it is a rule rather than a
 fudge: a second sofa does not make a flat twice as nice.
 
+## The property ladder
+
+Renting a shop unit and owning the building it is in are different
+relationships with the same address, and the game now models both. The door in
+the street is still a `CommercialProperty` or a `ResidenceProperty` doing its
+own leasing; ownership is a separate layer keyed to the same `property_id`, so a
+player can rent a flat, live in it for a month and then buy it without anything
+about the flat changing.
+
+Twelve addresses are on the market: the three flats, the eight shop units and
+one small block. Nothing appears on the market screen until the player has stood
+in front of its board — the city is meant to be driven around rather than
+browsed from a menu — and the boards are drawn from the listings, so an address
+coming on or off the market puts up or takes down its own sign.
+
+### What a building is worth
+
+Value is floor area times a rate for its kind, adjusted for the pitch it stands
+on, the district, its condition and a market trend that wanders slowly around
+1.0 and is pulled back the further it drifts. Rent follows value, but not at a
+flat percentage: a fringe address yields more than a prime one, which is what
+makes the cheap flat in Harbour Row and the unit on Central Plaza different
+investments rather than the same investment at two sizes.
+
+| Address | Kind | Asking | Gross yield |
+| --- | --- | --- | --- |
+| Larkspur Apartments | Residential | ~$40,000 | ~40% |
+| 40 Quayside | Commercial | ~$129,000 | ~45% |
+| 18 Main Street | Commercial | ~$154,000 | ~42% |
+| Dockside Court | Four flats | ~$183,000 | ~39% |
+| 1 Riverside Drive | Residential | ~$212,000 | ~30% |
+| 3 Central Plaza | Commercial | ~$405,000 | ~37% |
+
+### Mortgages
+
+Fixed rate, level payment, interest first. A lender wants 20% down on a flat,
+25% on a shop unit and 30% on the block, will not deal with anybody worth less
+than $12,000, and charges 6% a year over 200 weekly payments. Early payments are
+mostly interest and later ones mostly principal, which is what makes paying
+extra early worth doing; an overpayment comes straight off the balance and the
+next period's interest is smaller for it.
+
+A payment that cannot be met is missed rather than forgiven — the balance is
+simply owed again next period, and three misses flag the mortgage AT RISK, which
+stops any further borrowing. **Nothing is ever repossessed.** That system does
+not exist yet, and quietly deleting a property to imply it does would be worse
+than not having it.
+
+### Tenants
+
+A tenant is a name, a budget, a reliability and a payment schedule — data, and
+deliberately so. There is no tenant walking about a flat across the city, and
+there should not be: a portfolio of nine units would otherwise be nine more
+people to simulate for no gameplay at all. What the player interacts with is the
+decision, and it is a real one: this applicant pays more but is less reliable,
+that one is dull and always pays.
+
+Asking rent is the lever. Ask under the going rate and applicants arrive
+quickly; ask half again and almost nobody does, and the flat sits empty while
+the upkeep and the mortgage carry on. Leases run 28 days and renew if the tenant
+is happy, the place is decent and the rent is not more than 15% over the market.
+Every tenant puts a little wear on the building, a careless one slightly more.
+
+Dockside Court is four flats under one roof, and it is there for the arithmetic
+the single properties cannot teach: one flat is let or it is not, four flats are
+three-quarters let, and the difference between a good week and a bad one is one
+tenant leaving. Its windows light one per let flat, so an empty block is dark
+from the street.
+
+### Owning what you already use
+
+Buying the unit your own shop trades from does not create a rent you pay
+yourself. The unit's landlord becomes nobody, rent day skips it entirely rather
+than moving money between the player's pockets, and the business keeps its
+equipment, staff and signage exactly as they were. The same goes for buying the
+flat you live in: the lease ends, the furniture and the home marker stay, and
+nothing is charged. A building with your own business in it cannot be sold —
+there is no relocation system, so the sale is refused rather than allowed to
+destroy the shop.
+
+### The books
+
+`H` opens the portfolio: what is owned, what is owed, and what it earned.
+Selling is at market value less a 4% fee, with whatever is still owed cleared
+out of the proceeds before the player sees a penny, so a sold building never
+leaves a mortgage behind it. Property equity — market value less mortgage debt —
+is counted in net worth alongside cash, vehicles, furniture and business value,
+and the profile screen shows the value and the debt as separate lines so the two
+together are legibly the equity.
+
 ## Layout
 
 ```
@@ -528,7 +620,11 @@ world/        world_manager, district_data, district_01, district_02,
               world_debug, city_kit, day_night_cycle, portal, interiors/
 world/map/    map_manager, map_marker
 ui/map/       city_map
-property/     property_manager, commercial_property, residence_property
+property/     property_manager, commercial_property, residence_property,
+              garage_property, home_manager, owned_furniture,
+              real_estate, property_record, property_listing, mortgage_data,
+              tenant_data, multi_unit_building, property_sign
+ui/property/  property_sale_panel, real_estate_panel
 tests/        smoke_test, screenshot
 main.tscn     entry scene
 ```
@@ -774,11 +870,38 @@ cannot write to, to fire once and refuse to fire twice in a row. Finally the
 front end is checked to exist, to be what the game boots to, and to leave the
 test harness loading the world directly.
 
+The property pass is tested as arithmetic and as decisions. The arithmetic is
+checked directly, because a formula is either right or it is not: value scales
+with floor area, pitch, district and condition; a fringe address yields more
+than a prime one; the level payment is the level payment for the term; interest
+plus principal is exactly what was paid; the selling fee is 4% and the proceeds
+are the price less the fee less what is owed. The decisions are driven through
+the same calls the screens make — buying for cash takes the money exactly once
+and takes the board down, buying on a mortgage takes only the deposit, an
+overpayment comes off the principal and shrinks the next period's interest, a
+payment that cannot be met is missed and three misses stop any further
+borrowing, and a payoff leaves the property owned outright with no debt behind
+it.
+
+Letting is played rather than asserted: a flat is listed, applicants are waited
+for at the going rate, one is signed, the rent arrives week after week, the
+tenancy is ended and the money stops. Asking rent is checked to move demand in
+both directions. The block of flats is let one unit at a time and checked to
+read as three-quarters full, and one tenant leaving is checked to empty exactly
+one flat. Buying the unit the player's own shop trades from is checked to charge
+no rent to anybody on rent day and to refuse the sale while the shop is still in
+it; buying the flat they live in is checked to keep them living there. Property
+equity is checked to reach net worth, the map to tell FOR SALE from OWNED in
+different colours, and a portfolio to survive a save and a load with its
+mortgage, its condition and its tenant intact — as is a save written before any
+of this existed. One test exists for a bug: every door in the city with a board
+outside it is checked to answer for itself rather than for the board.
+
 ```sh
 godot --headless --path game res://tests/smoke_test.tscn
 ```
 
-It exits non-zero if any check fails. As of the ownership pass it runs 1,508
+It exits non-zero if any check fails. As of the property pass it runs 1,756
 checks.
 
 A screenshot tool renders the game to a PNG without a desktop, for eyeballing
@@ -818,7 +941,13 @@ Args after `++` are `key=value` pairs, all optional: `out`, `hour`, `scenario`
 `purchase_confirm`, `player_vehicle`, `my_vehicles`, `repair_shop`,
 `repair_screen`, `garage_exterior`, `garage_stored`, `premium_apartment`,
 `furniture_store`, `furniture_buying`, `furniture_placing`,
-`furnished_apartment`, `profile`, `night_premium`) and camera `distance` /
+`furnished_apartment`, `profile`, `night_premium`, `for_sale_board`,
+`property_sale_screen`, `mortgage_offer`, `property_purchase_confirm`,
+`dockside_court`, `dockside_court_let`, `property_portfolio`,
+`property_detail`, `letting_screen`, `tenant_applicants`, `tenant_signed`,
+`mortgage_tab`, `income_tab`, `renovation_screen`, `property_sale_confirm`,
+`property_map`, `property_profile`, `owned_shop_unit`, `multi_unit_detail`,
+`property_empire`) and camera `distance` /
 `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
 rather than faking their results. It runs under the Compatibility renderer, so
 lighting is close to but not identical to the Forward+ game.

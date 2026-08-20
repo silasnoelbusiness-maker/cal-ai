@@ -38,6 +38,10 @@ signal made_home()
 @export var next_rent_due_day: int = -1
 @export var arrears: int = 0
 @export var save_id: StringName = &""
+## Set by RealEstate when the player buys the flat outright. An owned home is
+## still a home — the furniture, the storage and the bed are all unchanged —
+## it simply has no landlord and no rent day.
+@export var owned_by_player: bool = false
 
 
 func _ready() -> void:
@@ -52,6 +56,19 @@ func _ready() -> void:
 
 func is_leased_by_player() -> bool:
 	return leased_by_player
+
+
+## Whether the player may live here: they rent it, or they own it.
+func is_available_to_player() -> bool:
+	return leased_by_player or owned_by_player
+
+
+func has_landlord() -> bool:
+	return not owned_by_player
+
+
+func refresh_state() -> void:
+	_refresh_prompt()
 
 
 func is_current_home() -> bool:
@@ -91,7 +108,10 @@ func end_lease() -> void:
 
 
 func set_as_home() -> void:
-	if not leased_by_player:
+	# Rented or owned: both are places the player may live. Before Phase N this
+	# only had to consider a lease, and buying the flat you were renting would
+	# quietly stop it being your home on the way through.
+	if not is_available_to_player():
 		return
 	for node in get_tree().get_nodes_in_group(&"residence"):
 		var other := node as ResidenceProperty

@@ -59,7 +59,9 @@ func _rebuild() -> void:
 
 ## Every asset counted once. Vehicles come from the registry, so a car in a
 ## garage counts exactly as much as one at the kerb and neither is counted twice;
-## a leased flat and a rented garage are not assets and do not appear.
+## a leased flat and a rented garage are not assets and do not appear. Property
+## is counted at market value with the mortgages shown against it, so the two
+## lines together are the equity that actually belongs to the player.
 func _build_worth() -> void:
 	_body.add_child(ScreenKit.heading("NET WORTH"))
 	var cash := EconomyManager.cash
@@ -74,6 +76,14 @@ func _build_worth() -> void:
 		"Vehicles (%d)" % VehicleRegistry.count(), ScreenKit.money(vehicles)
 	))
 	_body.add_child(ScreenKit.row("Furniture, at resale", ScreenKit.money(furniture)))
+	if RealEstate.count() > 0:
+		_body.add_child(ScreenKit.row(
+			"Property (%d)" % RealEstate.count(),
+			ScreenKit.money(RealEstate.total_market_value())
+		))
+		var owed := RealEstate.total_mortgage_debt()
+		if owed > 0:
+			_body.add_child(ScreenKit.row("Mortgages", "-%s" % ScreenKit.money(owed)))
 	if debt > 0:
 		_body.add_child(ScreenKit.row("Debt", "-%s" % ScreenKit.money(debt)))
 	_body.add_child(ScreenKit.row("Net worth", ScreenKit.money(BusinessManager.net_worth()), true))

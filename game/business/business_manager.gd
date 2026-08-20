@@ -1058,7 +1058,7 @@ func vehicle_value() -> int:
 func net_worth() -> int:
 	return (
 		EconomyManager.cash + vehicle_value() + total_business_value()
-		+ HomeManager.furniture_resale_value()
+		+ HomeManager.furniture_resale_value() + RealEstate.total_equity()
 	)
 
 
@@ -1086,6 +1086,9 @@ func portfolio_summary() -> Dictionary:
 		"business_cash": total_business_cash(),
 		"personal_cash": EconomyManager.cash,
 		"vehicles": vehicle_value(),
+		"property_value": RealEstate.total_market_value(),
+		"property_equity": RealEstate.total_equity(),
+		"mortgage_debt": RealEstate.total_mortgage_debt(),
 		"debt": total_debt(),
 		"net_worth": net_worth(),
 	}

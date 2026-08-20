@@ -118,6 +118,7 @@ func _build_empire(summary: Dictionary) -> void:
 	_pair("Business cash", BusinessUIKit.money(int(summary["business_cash"])))
 	_pair("Business value", BusinessUIKit.money(int(summary["business_value"])))
 	_pair("Vehicles", BusinessUIKit.money(int(summary["vehicles"])))
+	_pair("Property equity", BusinessUIKit.money(int(summary["property_equity"])))
 	_pair(
 		"Debt", BusinessUIKit.money(-int(summary["debt"])),
 		BusinessUIKit.BAD if int(summary["debt"]) > 0 else BusinessUIKit.TEXT
@@ -263,6 +264,8 @@ func _build_finance(summary: Dictionary) -> void:
 	_pair("Cash", BusinessUIKit.money(int(summary["personal_cash"])))
 	_pair("Business equity", BusinessUIKit.money(int(summary["business_value"])))
 	_pair("Vehicles", BusinessUIKit.money(int(summary["vehicles"])))
+	_pair("Property, at market", BusinessUIKit.money(int(summary["property_value"])))
+	_pair("Mortgages", BusinessUIKit.money(-int(summary["mortgage_debt"])))
 	_pair("Debt", BusinessUIKit.money(-int(summary["debt"])))
 	_pair(
 		"NET WORTH", BusinessUIKit.money(int(summary["net_worth"])),
