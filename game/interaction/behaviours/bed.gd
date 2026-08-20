@@ -22,6 +22,25 @@ signal slept(minutes: int)
 @export var residence_id: StringName = &""
 
 
+## Extra health a good bed gives back on top of the fitted one.
+##
+## Deliberately small. A bed the player bought should be worth having and must
+## not be worth having so much that the game is about beds — the fitted bed
+## already restores energy in full, so this is a comfort bonus, not a
+## requirement, and an unfurnished flat remains perfectly playable.
+const MAX_COMFORT_BONUS := 10.0
+
+
+func comfort_bonus() -> float:
+	if residence_id == StringName(""):
+		return 0.0
+	var best := HomeManager.best_bed(residence_id)
+	if best == null:
+		return 0.0
+	# The kingsize is worth fourteen comfort; that is the top of the scale.
+	return clampf(float(best.comfort_value) / 14.0, 0.0, 1.0) * MAX_COMFORT_BONUS
+
+
 ## In-game minutes from now until the next `wake_hour`, floored at the minimum.
 func get_sleep_minutes() -> int:
 	var now := TimeManager.minute_of_day
@@ -64,7 +83,7 @@ func _perform(interactor: Node3D) -> void:
 	var stats: PlayerStats = interactor.call("get_stats")
 	if stats != null:
 		stats.add_energy(energy_restore)
-		stats.add_health(health_restore)
+		stats.add_health(health_restore + comfort_bonus())
 
 	AudioManager.play(&"sleep", AudioBuses.SFX, -6.0)
 	slept.emit(minutes)

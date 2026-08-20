@@ -7,7 +7,8 @@ extends RefCounted
 ## whether a unit is still vacant — is already owned by something else. A stale
 ## copy of that would be a second source of truth.
 
-enum Category { HOME, OWNED_BUSINESS, AVAILABLE_PROPERTY, JOB, POLICE, SHOP, LANDMARK }
+## Appended to rather than reordered: the filter states are saved by index.
+enum Category { HOME, OWNED_BUSINESS, AVAILABLE_PROPERTY, JOB, POLICE, SHOP, LANDMARK, MY_VEHICLE }
 
 var category: Category = Category.SHOP
 var label: String = ""
@@ -44,6 +45,8 @@ static func category_name(category: Category) -> String:
 			return "Police"
 		Category.LANDMARK:
 			return "Landmarks"
+		Category.MY_VEHICLE:
+			return "My vehicles"
 		_:
 			return "Shops"
 
@@ -58,6 +61,8 @@ static func category_colour(category: Category) -> Color:
 			return Color(0.965, 0.816, 0.478)
 		Category.JOB:
 			return Color(0.847, 0.639, 0.961)
+		Category.MY_VEHICLE:
+			return Color(0.976, 0.812, 0.435)
 		Category.POLICE:
 			return Color(0.412, 0.667, 0.882)
 		Category.LANDMARK:

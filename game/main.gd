@@ -15,6 +15,10 @@ func _ready() -> void:
 	_spawn_player()
 	camera_rig.set_target(player, true)
 	camera_rig.camera.current = true
+	# The district places a car for the player before the registry exists to own
+	# it, and so did every save written before the registry existed. Both are
+	# taken onto the books here, once the world is built.
+	VehicleRegistry.adopt_scene_vehicles()
 
 
 func _spawn_player() -> void:

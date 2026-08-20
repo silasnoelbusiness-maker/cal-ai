@@ -36,6 +36,16 @@ const TONE_COLORS: Array[Color] = [
 @onready var _residence_panel: Control = %ResidencePanel
 @onready var _destination_label: Label = %DestinationLabel
 @onready var _empire_dashboard: Control = %EmpireDashboard
+
+## Built in _build_phase_m_screens rather than instanced from the scene.
+var _dealership_panel: DealershipPanel = null
+var _vehicle_detail_panel: VehicleDetailPanel = null
+var _repair_panel: RepairPanel = null
+var _garage_panel: GaragePanel = null
+var _furniture_store_panel: FurnitureStorePanel = null
+var _furnishing_panel: FurnishingPanel = null
+var _home_storage_panel: HomeStoragePanel = null
+var _profile_panel: ProfilePanel = null
 @onready var _store_panel: PanelContainer = %StorePanel
 @onready var _store_name: Label = %StoreName
 @onready var _store_status: Label = %StoreStatus
@@ -115,6 +125,7 @@ func _ready() -> void:
 	_toast_panel.modulate.a = 0.0
 	_pause_overlay.visible = false
 	_build_pause_menu()
+	_build_phase_m_screens()
 	_speed_panel.visible = false
 	_wanted_label.visible = false
 	_escape_label.visible = false
@@ -322,6 +333,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			_city_map.open()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("profile"):
+		if _profile_panel.is_open():
+			close_screens()
+		else:
+			close_screens()
+			_profile_panel.open()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("business_menu"):
 		# One key, and it opens whichever answer the player is standing in front
 		# of: the shop they are inside, or the company as a whole.
@@ -408,6 +427,28 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 			_residence_panel.open(context as ResidenceProperty)
 		&"map":
 			_city_map.open()
+		&"dealership":
+			_dealership_panel.open()
+		&"dealership_vehicle":
+			var stand := context as DealershipDisplay
+			if stand != null:
+				_vehicle_detail_panel.open(stand.model_id)
+		&"repair":
+			_repair_panel.open(context as RepairShop)
+		&"garage":
+			_garage_panel.open(context as GarageProperty)
+		&"furniture_store":
+			_furniture_store_panel.open()
+		&"furnishing":
+			var spot := context as FurnishingPoint
+			if spot != null:
+				_furnishing_panel.open(spot.residence_id)
+		&"home_storage":
+			var cupboard := context as HomeStoragePoint
+			if cupboard != null:
+				_home_storage_panel.open(cupboard.residence_id)
+		&"profile":
+			_profile_panel.open()
 		_:
 			push_warning("HUD has no screen for '%s'." % screen_id)
 
@@ -420,6 +461,8 @@ func close_screens() -> void:
 	_residence_panel.close()
 	_city_map.close()
 	_empire_dashboard.close()
+	for screen in _phase_m_screens():
+		screen.close()
 
 
 ## The business the management key should open: the one the player is standing
@@ -434,10 +477,13 @@ func _business_in_reach() -> BusinessInstance:
 
 ## A screen being up freezes the world, so the manager has to know.
 func _on_screen_visibility_changed() -> void:
+	var phase_m_open := false
+	for screen in _phase_m_screens():
+		phase_m_open = phase_m_open or screen.is_open()
 	GameManager.menu_open = (
 		_inventory_panel.is_open() or _shop_panel.is_open()
 		or _property_panel.is_open() or _business_dashboard.is_open()
-		or _empire_dashboard.is_open()
+		or _empire_dashboard.is_open() or phase_m_open
 	)
 
 
@@ -596,6 +642,56 @@ func _on_autosave_started(_reason: String) -> void:
 func _on_autosave_finished(succeeded: bool) -> void:
 	if not succeeded:
 		_show_toast("AUTOSAVE FAILED", GameManager.Tone.BAD)
+
+
+## The ownership screens: the dealership, the mechanic, the garage, the
+## furniture shop, the furnishing list, the cupboard and the profile.
+##
+## Built in code and parented here for the same reason the pause menu is —
+## their contents are lists whose length depends on what the player owns, so
+## there is nothing to lay out in a scene file that the code would not
+## immediately replace.
+func _build_phase_m_screens() -> void:
+	var root := get_node_or_null("Root")
+	var host: Node = root if root != null else self
+
+	_dealership_panel = DealershipPanel.new()
+	_dealership_panel.name = "DealershipPanel"
+	_vehicle_detail_panel = VehicleDetailPanel.new()
+	_vehicle_detail_panel.name = "VehicleDetailPanel"
+	_repair_panel = RepairPanel.new()
+	_repair_panel.name = "RepairPanel"
+	_garage_panel = GaragePanel.new()
+	_garage_panel.name = "GaragePanel"
+	_furniture_store_panel = FurnitureStorePanel.new()
+	_furniture_store_panel.name = "FurnitureStorePanel"
+	_furnishing_panel = FurnishingPanel.new()
+	_furnishing_panel.name = "FurnishingPanel"
+	_home_storage_panel = HomeStoragePanel.new()
+	_home_storage_panel.name = "HomeStoragePanel"
+	_profile_panel = ProfilePanel.new()
+	_profile_panel.name = "ProfilePanel"
+
+	for screen in _phase_m_screens():
+		host.add_child(screen)
+		screen.opened.connect(_on_screen_visibility_changed)
+		screen.closed.connect(_on_screen_visibility_changed)
+
+	# The stand beside a car offers COMPARE, and comparing is something the
+	# sales desk screen does, so the two hand off rather than stacking.
+	_vehicle_detail_panel.compare_requested.connect(_on_compare_requested)
+
+
+func _phase_m_screens() -> Array:
+	return [
+		_dealership_panel, _vehicle_detail_panel, _repair_panel, _garage_panel,
+		_furniture_store_panel, _furnishing_panel, _home_storage_panel, _profile_panel,
+	]
+
+
+func _on_compare_requested(_model_id: StringName) -> void:
+	_vehicle_detail_panel.close()
+	_dealership_panel.open(DealershipPanel.Tab.NEW)
 
 
 ## The pause menu, added to the HUD rather than given its own scene: pausing

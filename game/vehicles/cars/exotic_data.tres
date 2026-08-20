@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="VehicleData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://vehicles/vehicle_data.gd" id="1_vehicle_data"]
+
+[resource]
+script = ExtResource("1_vehicle_data")
+id = &"exotic"
+display_name = "Mira Solstice"
+description = "Two seats, no boot and a price that buys a shop. Worth it to somebody."
+max_speed = 36.0
+max_reverse_speed = 9.0
+acceleration = 24.0
+brake_deceleration = 30.0
+engine_braking = 7.5
+handbrake_deceleration = 20.0
+steer_rate_low = 2.9
+steer_rate_high = 1.22
+steer_response = 9.6
+handbrake_steer_bonus = 1.35
+min_speed_to_steer = 0.6
+full_steer_speed = 3.0
+max_health = 62.0
+damage_speed_threshold = 7.0
+damage_per_impact_speed = 5.2
+impact_speed_retention = 0.15
+body_length = 4.5
+body_width = 2.04
+body_height = 0.42
+cabin_height = 0.4
+ground_clearance = 0.12
+wheel_radius = 0.36
+wheel_width = 0.32
+body_color = Color(0.85098, 0.607843, 0.121569, 1)
+trim_color = Color(0.176471, 0.184314, 0.207843, 1)
+glass_color = Color(0.121569, 0.184314, 0.215686, 1)
+body_profile = 4
+cabin_offset = 0.18
+resale_value = 102000
+price_new = 158000
+manufacturer = "Mira"
+vehicle_class = "Exotic"
+prestige = 97
+purchasable = true
+cargo_capacity = 0

@@ -1,0 +1,44 @@
+[gd_resource type="Resource" script_class="VehicleData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://vehicles/vehicle_data.gd" id="1_vehicle_data"]
+
+[resource]
+script = ExtResource("1_vehicle_data")
+id = &"luxury_sedan"
+display_name = "Crown Regent"
+description = "Long, quiet and heavy. Bought to be sat in as much as driven."
+max_speed = 26.0
+max_reverse_speed = 8.5
+acceleration = 13.0
+brake_deceleration = 23.0
+engine_braking = 5.0
+handbrake_deceleration = 15.0
+steer_rate_low = 2.3
+steer_rate_high = 0.92
+steer_response = 6.8
+handbrake_steer_bonus = 1.35
+min_speed_to_steer = 0.6
+full_steer_speed = 3.0
+max_health = 118.0
+damage_speed_threshold = 7.0
+damage_per_impact_speed = 3.0
+impact_speed_retention = 0.15
+body_length = 5.2
+body_width = 2.02
+body_height = 0.64
+cabin_height = 0.56
+ground_clearance = 0.2
+wheel_radius = 0.36
+wheel_width = 0.26
+body_color = Color(0.098039, 0.109804, 0.129412, 1)
+trim_color = Color(0.176471, 0.184314, 0.207843, 1)
+glass_color = Color(0.121569, 0.184314, 0.215686, 1)
+body_profile = 5
+cabin_offset = 0.14
+resale_value = 55000
+price_new = 86000
+manufacturer = "Crown"
+vehicle_class = "Luxury saloon"
+prestige = 80
+purchasable = true
+cargo_capacity = 3

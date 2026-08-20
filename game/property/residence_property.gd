@@ -19,6 +19,13 @@ signal made_home()
 @export var district_id: StringName = &"harbour_row"
 @export var size_label: String = "Studio"
 @export_multiline var amenities: String = "Bed · Wardrobe"
+## 0-100. What living here says about you, and the largest single component of
+## the lifestyle score. Deliberately not derived from the rent: a dear flat in a
+## bad spot is dear, not impressive.
+@export var lifestyle_value: int = 10
+## Off-street spaces that come with the place. Nothing enforces them yet beyond
+## the parking marker outside; it is what the premium flat's private bay is.
+@export var parking_slots: int = 0
 
 @export_group("Terms")
 @export var rent_amount: int = 220

@@ -1042,16 +1042,12 @@ func total_employees() -> int:
 
 ## What the player's vehicles would fetch. Their own car counts; a stolen one
 ## does not, because it is not theirs to sell.
+## What the player's cars are worth, from the registry rather than from whatever
+## happens to be spawned. That distinction is the whole point of the registry: a
+## car in a garage across the city has no node at all and is still an asset, and
+## counting nodes would have quietly written it off.
 func vehicle_value() -> int:
-	var total := 0
-	for node in get_tree().get_nodes_in_group(&"vehicle"):
-		var car := node as Vehicle
-		if car == null or not car.is_player_owned() or car.data == null:
-			continue
-		# A wreck is worth less than a clean one, in proportion to the damage.
-		var condition := clampf(car.health / maxf(car.data.max_health, 1.0), 0.25, 1.0)
-		total += roundi(float(car.data.resale_value) * condition)
-	return total
+	return VehicleRegistry.total_value()
 
 
 ## Everything owned less everything owed.
@@ -1060,7 +1056,10 @@ func vehicle_value() -> int:
 ## theirs to count. What is theirs is the cash, the cars and the businesses,
 ## and the businesses are already net of their own debt.
 func net_worth() -> int:
-	return EconomyManager.cash + vehicle_value() + total_business_value()
+	return (
+		EconomyManager.cash + vehicle_value() + total_business_value()
+		+ HomeManager.furniture_resale_value()
+	)
 
 
 ## One line per business plus the totals, for the portfolio screen and the

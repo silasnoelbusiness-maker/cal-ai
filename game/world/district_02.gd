@@ -804,6 +804,22 @@ func _venue_table() -> Array:
 			"MeridianHeights", Vector3(-60.0, 1.2, -153.4), Vector3.FORWARD, "View Apartment",
 			"residence", "meridian",
 		],
+		# The showroom takes the ground floor of Meridian Tower, on Riverside
+		# Drive — the dearest frontage in the city, which is where a car
+		# dealership would actually be.
+		[
+			"NorthlineMotors", Vector3(-88.0, 1.2, -279.6), Vector3.BACK, "Enter Showroom",
+			"dealership", "",
+		],
+		# Flats above the chambers opposite. The top of the residential ladder.
+		[
+			"CentralHeights", Vector3(88.0, 1.2, -279.6), Vector3.BACK, "View Apartment",
+			"residence", "central_heights",
+		],
+		[
+			"KingstonFurnishings", Vector3(74.0, 1.2, -224.6), Vector3.BACK, "Enter Store",
+			"furniture", "",
+		],
 	]
 
 
@@ -826,6 +842,10 @@ func _build_venue_doors() -> void:
 				door = _make_courier_depot()
 			"residence":
 				door = _make_residence(point, facing, StringName(payload))
+			"dealership":
+				door = _make_dealership_door(point, facing)
+			"furniture":
+				door = _make_furniture_door(point, facing)
 			_:
 				var notice := MessagePoint.new()
 				notice.message = payload
@@ -936,20 +956,172 @@ func _make_residence(point: Vector3, facing: Vector3, id: StringName) -> Residen
 
 	var home := ResidenceProperty.new()
 	home.residence_id = id
-	home.address = "5 Kingston Road"
-	home.display_name = "Meridian Heights"
 	home.district_id = &"central"
-	home.size_label = "One bedroom"
-	home.amenities = "Double bed · Kitchen · Living area · Street parking"
-	home.rent_amount = 640
-	home.deposit = 600
 	home.leased_by_player = false
 	home.destination_group = ApartmentInterior.entry_group_for(id)
 	home.travel_minutes = 2
 	home.override_camera = true
-	home.camera_distance = 12.0
-	home.camera_pitch = 74.0
+
+	if id == &"central_heights":
+		# The top of the ladder. Dear enough that moving in is a decision, and
+		# worth twice the middle flat to the lifestyle score.
+		home.address = "1 Riverside Drive"
+		home.display_name = "Central Heights"
+		home.size_label = "Two bedroom · Top floor"
+		home.amenities = "Kingsize room · Open living space · Private bay · Concierge"
+		home.rent_amount = 2100
+		home.deposit = 2400
+		home.lifestyle_value = 78
+		home.parking_slots = 1
+		# The premium flat is half as big again as the middle one, so the camera
+		# has to stand further back to hold it.
+		home.camera_distance = 21.0
+		home.camera_pitch = 74.0
+		_add_private_bay(point)
+	else:
+		home.address = "5 Kingston Road"
+		home.display_name = "Meridian Heights"
+		home.size_label = "One bedroom"
+		home.amenities = "Double bed · Kitchen · Living area · Street parking"
+		home.rent_amount = 640
+		home.deposit = 600
+		home.lifestyle_value = 42
+		home.camera_distance = 12.0
+		home.camera_pitch = 74.0
 	return home
+
+
+## The premium flat's own parking space, marked out on the kerb beside its door.
+## Nothing enforces it — it is somewhere obvious to leave your car, which is
+## exactly what a private bay is worth.
+func _add_private_bay(point: Vector3) -> void:
+	var centre := Vector3(point.x - 5.0, 0.0, RIVERSIDE_DR_Z - 4.9)
+	var rect := CityKit.rect_from_bounds(centre.x - 2.6, centre.z - 1.8, centre.x + 2.6, centre.z + 1.8)
+	CityKit.add_slab(
+		_geometry, "PrivateBay", rect, MARKING_BASE, MARKING_THICKNESS,
+		CityKit.make_material(Color(0.847, 0.780, 0.545)), false, false
+	)
+	var marker := Marker3D.new()
+	marker.name = "CentralHeightsParking"
+	marker.position = centre + Vector3(0.0, 0.4, 0.0)
+	marker.rotation_degrees.y = -90.0
+	marker.add_to_group(&"residence_parking")
+	_interactables.add_child(marker)
+
+
+## The showroom door, plus the kerbside bays a bought car is handed over in and
+## the signage over the frontage. The showroom itself is an interior off to one
+## side, like every other room the player walks into.
+func _make_dealership_door(point: Vector3, facing: Vector3) -> Portal:
+	var street_marker := Marker3D.new()
+	street_marker.name = "DealershipStreetExit"
+	street_marker.position = point + facing * 2.2 - Vector3(0.0, 0.8, 0.0)
+	street_marker.add_to_group(DealershipInterior.EXIT_GROUP)
+	_interactables.add_child(street_marker)
+
+	# Where a car the player has just bought is left: three kerbside bays on
+	# Riverside Drive, right outside the door. Facing east, along the road.
+	var bays := Node3D.new()
+	bays.name = "DealershipCollection"
+	_interactables.add_child(bays)
+	for i in 3:
+		var bay := Marker3D.new()
+		bay.name = "CollectionBay%d" % i
+		bay.position = Vector3(point.x + 4.0 + float(i) * 6.5, 0.4, RIVERSIDE_DR_Z - 4.9)
+		bay.rotation_degrees.y = -90.0
+		bay.add_to_group(DealershipInterior.COLLECTION_GROUP)
+		bays.add_child(bay)
+		_add_collection_bay_markings(bay.position)
+
+	_add_dealership_signage(point, facing)
+
+	var door := Portal.new()
+	door.destination_group = DealershipInterior.ENTRY_GROUP
+	door.travel_minutes = 1
+	door.override_camera = true
+	door.camera_distance = 20.0
+	door.camera_pitch = 66.0
+	door.prompt_subtitle = "Northline Motors"
+	return door
+
+
+func _add_collection_bay_markings(centre: Vector3) -> void:
+	var rect := CityKit.rect_from_bounds(centre.x - 2.6, centre.z - 1.8, centre.x + 2.6, centre.z + 1.8)
+	var line := 0.16
+	for edge in [
+		CityKit.rect_from_bounds(rect.position.x, rect.position.y, rect.position.x + line, rect.end.y),
+		CityKit.rect_from_bounds(rect.end.x - line, rect.position.y, rect.end.x, rect.end.y),
+	]:
+		CityKit.add_slab(
+			_geometry, "CollectionMark_%d_%d" % [int(centre.x), int(edge.position.x)],
+			edge, MARKING_BASE, MARKING_THICKNESS, _mat("marking"), false, false
+		)
+
+
+## Signage and a lit glass frontage, so the showroom is obvious from the street
+## rather than being another door in a wall.
+func _add_dealership_signage(point: Vector3, facing: Vector3) -> void:
+	var holder := Node3D.new()
+	holder.name = "DealershipFrontage"
+	_geometry.add_child(holder)
+
+	var along := Vector3(absf(facing.z), 0.0, absf(facing.x))
+	var front := point - facing * 0.5
+	CityKit.add_box(
+		holder, "Glazing", Vector3(front.x, 2.1, front.z), along * 13.0 + Vector3(0.0, 4.0, 0.0) + facing.abs() * 0.2,
+		CityKit.make_material(Color(0.478, 0.596, 0.667, 0.40), 0.8, 0.1), false, false
+	)
+	CityKit.add_box(
+		holder, "SignBoard", Vector3(front.x, 5.2, front.z),
+		along * 11.0 + Vector3(0.0, 1.5, 0.0) + facing.abs() * 0.3,
+		CityKit.make_material(Color(0.129, 0.161, 0.220)), false, false
+	)
+	CityKit.add_box(
+		holder, "SignText", Vector3(front.x, 5.2, front.z - facing.z * 0.2 - facing.x * 0.2),
+		along * 8.6 + Vector3(0.0, 0.55, 0.0) + facing.abs() * 0.1,
+		CityKit.make_emissive_material(Color(0.906, 0.831, 0.588), 0.85), false, false
+	)
+	for i in 4:
+		CityKit.add_box(
+			holder, "Bollard%d" % i,
+			Vector3(point.x - 6.0 + float(i) * 4.0, 0.45, point.z - facing.z * 2.6),
+			Vector3(0.22, 0.9, 0.22), _mat("metal"), false, false
+		)
+
+
+## The furniture shop's door. A shopfront rather than a showroom: the interior
+## behind it is small and full of things to look at.
+func _make_furniture_door(point: Vector3, facing: Vector3) -> Portal:
+	var street_marker := Marker3D.new()
+	street_marker.name = "FurnitureStreetExit"
+	street_marker.position = point + facing * 2.0 - Vector3(0.0, 0.8, 0.0)
+	street_marker.add_to_group(FurnitureStoreInterior.EXIT_GROUP)
+	_interactables.add_child(street_marker)
+
+	var holder := Node3D.new()
+	holder.name = "FurnitureFrontage"
+	_geometry.add_child(holder)
+	var along := Vector3(absf(facing.z), 0.0, absf(facing.x))
+	var front := point - facing * 0.5
+	CityKit.add_box(
+		holder, "Window", Vector3(front.x, 1.9, front.z),
+		along * 8.0 + Vector3(0.0, 2.6, 0.0) + facing.abs() * 0.2,
+		CityKit.make_material(Color(0.545, 0.596, 0.612, 0.45), 0.7, 0.1), false, false
+	)
+	CityKit.add_box(
+		holder, "SignBoard", Vector3(front.x, 3.7, front.z),
+		along * 7.0 + Vector3(0.0, 1.1, 0.0) + facing.abs() * 0.3,
+		CityKit.make_emissive_material(Color(0.741, 0.549, 0.353), 0.7), false, false
+	)
+
+	var door := Portal.new()
+	door.destination_group = FurnitureStoreInterior.ENTRY_GROUP
+	door.travel_minutes = 1
+	door.override_camera = true
+	door.camera_distance = 15.0
+	door.camera_pitch = 70.0
+	door.prompt_subtitle = "Kingston Furnishings"
+	return door
 
 
 ## A door slab on the facade, so the prompt has something to point at.
@@ -1037,6 +1209,27 @@ func _build_street_props() -> void:
 
 # --- Parking -------------------------------------------------------------
 
+## The private garage at the north end of the west car park. Six bays, twice
+## Harbour Row's rent, and reached off the service road that is already there.
+func _build_central_garage() -> void:
+	var materials := {
+		"wall": _mat("concrete"), "trim": _mat("metal"), "deck": _mat("asphalt"),
+	}
+	var garage := ServiceKit.build_garage(
+		_geometry, _geometry, "CentralGarage",
+		CityKit.rect_from_bounds(-114.0, -258.0, -98.0, -248.0), -248.0, 6, 180.0, materials
+	)
+	garage.garage_id = &"central_garage"
+	garage.display_name = "Central Private Garage"
+	garage.address = "Riverside Yard"
+	garage.district_id = &"central"
+	garage.capacity = 6
+	garage.rent_amount = 620
+	garage.deposit = 700
+	garage.prompt_subtitle = "Central Private Garage"
+	CityKit.attach_interactable(_interactables, garage, Vector3(-106.0, 1.0, -245.5), 4.5)
+
+
 ## Two surface car parks, behind the service roads and against the edge of the
 ## district. Central's kerbs are almost all double-yellow — "offices, shops and
 ## no parking" is what the district tells the player on the way in — so this is
@@ -1045,6 +1238,7 @@ const CAR_PARK_ROWS := 5
 
 
 func _build_parking() -> void:
+	_build_central_garage()
 	var container := _make_container("Parking")
 	for side: float in [-1.0, 1.0]:
 		var name_part := "East" if side > 0.0 else "West"

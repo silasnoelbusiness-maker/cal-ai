@@ -15,8 +15,20 @@ extends Node3D
 ## group names so nothing that already looks them up has to change; a second
 ## apartment derives its own from its id.
 @export var residence_id: StringName = &"larkspur"
-## A bigger, better flat. Same room, more of it, and a proper living area.
-@export var spacious: bool = false
+
+## How good the flat is. Three rungs rather than a bigger/smaller flag: the
+## premium unit is not simply the better flat again with more floor, it is a
+## different finish and a different amount of room to put your own things in.
+enum Tier { STUDIO, BETTER, PREMIUM }
+
+@export var tier: Tier = Tier.STUDIO
+
+## Kept as a read-only convenience because a great deal already asks the flat
+## whether it is the bigger one, and "bigger than the studio" is still exactly
+## the question those callers mean.
+var spacious: bool:
+	get:
+		return tier >= Tier.BETTER
 
 const ENTRY_GROUP := &"apartment_interior_entry"
 ## Where this flat's front door sends the player back to.
@@ -24,6 +36,7 @@ const EXIT_GROUP := &"apartment_street_exit"
 
 const ROOM := Rect2(-5.0, -4.0, 10.0, 8.0)
 const ROOM_SPACIOUS := Rect2(-7.5, -6.0, 15.0, 12.0)
+const ROOM_PREMIUM := Rect2(-9.5, -7.5, 19.0, 15.0)
 const WALL_HEIGHT := 2.8
 const WALL_THICKNESS := 0.3
 ## Gap left in the south wall for the front door.
@@ -41,11 +54,18 @@ static func exit_group_for(id: StringName) -> StringName:
 
 
 func room() -> Rect2:
-	return ROOM_SPACIOUS if spacious else ROOM
+	match tier:
+		Tier.PREMIUM:
+			return ROOM_PREMIUM
+		Tier.BETTER:
+			return ROOM_SPACIOUS
+		_:
+			return ROOM
 
 
 func _ready() -> void:
 	add_to_group(&"interior_room")
+	add_to_group(&"residence_interior")
 	_build_palette()
 	_build_shell()
 	_build_bed()
@@ -53,10 +73,26 @@ func _ready() -> void:
 	_build_furniture()
 	_build_lighting()
 	_build_markers_and_doors()
+	_build_home_storage()
+	_build_player_furniture()
+	HomeManager.furniture_changed.connect(_rebuild_player_furniture)
 
 
 func _mat(key: String) -> StandardMaterial3D:
 	return _palette[key]
+
+
+## The fitted rug, which is the quickest read on how good the flat is: grey-blue
+## lino in the studio, warm brown boards in the better one, a deep red in the
+## premium unit.
+func _rug_colour() -> Color:
+	match tier:
+		Tier.PREMIUM:
+			return Color(0.318, 0.243, 0.220)
+		Tier.BETTER:
+			return Color(0.392, 0.302, 0.259)
+		_:
+			return Color(0.325, 0.353, 0.404)
 
 
 func _build_palette() -> void:
@@ -64,11 +100,11 @@ func _build_palette() -> void:
 	# fittings, nicer finishes, which is what the extra rent buys.
 	_palette = {
 		"surround": CityKit.make_material(Color(0.075, 0.082, 0.098)),
-		"floor": Palette.of(&"wood_floor" if spacious else &"lino_grey"),
-		"rug": Palette.tinted(
-			&"carpet_warm",
-			Color(0.392, 0.302, 0.259) if spacious else Color(0.325, 0.353, 0.404)
+		"floor": Palette.tinted(
+			&"wood_floor" if spacious else &"lino_grey",
+			Color(0.514, 0.396, 0.290) if tier == Tier.PREMIUM else Color.WHITE
 		),
+		"rug": Palette.tinted(&"carpet_warm", _rug_colour()),
 		"wall": Palette.of(&"wall_warm" if spacious else &"wall_paint"),
 		"trim": Palette.of(&"wood_dark"),
 		"bed": Palette.tinted(&"cloth", Color(0.365, 0.427, 0.510)),
@@ -155,7 +191,7 @@ func _add_wall(parent: Node3D, wall_name: String, rect: Rect2) -> void:
 func _build_bed() -> void:
 	var holder := Node3D.new()
 	holder.name = "Bed"
-	holder.position = Vector3(-3.4, 0.0, -2.2)
+	holder.position = Vector3(-3.4, 0.0, -2.2) + _fitted_shift()
 	add_child(holder)
 
 	CityKit.add_box(holder, "Frame", Vector3(0.0, 0.22, 0.0), Vector3(2.1, 0.44, 1.5), _mat("wood"))
@@ -182,7 +218,7 @@ func _build_bed() -> void:
 func _build_kitchen() -> void:
 	var holder := Node3D.new()
 	holder.name = "Kitchen"
-	holder.position = Vector3(3.1, 0.0, -3.0)
+	holder.position = Vector3(3.1, 0.0, -3.0) + _fitted_shift()
 	add_child(holder)
 
 	CityKit.add_box(
@@ -324,7 +360,9 @@ func _build_markers_and_doors() -> void:
 	# Just inside the front door.
 	var entry := Marker3D.new()
 	entry.name = "EntryPoint"
-	entry.position = Vector3(0.0, 0.4, 2.6)
+	# Just inside, whatever size the flat is — the studio's 2.6 would land the
+	# player in the middle of the premium unit's floor.
+	entry.position = Vector3(0.0, 0.4, room().end.y - 1.4)
 	entry.add_to_group(entry_group_for(residence_id))
 	add_child(entry)
 
@@ -344,3 +382,86 @@ func _build_markers_and_doors() -> void:
 	exit_door.travel_minutes = 1
 	exit_door.override_camera = false
 	CityKit.attach_interactable(self, exit_door, Vector3(0.0, 1.0, room().end.y - 0.6), 1.6)
+
+
+## The premium flat's fitted pieces sit against its own walls rather than where
+## the studio's happen to be. The two smaller flats are left exactly as they
+## were, because they already look right.
+func _fitted_shift() -> Vector3:
+	if tier != Tier.PREMIUM:
+		return Vector3.ZERO
+	return Vector3(
+		ROOM_PREMIUM.position.x - ROOM_SPACIOUS.position.x, 0.0,
+		ROOM_PREMIUM.position.y - ROOM_SPACIOUS.position.y
+	)
+
+
+# --- Furnishing ----------------------------------------------------------
+
+## Rectangles the player's own furniture may not be placed over: the fitted bed,
+## the kitchen run, the fitted table and the doorway. Without them a sofa can be
+## dropped on top of the cooker, which is legal geometry and a silly room.
+func _fitted_keep_out() -> Array[Rect2]:
+	var shift := _fitted_shift()
+	var bed := Rect2(-4.7 + shift.x, -3.2 + shift.z, 2.8, 2.4)
+	var kitchen := Rect2(1.2 + shift.x, -3.7 + shift.z, 3.9, 1.6)
+	var table := Rect2(-0.9, 0.4, 3.0, 1.6)
+	var doorway := Rect2(-DOORWAY_HALF_WIDTH - 0.4, room().end.y - 1.8, DOORWAY_HALF_WIDTH * 2.0 + 0.8, 2.4)
+	return [bed, kitchen, table, doorway]
+
+
+## Whether a footprint of this size may be set down here. The room's own answer,
+## so a different flat needs no changes in the placement mode.
+func is_valid_furniture_spot(local_point: Vector3, size: Vector2) -> bool:
+	var rect := PlacementRules.footprint(local_point, size)
+	# Half a metre in from the walls, so nothing is jammed into the skirting.
+	if not PlacementRules.contains(room(), rect, 0.35):
+		return false
+	for blocked in _fitted_keep_out():
+		if rect.intersects(blocked):
+			return false
+	return true
+
+
+## The player's own furniture, drawn from HomeManager's records. Rebuilt whole
+## rather than patched: the records are the truth and this is a view of them, so
+## the cheapest correct thing is to throw the view away and draw it again.
+func _build_player_furniture() -> void:
+	var holder := get_node_or_null("PlayerFurniture")
+	if holder == null:
+		holder = Node3D.new()
+		holder.name = "PlayerFurniture"
+		add_child(holder)
+	for record in HomeManager.placed_in(residence_id):
+		FurnitureKit.build(holder, record)
+
+
+func _rebuild_player_furniture() -> void:
+	var holder := get_node_or_null("PlayerFurniture")
+	if holder != null:
+		holder.free()
+	_build_player_furniture()
+	HomeManager.refresh_storage_capacity(residence_id)
+
+
+## The cupboard. Every flat has one, and storage furniture makes it bigger.
+func _build_home_storage() -> void:
+	var spot := Vector3(room().position.x + 1.1, 0.0, room().end.y - 1.6)
+	CityKit.add_box(
+		self, "StorageUnit", spot + Vector3(0.0, 0.85, 0.0), Vector3(0.9, 1.7, 0.55),
+		_mat("wood")
+	)
+	var cupboard := HomeStoragePoint.new()
+	cupboard.name = "HomeStorage"
+	cupboard.residence_id = residence_id
+	cupboard.prompt_action = "Open Storage"
+	cupboard.prompt_subtitle = "Home storage"
+	CityKit.attach_interactable(self, cupboard, spot + Vector3(0.0, 0.9, 1.0), 1.6)
+
+	# And somewhere to start furnishing from, beside it.
+	var desk := FurnishingPoint.new()
+	desk.name = "FurnishingPoint"
+	desk.residence_id = residence_id
+	desk.prompt_action = "Furnish"
+	desk.prompt_subtitle = "Arrange your furniture"
+	CityKit.attach_interactable(self, desk, spot + Vector3(1.6, 0.9, 1.0), 1.6)

@@ -75,6 +75,9 @@ const EXIT_OFFSETS: Array[Vector3] = [
 
 @export var data: VehicleData
 
+## A car on a showroom floor rather than a car in the world. See _ready().
+@export var display_only: bool = false
+
 @export_group("Ownership")
 @export var owner_type: OwnerType = OwnerType.NPC
 ## Who owns it. "player" for the player's own car; anything else for NPCs.
@@ -149,6 +152,25 @@ func _ready() -> void:
 
 	health = data.max_health
 	_spawn_transform = global_transform
+
+	# A showroom car is a picture of a car. It is deliberately not in the
+	# vehicle group — a car on a plinth is not traffic, is not somewhere the
+	# player can be dragged out of, and must not be stealable — and it has no
+	# engine noise, no door and no physics of its own.
+	if display_only:
+		# The group is set on the scene's root node rather than here, so a
+		# showroom car arrives already in it and has to be taken back out.
+		# Nothing that sweeps the city for traffic, theft or parking should
+		# ever see a car on a plinth.
+		remove_from_group(&"vehicle")
+		_build_body()
+		set_physics_process(false)
+		collision_layer = 0
+		collision_mask = 0
+		_door.queue_free()
+		_impact_zone.queue_free()
+		return
+
 	add_to_group(&"vehicle")
 	if save_id != &"":
 		add_to_group(&"saveable")
@@ -361,6 +383,22 @@ func repair() -> void:
 		return
 	health = data.max_health
 	health_changed.emit(health, data.max_health)
+
+
+## Sets the damage outright, without treating the change as a crash. The
+## registry uses it when a car it owns comes back into the world carrying the
+## dents its record says it has.
+func set_health(value: float) -> void:
+	if data == null:
+		return
+	health = clampf(value, 0.0, data.max_health)
+	health_changed.emit(health, data.max_health)
+
+
+## The mechanic's version of repair(): the same result, named for the caller so
+## a bill and a debug key do not read as the same thing.
+func restore_health() -> void:
+	repair()
 
 
 ## Brings the car to a dead stop without touching where it is or which way it

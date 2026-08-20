@@ -41,9 +41,35 @@ extends Resource
 @export var full_steer_speed: float = 3.0
 
 @export_group("Value")
-## What the car is worth second hand. Only the player's own vehicles count
-## toward their net worth; a stolen one is not theirs to sell.
+## What a clean, low-mileage example of this model fetches on the used market.
+## Every valuation in the game starts here and is modified by that particular
+## car's mileage and condition, so this is the model's worth, never an
+## individual's. Only the player's own vehicles count toward their net worth; a
+## stolen one is not theirs to sell.
 @export var resale_value: int = 4500
+## List price at the dealership for a brand new one. Deliberately independent of
+## `resale_value` rather than derived from it: the gap between the two is what
+## makes buying used the sensible early move.
+@export var price_new: int = 12000
+
+@export_group("Showroom")
+## The marque. Model names are already distinct, so this is who builds them —
+## what the dealership groups its floor by and what the player learns to
+## recognise.
+@export var manufacturer: String = "Kestrel"
+## What kind of thing it is, in the words the showroom uses.
+@export var vehicle_class: String = "Saloon"
+## 0-100. What owning one says about you, which is deliberately not what it
+## cost: a panel van is dear and says nothing, and lifestyle reads this rather
+## than the price tag.
+@export var prestige: int = 20
+## Whether the dealership will sell you one. Police cars exist and are not for
+## sale, which is why this is off by default.
+@export var purchasable: bool = false
+## Cargo volume in arbitrary units, for the deliveries and equipment-moving a
+## van is obviously for. Nothing reads it yet; it is here so the roster does not
+## have to be revisited when something does.
+@export var cargo_capacity: int = 0
 
 @export_group("Durability")
 @export var max_health: float = 100.0
@@ -92,3 +118,52 @@ func get_total_height() -> float:
 ## Top speed as the HUD shows it.
 func get_max_speed_kmh() -> float:
 	return max_speed * 3.6
+
+
+# --- Showroom ratings ----------------------------------------------------
+#
+# The numbers on the dealership wall are read off the physics rather than
+# stored beside it. A car that is quicker in the driver's seat is quicker on
+# the board by construction, and there is no second copy of the roster to drift
+# out of step with the first.
+
+## Maps a value in [from, to] onto 0-100, clamped at both ends.
+static func _rate(value: float, from: float, to: float) -> int:
+	return clampi(roundi((value - from) / maxf(to - from, 0.001) * 100.0), 0, 100)
+
+
+func speed_rating() -> int:
+	return _rate(max_speed, 15.0, 37.0)
+
+
+func acceleration_rating() -> int:
+	return _rate(acceleration, 7.0, 25.0)
+
+
+## Cornering, from how much steering authority survives at speed and how
+## quickly the car answers the wheel.
+func handling_rating() -> int:
+	return clampi(
+		roundi(_rate(steer_rate_high, 0.7, 1.35) * 0.65 + _rate(steer_response, 6.0, 10.0) * 0.35),
+		0, 100
+	)
+
+
+## How much of a shunt it will take: the health it carries, less how hard each
+## impact hits it.
+func durability_rating() -> int:
+	return clampi(
+		roundi(_rate(max_health, 55.0, 175.0) * 0.75 + (100 - _rate(damage_per_impact_speed, 2.0, 5.5)) * 0.25),
+		0, 100
+	)
+
+
+## Every showroom figure in one dictionary, in the order the panels show them.
+func showroom_ratings() -> Dictionary:
+	return {
+		"Top speed": speed_rating(),
+		"Acceleration": acceleration_rating(),
+		"Handling": handling_rating(),
+		"Durability": durability_rating(),
+		"Prestige": clampi(prestige, 0, 100),
+	}

@@ -27,7 +27,12 @@ extends Node
 ##             map_route, central_property, large_interior, better_apartment,
 ##             courier_delivery, vehicle_roster, harbour_business,
 ##             central_business, city_empire, cross_district_chase, central_night,
-##             pause_menu, loaded_game
+##             pause_menu, loaded_game, dealer_exterior, showroom,
+##             vehicle_detail, vehicle_compare, used_listing,
+##             purchase_confirm, player_vehicle, my_vehicles, repair_shop,
+##             repair_screen, garage_exterior, garage_stored,
+##             premium_apartment, furniture_store, furniture_buying,
+##             furniture_placing, furnished_apartment, profile, night_premium
 ##   distance  camera distance override, for overview shots
 ##   yaw       camera yaw override
 ##   pitch     camera pitch override
@@ -308,6 +313,13 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 
 		"pause_menu", "loaded_game":
 			await _phase_l_scenario(main, scenario)
+
+		"dealer_exterior", "showroom", "vehicle_detail", "vehicle_compare", \
+		"used_listing", "purchase_confirm", "player_vehicle", "my_vehicles", \
+		"repair_shop", "repair_screen", "garage_exterior", "garage_stored", \
+		"premium_apartment", "furniture_store", "furniture_buying", \
+		"furniture_placing", "furnished_apartment", "profile", "night_premium":
+			await _phase_m_scenario(main, scenario)
 
 		"characters":
 			# The five people the game draws, lined up at reading distance:
@@ -831,6 +843,227 @@ func _run_empire_scenario(main: Node, scenario: String) -> void:
 ## The shots the visual pass exists for. Each drives the real systems: the
 ## officer is a real PoliceOfficer, the light bar is the pursuit light bar, and
 ## the shop exterior is the sign the business actually puts up.
+## Phase M: what the money buys — the showroom, the garage, the flat and the
+## screens that describe them.
+func _phase_m_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	EconomyManager.restore(340000)
+
+	match scenario:
+		"dealer_exterior":
+			player.global_position = Vector3(-88.0, 0.5, District02.RIVERSIDE_DR_Z - 8.0)
+			await _wait(40)
+
+		"showroom", "vehicle_detail", "vehicle_compare", "used_listing", \
+		"purchase_confirm", "my_vehicles":
+			await _enter_showroom(main, player)
+			await _wait(20)
+			match scenario:
+				"vehicle_detail":
+					_hud_screen(hud, "VehicleDetailPanel").open(&"coupe")
+				"vehicle_compare":
+					var panel: Node = _hud_screen(hud, "DealershipPanel")
+					panel.open(DealershipPanel.Tab.NEW)
+					panel.call("_toggle_compare", &"compact")
+					panel.call("_toggle_compare", &"exotic")
+				"used_listing":
+					_hud_screen(hud, "DealershipPanel").open(DealershipPanel.Tab.USED)
+				"purchase_confirm":
+					var buy: Node = _hud_screen(hud, "VehicleDetailPanel")
+					buy.open(&"luxury_sedan")
+					await _wait(6)
+					buy.call("_on_buy_pressed")
+				"my_vehicles":
+					_give_fleet()
+					await _wait(10)
+					_hud_screen(hud, "DealershipPanel").open(DealershipPanel.Tab.MINE)
+			await _wait(14)
+
+		"player_vehicle":
+			# Bought, collected and standing in the bay it was handed over in.
+			var stock := _dealership_stock()
+			VehicleRegistry.buy(&"performance_sedan", stock.collection_transform())
+			await _wait(20)
+			var bought: OwnedVehicle = VehicleRegistry.get_fleet().back()
+			player.global_position = bought.position + Vector3(0.0, 0.1, 5.0)
+			await _wait(30)
+
+		"repair_shop", "repair_screen":
+			var shop: RepairShop = get_tree().get_first_node_in_group(&"repair_shop")
+			var record := VehicleRegistry.grant(
+				&"coupe", Transform3D(Basis(Vector3.UP, PI), shop.service_point)
+			)
+			record.health = record.max_health() * 0.32
+			record.condition = 46.0
+			record.mileage_km = 61250.0
+			player.global_position = shop.service_point + Vector3(0.0, 0.1, 4.4)
+			await _wait(30)
+			if record.is_spawned():
+				record.node.set_health(record.health)
+			if scenario == "repair_screen":
+				_hud_screen(hud, "RepairPanel").open(shop)
+				await _wait(14)
+
+		"garage_exterior", "garage_stored":
+			var garage: GarageProperty = PropertyManager.garage_by_id(&"harbour_garage")
+			PropertyManager.lease_garage(garage)
+			if scenario == "garage_stored":
+				for model_id: StringName in [&"coupe", &"suv", &"hatchback"]:
+					var car := VehicleRegistry.grant(
+						model_id, Transform3D(Basis.IDENTITY, garage.global_position + Vector3(0.0, 0.4, 6.0))
+					)
+					VehicleRegistry.store(car, &"harbour_garage")
+			player.global_position = garage.global_position + Vector3(0.0, 0.1, 9.0)
+			await _wait(40)
+
+		"premium_apartment", "furnished_apartment", "furniture_placing", "profile":
+			await _move_into_premium(main, player)
+			if scenario == "furnished_apartment" or scenario == "profile":
+				await _furnish_premium(main)
+			await _wait(20)
+			if scenario == "furniture_placing":
+				var room := _premium_room()
+				var controller: FurniturePlacement = get_tree().get_first_node_in_group(
+					&"furniture_placement"
+				)
+				var piece := HomeManager.grant(&"sofa_premium")
+				controller.begin(room, piece)
+				# Held over a legal spot rather than set down, which is what the
+				# mode looks like in the player's hands.
+				controller.call("place_preview_at", Vector3(0.0, 0.0, 3.5), 0.0)
+			if scenario == "profile":
+				_give_fleet()
+				await _wait(10)
+				_hud_screen(hud, "ProfilePanel").open()
+			await _wait(14)
+
+		"furniture_store", "furniture_buying":
+			await _move_into_premium(main, player)
+			await _enter_furniture_store(main, player)
+			await _wait(20)
+			if scenario == "furniture_buying":
+				_hud_screen(hud, "FurnitureStorePanel").open()
+			await _wait(14)
+
+		"night_premium":
+			# The player has to be standing there for the car to exist at all:
+			# an owned car more than a hundred metres away is a record with no
+			# node, which is the whole point of the registry.
+			# A clear northbound run up Centre Boulevard, well short of the next
+			# junction, so the car has room to get to speed.
+			var start := Vector3(District02.LANE_OFFSET, 0.4, -190.0)
+			player.global_position = start + Vector3(3.0, 0.1, 0.0)
+			await _wait(20)
+			var car := VehicleRegistry.grant(&"luxury_sedan", Transform3D(Basis.IDENTITY, start))
+			await _wait(20)
+			if car.is_spawned():
+				car.node.halt()
+				player.global_position = car.node.global_position + Vector3(2.0, 0.5, 0.0)
+				await _wait(10)
+				car.node.enter(player)
+				# The throttle is held down through the capture, the same way the
+				# other driving shots do it: set_ai_input drives an AI car, and
+				# this one has the player in it.
+				# Held through the capture, so the speedometer and the speed zoom
+				# are both showing real values when the frame is taken.
+				Input.action_press("move_forward")
+				await _wait(58)
+
+
+## The showroom, through its own door.
+func _enter_showroom(main: Node, player: Node3D) -> void:
+	var district: Node = main.get_node("District02")
+	var door: Portal = district.get_node("Interactables/NorthlineMotors")
+	player.global_position = Vector3(-88.0, 0.5, District02.RIVERSIDE_DR_Z - 6.0)
+	await _wait(10)
+	door.interact(player)
+	await _wait(20)
+	# Stood in the middle of the floor, so the whole room composes.
+	player.global_position = Vector3(1000.0, 0.5, 2450.0)
+	await _wait(10)
+
+
+func _enter_furniture_store(main: Node, player: Node3D) -> void:
+	var district: Node = main.get_node("District02")
+	var door: Portal = district.get_node("Interactables/KingstonFurnishings")
+	player.global_position = Vector3(74.0, 0.5, District02.KINGSTON_RD_Z - 6.0)
+	await _wait(10)
+	door.interact(player)
+	await _wait(20)
+	player.global_position += Vector3(0.0, 0.0, -1.6)
+
+
+## Rents the premium flat, makes it home and walks in.
+func _move_into_premium(main: Node, player: Node3D) -> void:
+	var home := PropertyManager.residence_by_id(&"central_heights")
+	if not home.is_leased_by_player():
+		PropertyManager.lease_residence(home)
+	home.set_as_home()
+	await _wait(6)
+	var district: Node = main.get_node("District02")
+	var door: ResidenceProperty = district.get_node("Interactables/CentralHeights")
+	player.global_position = Vector3(88.0, 0.5, District02.RIVERSIDE_DR_Z - 6.0)
+	await _wait(8)
+	door.interact(player)
+	await _wait(20)
+
+
+## A room the player has furnished, laid out the way somebody would.
+func _furnish_premium(main: Node) -> void:
+	var room := _premium_room()
+	var controller: FurniturePlacement = get_tree().get_first_node_in_group(&"furniture_placement")
+	if room == null or controller == null:
+		return
+	var plan: Array = [
+		[&"bed_kingsize", Vector3(5.0, 0.0, -4.5), 0.0],
+		[&"sofa_premium", Vector3(-3.5, 0.0, 3.0), 0.0],
+		[&"table_premium", Vector3(3.5, 0.0, 3.0), 0.0],
+		[&"chair_premium", Vector3(6.5, 0.0, 3.0), 90.0],
+		[&"tv_premium", Vector3(-3.5, 0.0, 6.0), 180.0],
+		[&"lamp_premium", Vector3(-7.0, 0.0, 3.0), 0.0],
+		[&"rug_premium", Vector3(-3.5, 0.0, 1.0), 0.0],
+		[&"plant_large", Vector3(7.5, 0.0, 0.0), 0.0],
+		[&"dresser_premium", Vector3(8.0, 0.0, -2.0), 90.0],
+		[&"storage_wardrobe", Vector3(-8.0, 0.0, -4.0), 0.0],
+	]
+	for entry in plan:
+		var piece := HomeManager.grant(entry[0])
+		controller.begin(room, piece)
+		if not controller.place_at(entry[1], entry[2]) and controller.is_active():
+			controller.cancel()
+	await _wait(6)
+
+
+func _premium_room() -> ApartmentInterior:
+	for node in get_tree().get_nodes_in_group(&"residence_interior"):
+		var room := node as ApartmentInterior
+		if room != null and room.residence_id == &"central_heights":
+			return room
+	return null
+
+
+func _dealership_stock() -> Dealership:
+	return get_tree().get_first_node_in_group(&"dealership_stock") as Dealership
+
+
+## A fleet worth photographing: something cheap, something quick, something dear.
+func _give_fleet() -> void:
+	var spot := Vector3(-40.0, 0.4, 8.4)
+	for i in 3:
+		var model_id: StringName = [&"compact", &"coupe", &"luxury_suv"][i]
+		var car := VehicleRegistry.grant(
+			model_id, Transform3D(Basis.IDENTITY, spot + Vector3(float(i) * 6.0, 0.0, 0.0)),
+			float(i) * 18000.0, 100.0 - float(i) * 17.0
+		)
+		car.mileage_km = float(i) * 18000.0
+
+
+func _hud_screen(hud: Node, screen_name: String) -> Node:
+	var root := hud.get_node_or_null("Root/%s" % screen_name)
+	return root if root != null else hud.get_node_or_null(screen_name)
+
+
 ## Phase L: the front end seen from inside a running game.
 func _phase_l_scenario(_main: Node, scenario: String) -> void:
 	var player: Node3D = GameManager.player

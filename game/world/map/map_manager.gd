@@ -32,6 +32,7 @@ func collect_markers() -> Array[MapMarker]:
 	markers.append_array(_residence_markers())
 	markers.append_array(_job_markers())
 	markers.append_array(_service_markers())
+	markers.append_array(_vehicle_markers())
 	return markers
 
 
@@ -127,6 +128,27 @@ func _service_markers() -> Array[MapMarker]:
 		markers.append(MapMarker.make(
 			MapMarker.Category.LANDMARK, String(landmark.get_meta("label", landmark.name)),
 			landmark.global_position
+		))
+	return markers
+
+
+## The player's own cars, wherever they were left. Its own category so it can
+## be switched off: somebody who collects cars should not have their map buried
+## under their own garage.
+func _vehicle_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	for record in VehicleRegistry.get_fleet():
+		var where := record.position
+		var detail := "%s  ·  %s" % [record.condition_label(), record.mileage_label()]
+		if record.is_stored():
+			var garage := PropertyManager.garage_by_id(record.garage_id)
+			if garage == null:
+				continue
+			where = garage.global_position
+			detail = "IN %s" % garage.display_name.to_upper()
+		markers.append(MapMarker.make(
+			MapMarker.Category.MY_VEHICLE, record.display_name(), where, detail,
+			record.instance_id
 		))
 	return markers
 

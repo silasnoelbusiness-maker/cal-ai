@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=21 format=3]
 
 [ext_resource type="Script" path="res://main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://world/district_01.tscn" id="2_district"]
@@ -12,6 +12,11 @@
 [ext_resource type="Script" path="res://business/business_debug.gd" id="11_business_debug"]
 [ext_resource type="PackedScene" path="res://world/interiors/convenience_store.tscn" id="8_store"]
 [ext_resource type="PackedScene" path="res://world/interiors/retail_unit.tscn" id="9_retail_unit"]
+[ext_resource type="PackedScene" path="res://world/interiors/dealership.tscn" id="17_dealership"]
+[ext_resource type="PackedScene" path="res://world/interiors/furniture_store.tscn" id="18_furniture"]
+[ext_resource type="Script" path="res://vehicles/dealership.gd" id="19_dealership_stock"]
+[ext_resource type="Script" path="res://furniture/furniture_placement.gd" id="20_furniture_placement"]
+[ext_resource type="Script" path="res://world/ownership_debug.gd" id="21_ownership_debug"]
 [ext_resource type="Script" path="res://equipment/placement_controller.gd" id="10_placement"]
 [ext_resource type="Script" path="res://world/world_debug.gd" id="13_world_debug"]
 [ext_resource type="Script" path="res://audio/audio_debug.gd" id="14_audio_debug"]
@@ -78,7 +83,24 @@ unit_name = "40 Kingston Road"
 [node name="MeridianApartment" parent="Interiors" instance=ExtResource("6_apartment")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 2000)
 residence_id = &"meridian"
-spacious = true
+tier = 1
+
+[node name="CentralHeightsApartment" parent="Interiors" instance=ExtResource("6_apartment")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 2200)
+residence_id = &"central_heights"
+tier = 2
+
+[node name="Dealership" parent="Interiors" instance=ExtResource("17_dealership")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 2450)
+
+[node name="FurnitureStore" parent="Interiors" instance=ExtResource("18_furniture")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 2650)
+
+[node name="DealershipStock" type="Node" parent="."]
+script = ExtResource("19_dealership_stock")
+
+[node name="FurniturePlacement" type="Node3D" parent="."]
+script = ExtResource("20_furniture_placement")
 
 [node name="PlacementController" type="Node3D" parent="."]
 script = ExtResource("10_placement")
@@ -105,3 +127,6 @@ script = ExtResource("14_audio_debug")
 
 [node name="WorldDebug" type="CanvasLayer" parent="."]
 script = ExtResource("13_world_debug")
+
+[node name="OwnershipDebug" type="CanvasLayer" parent="."]
+script = ExtResource("21_ownership_debug")

@@ -156,6 +156,7 @@ func _ready() -> void:
 	_build_buildings()
 	_build_park()
 	_build_parking()
+	_build_services()
 	_build_street_lights()
 	_build_streetscape()
 	_build_warehouse_yard()
@@ -1005,6 +1006,42 @@ func _build_parking() -> void:
 	for i in 7:
 		var x := 10.0 + float(i) * 5.4
 		_add_bay(container, "CivicBay%d" % i, CityKit.rect_from_bounds(x, -78.0, x + 4.6, -68.0))
+
+
+## The service quarter behind the civic hall: somewhere to keep a car and
+## somewhere to get one fixed, both fronting onto the car park that is already
+## there so a car can be driven right up to them.
+func _build_services() -> void:
+	var materials := {
+		"wall": _mat("concrete_a"), "trim": _mat("metal"), "deck": _mat("asphalt"),
+	}
+
+	var garage := ServiceKit.build_garage(
+		_geometry, _props, "HarbourGarage",
+		CityKit.rect_from_bounds(10.0, -92.0, 34.0, -82.0), -82.0, 3, 0.0, materials
+	)
+	garage.garage_id = &"harbour_garage"
+	garage.display_name = "Harbour Garage"
+	garage.address = "Dock Road"
+	garage.district_id = &"harbour_row"
+	garage.capacity = 3
+	garage.rent_amount = 260
+	garage.deposit = 300
+	garage.prompt_subtitle = "Harbour Garage"
+	CityKit.attach_interactable(
+		_interactables, garage, Vector3(22.0, 1.0, -79.5), 4.5
+	)
+
+	var shop := ServiceKit.build_repair_shop(
+		_geometry, _props, "DocksideMotors",
+		CityKit.rect_from_bounds(44.0, -92.0, 70.0, -82.0), -82.0, materials
+	)
+	shop.shop_name = "Dockside Motors"
+	shop.prompt_action = "Vehicle Service"
+	shop.prompt_subtitle = "Dockside Motors"
+	CityKit.attach_interactable(
+		_interactables, shop, shop.service_point + Vector3(0.0, 1.0, 2.6), 3.4
+	)
 
 
 func _add_bay(parent: Node3D, node_name: String, rect: Rect2) -> void:

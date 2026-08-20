@@ -98,8 +98,9 @@ end never stands between a test and the game.
 | `G` | Rob the till you are stood at |
 | `B` | Open the business dashboard, or the company view outside a shop |
 | `M` | Open the city map |
-| Left mouse | Attack with whatever is in your hand · place equipment |
-| `R` | Rotate the equipment being placed |
+| `P` | Open your profile: net worth, vehicles, home, lifestyle |
+| Left mouse | Attack with whatever is in your hand · place equipment · place furniture |
+| `R` | Rotate the equipment or furniture being placed |
 
 Driving:
 
@@ -127,6 +128,8 @@ Development keys, to be removed before release:
 | `F11` | Show / hide the world overlay (district, populations, graphs, FPS) |
 | `1`–`6`, `0` | World debug view layers, only while that overlay is up |
 | `F12` | Show / hide the audio overlay (voices, ambience, buses, surface) |
+| `O` | Show / hide the ownership overlay (fleet, home, garages, lifestyle) |
+| `1`–`0`, `Q`–`T` | Ownership debug commands, only while that overlay is up |
 
 Every overlay is hidden by default and draws nothing until it is switched on, so
 none of them intrudes on ordinary play or on a screenshot.
@@ -134,7 +137,9 @@ none of them intrudes on ordinary play or on a screenshot.
 `F9` was quick-load in Phase D and is now clear-wanted. Quick-load has been
 retired altogether: loading is a considered choice made from the pause menu
 against a named slot, rather than a keystroke that silently discards everything
-since the last save. `F12` is now the audio overlay.
+since the last save. `F12` is now the audio overlay, and the ownership
+overlay is on `O` rather than a function key because F1 to F12 were already
+spent.
 
 ## Running a business
 
@@ -435,6 +440,66 @@ when the car the player is driving hits something — all the way down to nothin
 at zero, which is the setting that matters most for anybody who cannot tolerate
 it.
 
+## What the money buys
+
+Until this pass, earning was a number going up. Now it buys things that exist in
+the world, and the two measures of how the player is doing are deliberately
+allowed to disagree: net worth is what the books say, lifestyle is what the life
+looks like, and a player with a fortune in the bank and a studio flat is
+correctly described as rich and living modestly.
+
+### Vehicles
+
+Ten models across five invented marques — Kestrel at the everyday end,
+Northline for the van and the SUV, Ardent for the quick ones, Crown for the
+luxury pair and Mira for the one nobody can afford yet. The showroom figures for
+speed, acceleration, handling and durability are read off the physics rather
+than stored beside it, so a car that is quicker in the driver's seat is quicker
+on the board by construction. Prestige is deliberately not price: the panel van
+is dear and impresses nobody, and lifestyle reads prestige.
+
+A car the player owns is a record, not a node. That is what makes the rest
+possible: two sedans are two records with their own mileage and their own dents,
+a car left across the city stays exactly where it was left without being
+simulated there, and a car in a garage has no node at all and is still an asset.
+Nodes come and go within about 120 metres of the player; the record is the
+truth.
+
+Mileage is measured from how far the car actually moves, so a parked one never
+gains any and a car being pushed downhill does. Health and condition are
+separate on purpose — health is what this crash did, condition is what the car
+has been through — and value falls with both, plus a slow drift for age. The
+mechanic prices the two jobs separately: putting the damage right is cheap and
+takes an hour, putting the years right is dear, takes three, and never quite
+gets a car back to new.
+
+Northline Motors on Riverside Drive sells them. The showroom floor holds six
+real models with their physics switched off, each on a lit plinth with a stand
+beside it; the desk at the back does the paperwork, including part exchange and
+selling, which can only be done there because a car has to be brought in. Four
+used cars sit on the lot at any time with somebody else's mileage on them, and
+one of them is always something a new player could afford.
+
+### Garages and homes
+
+Two garages, three bays and six, rented rather than bought — so neither is an
+asset, but what is inside them is. A stored car is drawn in its bay when the
+player is near enough to see it and is not simulated otherwise. Nothing stolen
+goes in: the registry only ever holds vehicles that were paid for, which is the
+whole difference between owning a car and having taken one.
+
+Three places to live now, and the rent, the room and what living there says
+about you all climb together: the Larkspur studio, Meridian Heights, and Central
+Heights on Riverside Drive with a private bay outside it. Furniture is bought at
+Kingston Furnishings and delivered — nobody carries a wardrobe — and then placed
+by hand in the same mode, with the same keys, that puts shop equipment on a shop
+floor. A flat remembers exactly where its sofa is, because the sofa is a record
+too.
+
+Only the best two things in each category count towards lifestyle. That is the
+whole answer to buying twenty identical plants, and it is a rule rather than a
+fudge: a second sofa does not make a flat twice as nice.
+
 ## Layout
 
 ```
@@ -713,8 +778,8 @@ test harness loading the world directly.
 godot --headless --path game res://tests/smoke_test.tscn
 ```
 
-It exits non-zero if any check fails. As of the audio and front-end pass it runs
-1,280 checks.
+It exits non-zero if any check fails. As of the ownership pass it runs 1,508
+checks.
 
 A screenshot tool renders the game to a PNG without a desktop, for eyeballing
 the district:
@@ -748,7 +813,12 @@ Args after `++` are `key=value` pairs, all optional: `out`, `hour`, `scenario`
 `central_property`, `large_interior`, `better_apartment`, `courier_delivery`,
 `vehicle_roster`, `harbour_business`, `central_business`, `city_empire`,
 `cross_district_chase`, `characters`, `police_officer`, `police_close`,
-`business_exterior`, `hero`, `pause_menu`, `loaded_game`) and camera `distance` /
+`business_exterior`, `hero`, `pause_menu`, `loaded_game`, `dealer_exterior`,
+`showroom`, `vehicle_detail`, `vehicle_compare`, `used_listing`,
+`purchase_confirm`, `player_vehicle`, `my_vehicles`, `repair_shop`,
+`repair_screen`, `garage_exterior`, `garage_stored`, `premium_apartment`,
+`furniture_store`, `furniture_buying`, `furniture_placing`,
+`furnished_apartment`, `profile`, `night_premium`) and camera `distance` /
 `yaw` / `pitch` for overview shots. Scenarios drive the real interactables
 rather than faking their results. It runs under the Compatibility renderer, so
 lighting is close to but not identical to the Forward+ game.

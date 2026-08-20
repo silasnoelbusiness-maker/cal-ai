@@ -193,6 +193,66 @@ func charge_due_residence_rent() -> void:
 		)
 
 
+# --- Garages -------------------------------------------------------------
+
+func get_garages() -> Array[GarageProperty]:
+	return GarageProperty.all(get_tree())
+
+
+func garage_by_id(id: StringName) -> GarageProperty:
+	return GarageProperty.by_id(get_tree(), id)
+
+
+func leased_garages() -> Array[GarageProperty]:
+	var found: Array[GarageProperty] = []
+	for garage in get_garages():
+		if garage.is_leased_by_player():
+			found.append(garage)
+	return found
+
+
+## Rents a garage out of the player's own pocket. A garage is somewhere to put
+## your things, not a business expense, so it comes from the same account the
+## flat does.
+func lease_garage(garage: GarageProperty) -> bool:
+	if garage == null or garage.is_leased_by_player():
+		return false
+	if not EconomyManager.can_afford(garage.move_in_cost()):
+		GameManager.notify(
+			"NOT ENOUGH CASH
+Need $%d" % garage.move_in_cost(), GameManager.Tone.BAD
+		)
+		return false
+	EconomyManager.spend(garage.deposit, "%s — deposit" % garage.display_name)
+	EconomyManager.spend(garage.rent_amount, "%s — rent" % garage.display_name)
+	garage.begin_lease()
+	GameManager.notify(
+		"GARAGE RENTED
+%s  ·  %d bays" % [garage.display_name.to_upper(), garage.capacity],
+		GameManager.Tone.GOOD
+	)
+	SaveManager.autosave("rented a garage")
+	return true
+
+
+## Garage rent, on the same calendar as everything else. A missed payment is
+## recorded and said out loud; it never costs the player a car.
+func charge_due_garage_rent() -> void:
+	for garage in get_garages():
+		if not garage.is_rent_due():
+			continue
+		var paid := EconomyManager.spend(garage.rent_amount, "%s — rent" % garage.display_name)
+		garage.settle_rent(paid)
+		GameManager.notify(
+			"RENT PAID
+%s  -$%d" % [garage.display_name.to_upper(), garage.rent_amount] if paid
+			else "GARAGE RENT OVERDUE
+%s" % garage.display_name.to_upper(),
+			GameManager.Tone.INFO if paid else GameManager.Tone.BAD
+		)
+
+
 func _on_day_passed(_day_index: int) -> void:
 	charge_due_rent()
 	charge_due_residence_rent()
+	charge_due_garage_rent()
