@@ -2070,6 +2070,13 @@ func _build_a_company(main: Node, scenario: String) -> void:
 
 	if scenario == "bottleneck_report" and diner != null:
 		# One cook against a full dining room: the problem the report is for.
+		# Everything is restocked first — a day's trading empties the store
+		# rooms, and a report where every line reads LOW STOCK shows the one
+		# problem this frame is not about.
+		for business in [market, branch, diner, gym, club]:
+			if business != null:
+				CompanyDebug.stock_up(business, 90)
+				CompanyDebug.set_cleanliness(business, 78.0)
 		var cooks := diner.rostered_all(EmployeeData.Role.COOK, 12)
 		while cooks.size() > 1:
 			diner.fire(cooks.pop_back().employee_id)
@@ -2077,8 +2084,11 @@ func _build_a_company(main: Node, scenario: String) -> void:
 			if BusinessManager.buy_equipment(diner, &"dining_table") == BusinessManager.PurchaseResult.OK \
 					and BusinessManager.consume_unplaced(diner, &"dining_table"):
 				diner.place_equipment(&"dining_table", Vector3(float(i) * 2.2 - 4.0, 0.0, 3.2), 0.0)
-		for i in 3:
+		# A lunch rush, so the kitchen is visibly the thing that cannot cope.
+		CompanyDebug.force_demand(diner, 4.0)
+		for i in 2:
 			BusinessManager.simulate_hour_now(diner, 12)
+		CompanyDebug.stock_up(diner, 90)
 
 	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
 	await _wait(30)
