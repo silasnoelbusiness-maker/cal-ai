@@ -510,11 +510,12 @@ func _build_palette() -> void:
 			wall_mat = CityKit.make_material(Color(0.808, 0.796, 0.769))
 			trim_mat = Palette.of(&"metal_mid")
 		&"nightclub":
-			# Nearly black, so the emissive fittings are the only real light in
-			# the room and the place reads as a venue from the first frame.
-			floor_mat = CityKit.make_material(Color(0.075, 0.067, 0.098))
-			wall_mat = CityKit.make_material(Color(0.106, 0.090, 0.137))
-			trim_mat = CityKit.make_material(Color(0.180, 0.145, 0.231))
+			# Dark enough that the fittings are what light the room, light
+			# enough that there is a room to see. The first pass at this was
+			# nearly black and rendered a frame nobody could read.
+			floor_mat = CityKit.make_material(Color(0.145, 0.129, 0.180))
+			wall_mat = CityKit.make_material(Color(0.180, 0.157, 0.224))
+			trim_mat = CityKit.make_material(Color(0.286, 0.235, 0.353))
 		_:
 			# Vacant: bare but finished. An empty unit is a rental, not a
 			# debug room, so it gets a real floor and a real skirting.
@@ -936,8 +937,14 @@ func _add_wall(parent: Node3D, wall_name: String, rect: Rect2) -> void:
 ## work. Warm in a cafe, cool in a shop, which is most of what makes the two
 ## feel like different businesses before you look at what is in them.
 func _build_lighting() -> void:
-	var warm := _style_id() == &"coffee_shop"
+	var style := _style_id()
+	var warm := style == &"coffee_shop" or style == &"restaurant"
+	var venue := style == &"nightclub"
 	var tone := Color(0.996, 0.925, 0.808) if warm else Color(0.945, 0.965, 0.988)
+	if venue:
+		# Coloured rather than white, because a venue lit like a shop is a shop
+		# with the lights off.
+		tone = Color(0.663, 0.545, 0.878)
 	var strip := Palette.glow(tone, 0.55)
 
 	var holder := Node3D.new()
@@ -954,16 +961,29 @@ func _build_lighting() -> void:
 			Vector3(0.12, 0.08, room.size.y * 0.86), strip, false, false
 		)
 
-	for spot in [
-		Vector3(-3.5, 2.9, 1.5), Vector3(3.5, 2.9, 1.5),
-		Vector3(0.0, 2.9, -4.2), Vector3(0.0, 2.9, 4.6),
-	]:
+	# Spread across whatever size the room actually is. These used to be four
+	# fixed points chosen for a small unit, which left the corners of a large
+	# one — a gym, a venue — in the dark.
+	var centre := room.get_center()
+	var span_x := room.size.x * 0.26
+	var span_z := room.size.y * 0.26
+	var spots: Array[Vector3] = [
+		Vector3(centre.x - span_x, 2.9, centre.y - span_z),
+		Vector3(centre.x + span_x, 2.9, centre.y - span_z),
+		Vector3(centre.x - span_x, 2.9, centre.y + span_z),
+		Vector3(centre.x + span_x, 2.9, centre.y + span_z),
+	]
+	if room.size.x > 20.0:
+		spots.append(Vector3(centre.x, 2.9, centre.y))
+	for spot in spots:
 		var light := OmniLight3D.new()
 		light.name = "CeilingLight"
 		light.position = spot
 		light.light_color = tone
-		light.light_energy = 0.8 if warm else 0.95
-		light.omni_range = 11.0
+		# A venue is dim, not invisible: enough to read the room by, and no
+		# more, with the rig doing the rest.
+		light.light_energy = 0.55 if venue else (0.8 if warm else 0.95)
+		light.omni_range = maxf(room.size.x, room.size.y) * 0.62
 		light.shadow_enabled = false
 		holder.add_child(light)
 
