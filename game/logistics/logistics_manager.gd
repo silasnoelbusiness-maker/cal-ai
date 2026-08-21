@@ -324,14 +324,25 @@ func request_transfer(
 	_next_transfer += 1
 	order.priority = priority
 
-	# Reserve what is really there. A request for fifty against twenty either
-	# ships twenty or ships nothing, and never creates thirty.
+	# Reserve what is really there, and no more than will fit at the far end.
+	# A request for fifty against twenty either ships twenty or ships nothing,
+	# and never creates thirty; a request for more than the destination's back
+	# room holds is trimmed here rather than driven across the city and
+	# brought back again.
+	var room := _room_at(destination_kind, destination_id)
+	if room <= 0:
+		# Nothing wrong with the stock — there is simply nowhere to put it.
+		# Saying "not enough stock" here would send the player to the wrong
+		# problem entirely.
+		return {"result": TransferResult.NO_ROOM, "order": null}
 	var short := false
 	for id: StringName in wanted:
-		var asked := int(wanted[id])
+		var asked := mini(int(wanted[id]), room)
 		if asked <= 0:
+			short = short or int(wanted[id]) > 0
 			continue
 		var promised := _reserve_at(source_kind, source_id, id, asked)
+		room -= promised
 		if promised < asked:
 			short = true
 		if promised > 0:
@@ -577,6 +588,15 @@ func _add_at(kind: TransferOrder.Place, id: StringName, item: StringName, units:
 		return warehouse.add(item, units) if warehouse != null else 0
 	var business := BusinessManager.by_id(id)
 	return business.add_storage(item, units) if business != null else 0
+
+
+## Room at the far end, so nothing is sent that cannot be put away.
+func _room_at(kind: TransferOrder.Place, id: StringName) -> int:
+	if kind == TransferOrder.Place.WAREHOUSE:
+		var warehouse := warehouse_by_id(id)
+		return warehouse.room_left() if warehouse != null else 0
+	var business := BusinessManager.by_id(id)
+	return business.storage_room_left() if business != null else 0
 
 
 func available_at(kind: TransferOrder.Place, id: StringName, item: StringName) -> int:

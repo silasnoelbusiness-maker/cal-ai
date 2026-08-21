@@ -11,6 +11,15 @@ extends RefCounted
 
 ## Equipment each type gets stood up with, in the order it is placed.
 const FITTINGS := {
+	# The two Phase H types were left out when this was written for Phase O,
+	# which meant a tool could stand up a restaurant but not a corner shop.
+	&"convenience_store": [
+		&"checkout_counter", &"retail_shelf", &"retail_shelf", &"retail_shelf",
+		&"storage_rack",
+	],
+	&"coffee_shop": [
+		&"service_counter", &"coffee_machine", &"ingredient_store", &"cafe_table",
+	],
 	&"restaurant": [
 		&"cook_station", &"prep_counter", &"kitchen_fridge", &"dry_store",
 		&"service_pass", &"dining_table", &"dining_table", &"dining_table",
@@ -27,6 +36,8 @@ const FITTINGS := {
 
 ## Who each type needs on the rota before it can trade properly.
 const CREW := {
+	&"convenience_store": [EmployeeData.Role.CASHIER],
+	&"coffee_shop": [EmployeeData.Role.BARISTA],
 	&"restaurant": [EmployeeData.Role.COOK, EmployeeData.Role.SERVER],
 	&"gym": [EmployeeData.Role.RECEPTIONIST],
 	&"nightclub": [
@@ -211,6 +222,97 @@ static func _property(property_id: StringName) -> CommercialProperty:
 		if unit != null and unit.property_id == property_id:
 			return unit
 	return null
+
+
+# --- Phase P: logistics ---------------------------------------------------
+
+## Takes the depot on and funds it from a nominated branch, ready to trade.
+static func stand_up_warehouse(payer: BusinessInstance) -> WarehouseInstance:
+	var unit := _property(&"warehouse_dock_14")
+	if unit == null:
+		return null
+	if unit.is_vacant():
+		PropertyManager.lease(unit)
+	var warehouse := LogisticsManager.take_warehouse(unit)
+	if warehouse == null:
+		return null
+	if payer != null:
+		LogisticsManager.set_funding_business(payer)
+	return warehouse
+
+
+## Racking, without the shop screen.
+static func add_racks(warehouse: WarehouseInstance, count: int) -> void:
+	if warehouse == null:
+		return
+	for i in count:
+		if warehouse.can_add_racks():
+			warehouse.racks += 1
+
+
+## Stock straight onto the warehouse floor, for a test that is about what
+## happens next rather than about ordering.
+static func fill_warehouse(warehouse: WarehouseInstance, per_line: int = 60) -> int:
+	if warehouse == null:
+		return 0
+	var added := 0
+	for business in BusinessManager.get_businesses():
+		for item in business.orderable():
+			added += warehouse.add(item.id, per_line)
+	return added
+
+
+## A van and somebody to drive it, so a transfer has what it needs.
+static func stand_up_fleet(payer: BusinessInstance) -> Dictionary:
+	var van := CompanyFleet.buy_for_company(&"van", payer)
+	var driver := hire(payer, EmployeeData.Role.DELIVERY_DRIVER, 0.8)
+	return {"van": van, "driver": driver}
+
+
+## Everything: depot, racking, stock, van and driver.
+static func stand_up_logistics(payer: BusinessInstance) -> WarehouseInstance:
+	var warehouse := stand_up_warehouse(payer)
+	if warehouse == null:
+		return null
+	add_racks(warehouse, 4)
+	fill_warehouse(warehouse)
+	stand_up_fleet(payer)
+	return warehouse
+
+
+# --- Phase P: distress ----------------------------------------------------
+
+## Drains a business to a chosen balance, so the tests about running out of
+## money do not have to trade their way there.
+static func set_cash(business: BusinessInstance, amount: int) -> void:
+	if business == null:
+		return
+	var difference := amount - business.cash_balance
+	if difference > 0:
+		business.credit(difference, "Debug", &"revenue")
+	elif difference < 0:
+		business.debit(-difference, "Debug", &"other")
+
+
+## Makes somebody owed wages, without waiting for a payday to fail.
+static func owe_wages(business: BusinessInstance, worker: EmployeeData, amount: int) -> void:
+	if worker == null:
+		return
+	worker.wage_arrears += amount
+	worker.missed_pay_runs += 1
+	FinanceManager.review(business)
+
+
+## Pushes a mortgage to the edge of foreclosure without waiting weeks.
+static func miss_mortgage_payments(loan: MortgageData, count: int) -> void:
+	if loan == null:
+		return
+	for i in count:
+		loan.missed_payments += 1
+	if loan.missed_payments >= MortgageData.FORECLOSURE_MISSES:
+		RealEstate.call("_begin_foreclosure", loan)
+	elif loan.missed_payments >= MortgageData.AT_RISK_MISSES:
+		loan.status = MortgageData.Status.AT_RISK
 
 
 # --- Single-purpose pokes -------------------------------------------------

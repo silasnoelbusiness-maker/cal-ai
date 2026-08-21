@@ -143,7 +143,7 @@ func forecast(days: int = FORECAST_DAYS) -> Dictionary:
 	return {
 		"days": days,
 		"cash": cash,
-		"personal_cash": EconomyManager.get_cash(),
+		"personal_cash": EconomyManager.cash,
 		"due": due,
 		"overdue": overdue,
 		"expected_revenue": expected,
