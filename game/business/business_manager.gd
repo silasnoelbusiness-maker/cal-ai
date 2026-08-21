@@ -80,6 +80,9 @@ var _next_order_number: int = 1
 var _next_loan_number: int = 1
 var _supplier := SupplierData.default_supplier()
 var _milestones_reached: Dictionary = {}
+## Branches already told they have nobody to call, so the warning is once a
+## day rather than once an hour. §103.
+var _backup_warned: Dictionary = {}
 ## The player's own company name, shown over the portfolio.
 var company_name: String = "My Company"
 
@@ -378,6 +381,26 @@ func purchasing_overview() -> Dictionary:
 	return {"pending": pending, "low_stock": short}
 
 
+## Puts a warehouse order on the same delivery clock as every branch order.
+## LogisticsManager builds it and hands it over; there is one order list.
+func register_warehouse_order(order: PurchaseOrder) -> void:
+	if order == null:
+		return
+	_orders.append(order)
+	order_placed.emit(order)
+
+
+## Anybody on the payroll, anywhere in the company, by id.
+func employee_by_id(employee_id: StringName) -> EmployeeData:
+	if employee_id == &"":
+		return null
+	for business in get_businesses():
+		var worker := business.employee_by_id(employee_id)
+		if worker != null:
+			return worker
+	return null
+
+
 func get_supplier() -> SupplierData:
 	return _supplier
 
@@ -394,9 +417,18 @@ func _advance_deliveries() -> void:
 			arrived.append(order)
 
 	for order in arrived:
-		var business := by_id(order.business_id)
 		order.status = PurchaseOrder.Status.DELIVERED
 		_orders.erase(order)
+		# A bulk run goes to the warehouse floor rather than a shop's back
+		# room. Same order, same supplier, same clock — only the door differs.
+		if order.goes_to_warehouse():
+			var landed := LogisticsManager.receive_supplier_delivery(order)
+			GameManager.notify(
+				"WAREHOUSE DELIVERY\n%d units received" % landed, GameManager.Tone.GOOD
+			)
+			order_delivered.emit(order)
+			continue
+		var business := by_id(order.business_id)
 		if business == null:
 			continue
 		var delivered := 0
@@ -730,6 +762,8 @@ func _on_hour_passed(hour: int) -> void:
 
 
 func _on_day_passed(day_index: int) -> void:
+	_backup_warned.clear()
+	_settle_backup_shifts()
 	_collect_loan_payments()
 	for business in get_businesses():
 		# Anybody still clocked on is paid off before the books close.
@@ -757,6 +791,27 @@ func _on_day_passed(day_index: int) -> void:
 		_raise_statistic(&"highest_business_value", business.estimated_value())
 	_raise_statistic(&"highest_net_worth", net_worth())
 	_check_milestones()
+
+
+## Cover is for a day. Anybody who came in to help is paid for it — at a small
+## premium, because being rung up on a day off is worth something — and then
+## goes back to their own branch.
+func _settle_backup_shifts() -> void:
+	for worker in backup_assignments():
+		var covered := by_id(worker.backup_business_id)
+		var home := by_id(worker.assigned_business)
+		if covered != null and worker.hours_unpaid > 0.0:
+			var due := roundi(
+				float(worker.wage_for_hours(worker.hours_unpaid))
+				* (1.0 + FinanceManager.BACKUP_WAGE_PREMIUM)
+			)
+			# The branch that got the help pays for it, not the one that lent
+			# the person out.
+			FinanceManager.settle_wages(covered, worker, due)
+			worker.hours_unpaid = 0.0
+		worker.clear_backup()
+		if home != null:
+			home.changed.emit()
 
 
 func _update_open_state(business: BusinessInstance, hour: int) -> void:
@@ -810,7 +865,99 @@ func _run_manager(business: BusinessInstance, hour: int) -> void:
 		_manager_reorder(business, boss)
 	if business.may(&"manage_cleanliness"):
 		_manager_clean(business)
+	if business.may(&"call_backup"):
+		_manager_call_backup(business, hour)
 	_manager_position_staff(business, hour)
+
+
+## The manager finds a critical job uncovered and rings round the company for
+## somebody to come in. Phase O shipped this permission with nothing behind it;
+## this is the behind it.
+##
+## Nobody is conjured. Every candidate is a real employee of another branch who
+## is off shift and can do the job, and if there is nobody the shift stays
+## uncovered and the business takes the consequences. §60.
+func _manager_call_backup(business: BusinessInstance, hour: int) -> void:
+	for role in business.unstaffed_roles(hour):
+		# Somebody already on the way here counts as covered.
+		if backup_covering(business.business_id, role, hour) != null:
+			continue
+		if _backup_incoming(business.business_id, role):
+			continue
+		var worker := BackupPool.best_for(business, role, hour)
+		if worker == null:
+			_notify_no_backup(business, role)
+			continue
+		assign_backup(business, worker, role, hour)
+
+
+func _backup_incoming(business_id: StringName, role: int) -> bool:
+	for other in get_businesses():
+		for worker in other.employees:
+			if worker.backup_business_id == business_id and worker.backup_role == role:
+				return true
+	return false
+
+
+func _notify_no_backup(business: BusinessInstance, role: int) -> void:
+	var key := "%s/nobackup/%d" % [business.business_id, role]
+	if _backup_warned.has(key):
+		return
+	_backup_warned[key] = true
+	GameManager.notify(
+		"NO BACKUP STAFF AVAILABLE\n%s  ·  %s" % [
+			business.business_name.to_upper(), EmployeeData.name_of_role(role)
+		],
+		GameManager.Tone.BAD
+	)
+
+
+## Sends somebody to cover a shift somewhere else. They travel, they arrive,
+## and they are paid a little over the odds for the inconvenience.
+func assign_backup(
+	business: BusinessInstance, worker: EmployeeData, role: int, hour: int
+) -> bool:
+	if business == null or worker == null:
+		return false
+	if not BackupPool.is_eligible(worker, business, role, hour):
+		return false
+	var travel := BackupPool.travel_minutes(worker, business)
+	worker.backup_business_id = business.business_id
+	worker.backup_role = role
+	worker.backup_until_hour = business.closing_hour
+	worker.backup_arrives_minute = TimeManager.total_minutes + travel
+	GameManager.notify(
+		"BACKUP %s ASSIGNED\n%s  ·  %s arrives %s" % [
+			EmployeeData.name_of_role(role).to_upper(),
+			business.business_name.to_upper(), worker.employee_name,
+			worker.backup_arrival_text(),
+		],
+		GameManager.Tone.GOOD
+	)
+	AudioManager.play_ui(&"ui_confirm")
+	business_changed.emit(business)
+	return true
+
+
+## Whoever is standing in at a branch, in a job, this hour.
+func backup_covering(
+	business_id: StringName, role: int, hour: int
+) -> EmployeeData:
+	for business in get_businesses():
+		for worker in business.employees:
+			if worker.is_covering(business_id, role, hour):
+				return worker
+	return null
+
+
+## Everybody currently away covering somewhere else.
+func backup_assignments() -> Array[EmployeeData]:
+	var found: Array[EmployeeData] = []
+	for business in get_businesses():
+		for worker in business.employees:
+			if worker.has_backup_shift():
+				found.append(worker)
+	return found
 
 
 ## Moves a spare pair of hands onto a job nobody is doing.
@@ -992,7 +1139,19 @@ func _work_the_stock_room(business: BusinessInstance, hour: int) -> void:
 ## An hour on shift is an hour owed. The money only moves when the shift ends,
 ## so the ledger reads as one wage payment rather than eight.
 func _accrue_wages(business: BusinessInstance, hour: int) -> void:
+	# Anybody out covering another branch is on that branch's clock, and is
+	# paid by them when the day closes. Counting the hour here as well would
+	# pay one person twice for one hour.
 	for worker in business.employees:
+		if worker.has_backup_shift():
+			if worker.is_covering(worker.backup_business_id, worker.backup_role, hour):
+				worker.hours_worked_today += 1.0
+				worker.hours_unpaid += 1.0
+			continue
+		# Somebody who has not been paid for weeks stops coming in. That is the
+		# whole of Phase P's morale model, and enough of one. §70.
+		if not worker.will_work():
+			continue
 		if worker.is_on_shift(hour):
 			worker.hours_worked_today += 1.0
 			worker.hours_unpaid += 1.0
@@ -1011,16 +1170,12 @@ func _pay(business: BusinessInstance, worker: EmployeeData) -> void:
 	worker.hours_unpaid = 0.0
 	if due <= 0:
 		return
-	# An account too short for the wage bill still owes it: the shift is worked
-	# either way, so it goes on as an expense the account can carry into the red
-	# of its own reporting rather than silently vanishing.
-	if not business.debit(due, "Wages — %s" % worker.employee_name, &"wages"):
-		business.debit(business.cash_balance, "Wages — %s (part)" % worker.employee_name, &"wages")
-		GameManager.notify(
-			"COULD NOT COVER WAGES\n%s" % worker.employee_name.to_upper(), GameManager.Tone.BAD
-		)
+	# An account too short for the wage bill still owes it. Phase P is where
+	# that shortfall stopped evaporating: whatever cannot be covered becomes
+	# arrears against this person's name, and paying later pays them. §69.
+	var paid := FinanceManager.settle_wages(business, worker, due)
 	GameManager.notify(
-		"EMPLOYEE SHIFT ENDED\n%s  -$%d" % [worker.employee_name.to_upper(), due],
+		"EMPLOYEE SHIFT ENDED\n%s  -$%d" % [worker.employee_name.to_upper(), paid],
 		GameManager.Tone.INFO
 	)
 
@@ -1272,16 +1427,142 @@ func sell_business(business: BusinessInstance) -> int:
 
 ## Stops trading without giving the business up. The lease and its rent carry on,
 ## which is the difference between closing for a while and getting out.
-func close_business(business: BusinessInstance) -> void:
-	if business == null:
+## Shuts the doors without giving anything up. The branch keeps its stock, its
+## fittings, its lease and its debts — it simply stops trading, which is what
+## makes this a way of stopping the bleeding rather than a way of quitting.
+func close_business(business: BusinessInstance, reason: String = "") -> void:
+	if business == null or business.is_closed():
 		return
 	business.manual_override = BusinessInstance.Override.FORCE_CLOSED
 	business.auto_open = false
 	business.set_open(false)
+	business.distress = DistressState.State.CLOSED
+	business.closed_on_day = TimeManager.day_index
+	_stand_down(business)
 	GameManager.notify(
-		"BUSINESS CLOSED\n%s  ·  rent still due" % business.business_name.to_upper(),
+		"BUSINESS CLOSED\n%s%s" % [
+			business.business_name.to_upper(),
+			"  ·  %s" % reason if not reason.is_empty() else "  ·  rent still due",
+		],
 		GameManager.Tone.INFO
 	)
+	business_changed.emit(business)
+
+
+## Opens a temporarily closed branch again. Wages and customers resume; nothing
+## was lost while it was shut.
+func reopen_business(business: BusinessInstance) -> bool:
+	if business == null or not business.is_closed():
+		return false
+	business.manual_override = BusinessInstance.Override.NONE
+	business.closed_on_day = -1
+	business.distress = DistressState.State.HEALTHY
+	FinanceManager.review(business)
+	GameManager.notify(
+		"BUSINESS REOPENED\n%s" % business.business_name.to_upper(), GameManager.Tone.GOOD
+	)
+	business_changed.emit(business)
+	return true
+
+
+## Closure the player did not choose, after the warnings ran out.
+func close_business_for_distress(business: BusinessInstance) -> void:
+	close_business(business, "could not meet its obligations")
+	GameManager.notify(
+		"BUSINESS FAILED\n%s" % business.business_name.to_upper(), GameManager.Tone.BAD
+	)
+	AudioManager.play_ui(&"ui_error")
+
+
+## Everything that has to stop when a branch shuts: the floor empties, the
+## rota stops accruing, and anything on its way here is turned around. §132
+## and §133 — no stuck queues and no ghost deliveries.
+func _stand_down(business: BusinessInstance) -> void:
+	var unit := RetailUnit.for_business(business, get_tree())
+	if unit != null:
+		var spawner := unit.get_spawner()
+		if spawner != null:
+			for customer in spawner.active_customers():
+				customer.call("_leave")
+	# Supplier runs still coming here are refunded rather than delivered into
+	# a shop that is shut.
+	for order in _orders.duplicate():
+		if order.business_id != business.business_id or order.goes_to_warehouse():
+			continue
+		business.credit(order.total_cost, "Cancelled order", &"revenue")
+		_orders.erase(order)
+	# Transfers pointed at it go back where they came from.
+	for order in LogisticsManager.transfers_for(business.business_id):
+		if order.is_open():
+			LogisticsManager.call("_fail", order, "The branch closed.")
+
+
+## Winds a branch up: sells what it has, pays what it owes, ends the lease and
+## takes it off the books. The order is fixed and every step is reported. §81.
+func liquidate_business(business: BusinessInstance) -> Dictionary:
+	if business == null:
+		return {}
+	var report := Liquidation.quote(business)
+	business.distress = DistressState.State.LIQUIDATING
+	close_business(business, "liquidated")
+
+	# Sell the stock and the fittings into the business's own account first,
+	# so the money is there to pay what the business owes.
+	business.credit(
+		int(report.get("stock_recovered", 0)), "Liquidated stock", &"revenue"
+	)
+	business.credit(
+		int(report.get("equipment_recovered", 0)), "Liquidated equipment", &"revenue"
+	)
+	business.storage.clear()
+	business.reserved_stock.clear()
+	business.equipment.clear()
+
+	# Wages first: people who worked are paid before anything else.
+	FinanceManager.pay_arrears(business)
+	var settled := int(report.get("owed", 0)) - business.total_arrears()
+
+	# Whatever is left goes to the player, and any shortfall simply stands.
+	var left := maxi(business.cash_balance, 0)
+	if left > 0:
+		business.debit(left, "Wound up", &"other")
+		EconomyManager.deposit(left, "Liquidated %s" % business.business_name)
+
+	# The lease ends only once the place is empty and the books are settled.
+	var unit := business.property()
+	if unit != null and unit.has_landlord():
+		PropertyManager.end_lease(unit)
+
+	# Staff are not deleted with the shop: they go to the company pool so the
+	# player can move them somewhere. §130.
+	var released := business.employees.size()
+	for worker in business.employees.duplicate():
+		worker.assigned_business = &""
+		worker.available_for_backup = true
+	business.employees.clear()
+
+	CompanyManager.detach_branch(business)
+	_remove(business)
+	FinanceManager.businesses_liquidated += 1
+	report["settled"] = settled
+	report["returned"] = left
+	report["released_staff"] = released
+	GameManager.notify(
+		"BRANCH LIQUIDATED\n%s  ·  $%s recovered" % [
+			business.business_name.to_upper(),
+			EconomyManager.with_thousands_separator(left),
+		],
+		GameManager.Tone.INFO
+	)
+	AudioManager.play(&"money", AudioBuses.SFX, -10.0)
+	SaveManager.autosave("liquidated a branch")
+	return report
+
+
+## Takes a business off the register. Selling and liquidating both end here.
+func _remove(business: BusinessInstance) -> void:
+	_businesses.erase(business.business_id)
+	_order.erase(business.business_id)
 	business_changed.emit(business)
 
 

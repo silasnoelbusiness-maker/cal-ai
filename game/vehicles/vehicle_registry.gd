@@ -101,9 +101,26 @@ func stored_in(garage_id: StringName) -> Array[OwnedVehicle]:
 	return found
 
 
-## What the fleet is worth today. This is the vehicle line on the net worth
-## screen, and it counts garaged cars exactly once alongside street-parked ones.
+## What the player's own cars are worth today. This is the vehicle line on the
+## net worth screen, and it counts garaged cars exactly once alongside
+## street-parked ones.
+##
+## Company vans are deliberately not in it. They are bought with company money
+## and counted in company value; adding them here as well would show the same
+## van twice on the profile screen, once as a car and once as part of the
+## business that owns it.
 func total_value() -> int:
+	var total := 0
+	for record in _records:
+		if CompanyFleet.is_company_owned(record):
+			continue
+		total += record.market_value()
+	return total
+
+
+## Everything on the books, whoever owns it. What the fleet sweep and the save
+## work from, as against what the player's net worth counts.
+func total_fleet_value() -> int:
 	var total := 0
 	for record in _records:
 		total += record.market_value()
@@ -254,6 +271,33 @@ func _create_owned(
 	_records.append(record)
 	_sweep()
 	return BuyResult.OK
+
+
+## Puts distance on a vehicle without it having driven anywhere the sweep can
+## see. A far-simulated delivery run really happened, so the van that made it
+## really wears — otherwise a company van is immortal precisely because nobody
+## watched it work.
+func add_mileage(record: OwnedVehicle, km: float) -> void:
+	if record == null or km <= 0.0:
+		return
+	record.mileage_km += km
+	record.condition = maxf(record.condition - km * WEAR_PER_KM, 1.0)
+	fleet_changed.emit()
+
+
+## Takes a vehicle off the books entirely. Selling is the only route a player
+## has to it; liquidation and the debug tools need it too.
+func remove(record: OwnedVehicle) -> bool:
+	if record == null:
+		return false
+	if record.is_spawned():
+		_despawn(record)
+	var index := _records.find(record)
+	if index < 0:
+		return false
+	_records.remove_at(index)
+	fleet_changed.emit()
+	return true
 
 
 func _make_record(model_id: StringName) -> OwnedVehicle:

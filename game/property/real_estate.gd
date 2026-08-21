@@ -1272,6 +1272,12 @@ func yield_of(record: PropertyRecord) -> float:
 	return float(rent) * 52.0 / float(record.market_value)
 
 
+## The address of anything the player owns or could own. Public because the
+## obligation list names mortgages by where they are, not by an id.
+func address_of(property_id: StringName) -> String:
+	return _address_of(property_id)
+
+
 func _address_of(property_id: StringName) -> String:
 	var record := record_for(property_id)
 	if record != null:

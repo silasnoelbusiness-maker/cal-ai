@@ -12,6 +12,12 @@ enum Status { PLACED, IN_TRANSIT, DELIVERED }
 var order_id: StringName = &""
 var business_id: StringName = &""
 var supplier_id: StringName = &"citywide"
+## Set when the goods are going to a warehouse rather than to a shop's back
+## room. §12: one supplier-order system, two destinations — not two systems.
+var warehouse_id: StringName = &""
+## Whether this run is running late. Recorded so the logistics screen can say
+## so rather than the player wondering where their stock is.
+var delayed: bool = false
 ## item id -> units.
 var items: Dictionary = {}
 var total_cost: int = 0
@@ -44,6 +50,10 @@ func summary() -> String:
 	if names.size() == 1:
 		return names[0]
 	return "%s +%d more" % [names[0], names.size() - 1]
+
+
+func goes_to_warehouse() -> bool:
+	return warehouse_id != &""
 
 
 func is_outstanding() -> bool:
@@ -92,6 +102,8 @@ func to_dict() -> Dictionary:
 		"id": String(order_id),
 		"business": String(business_id),
 		"supplier": String(supplier_id),
+		"warehouse": String(warehouse_id),
+		"delayed": delayed,
 		"items": stored,
 		"cost": total_cost,
 		"placed_at": placed_at,
@@ -106,6 +118,8 @@ static func from_dict(state: Dictionary) -> PurchaseOrder:
 	order.order_id = StringName(state.get("id", ""))
 	order.business_id = StringName(state.get("business", ""))
 	order.supplier_id = StringName(state.get("supplier", "citywide"))
+	order.warehouse_id = StringName(state.get("warehouse", ""))
+	order.delayed = bool(state.get("delayed", false))
 	for key in state.get("items", {}):
 		order.items[StringName(key)] = int(state["items"][key])
 	order.total_cost = int(state.get("cost", 0))

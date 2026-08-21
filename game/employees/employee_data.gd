@@ -10,6 +10,7 @@ extends RefCounted
 enum Role {
 	CASHIER, STOCKER, BARISTA, MANAGER,
 	COOK, SERVER, RECEPTIONIST, CLEANER, SECURITY, BARTENDER, ENTERTAINER,
+	DELIVERY_DRIVER,
 }
 
 ## What a role is worth per hour before skill is taken into account. A manager
@@ -20,6 +21,7 @@ const BASE_WAGE := {
 	Role.CASHIER: 18, Role.STOCKER: 19, Role.BARISTA: 20, Role.MANAGER: 30,
 	Role.COOK: 26, Role.SERVER: 19, Role.RECEPTIONIST: 18, Role.CLEANER: 16,
 	Role.SECURITY: 24, Role.BARTENDER: 21, Role.ENTERTAINER: 28,
+	Role.DELIVERY_DRIVER: 22,
 }
 
 ## The one skill each role is paid for. Everything that asks "how good are they
@@ -30,7 +32,7 @@ const ROLE_SKILL := {
 	Role.MANAGER: &"management", Role.COOK: &"cooking", Role.SERVER: &"checkout",
 	Role.RECEPTIONIST: &"checkout", Role.CLEANER: &"cleaning",
 	Role.SECURITY: &"security", Role.BARTENDER: &"checkout",
-	Role.ENTERTAINER: &"entertainment",
+	Role.ENTERTAINER: &"entertainment", Role.DELIVERY_DRIVER: &"logistics",
 }
 
 ## How a role reads on a wage slip.
@@ -39,7 +41,7 @@ const ROLE_NAMES := {
 	Role.MANAGER: "Manager", Role.COOK: "Cook", Role.SERVER: "Server",
 	Role.RECEPTIONIST: "Receptionist", Role.CLEANER: "Cleaner",
 	Role.SECURITY: "Security", Role.BARTENDER: "Bartender",
-	Role.ENTERTAINER: "DJ",
+	Role.ENTERTAINER: "DJ", Role.DELIVERY_DRIVER: "Driver",
 }
 
 const FIRST_NAMES: Array[String] = [
@@ -66,6 +68,24 @@ var skill_cooking: int = 50
 var skill_cleaning: int = 50
 var skill_security: int = 50
 var skill_entertainment: int = 50
+## Phase P. Knowing the city and getting the van back in one piece.
+var skill_logistics: int = 50
+## Wages worked for and not paid, because the business had no money on the day.
+## Tracked per person so paying it back later pays the right people. §71.
+var wage_arrears: int = 0
+## Consecutive paydays missed. A person forgives one and starts refusing shifts
+## after several, which is as much morale as Phase P models. §70.
+var missed_pay_runs: int = 0
+## Whether the company may call this person in to cover a shift elsewhere.
+var available_for_backup: bool = false
+## Set while they are covering a shift at a branch that is not their own.
+## Transient by design: cover is for today, and a rota entry that repeated
+## every Monday because somebody was once called in would be a bug.
+var backup_business_id: StringName = &""
+var backup_role: int = -1
+var backup_until_hour: int = -1
+## When they actually get there. Nobody teleports across the city. §56.
+var backup_arrives_minute: float = 0.0
 ## Hours worked in each role, which is what slowly raises the matching skill.
 var experience: float = 0.0
 var role: Role = Role.CASHIER
@@ -118,6 +138,7 @@ static func generate(
 	worker.skill_cleaning = _roll_skill(rng, floor_skill)
 	worker.skill_security = _roll_skill(rng, floor_skill)
 	worker.skill_entertainment = _roll_skill(rng, floor_skill)
+	worker.skill_logistics = _roll_skill(rng, floor_skill)
 	worker.hourly_wage = worker.expected_wage(rng.randf_range(-1.5, 1.5))
 	return worker
 
@@ -155,6 +176,8 @@ func skill_named(key: StringName) -> int:
 			return skill_security
 		&"entertainment":
 			return skill_entertainment
+		&"logistics":
+			return skill_logistics
 		_:
 			return skill_checkout
 
@@ -176,6 +199,8 @@ func set_skill_named(key: StringName, value: int) -> void:
 			skill_security = capped
 		&"entertainment":
 			skill_entertainment = capped
+		&"logistics":
+			skill_logistics = capped
 		_:
 			skill_checkout = capped
 
@@ -389,6 +414,44 @@ func service_scale() -> float:
 	return lerpf(1.5, 0.72, clampf(float(skill_checkout) / 100.0, 0.0, 1.0))
 
 
+## Whether they are standing in at a given branch, in a given job, right now.
+## False until they have physically had time to arrive.
+func is_covering(business_id: StringName, role: int, hour: int) -> bool:
+	if backup_business_id != business_id or backup_role != role:
+		return false
+	if TimeManager.total_minutes < backup_arrives_minute:
+		return false
+	return hour < backup_until_hour or backup_until_hour < 0
+
+
+func has_backup_shift() -> bool:
+	return backup_business_id != &""
+
+
+func clear_backup() -> void:
+	backup_business_id = &""
+	backup_role = -1
+	backup_until_hour = -1
+	backup_arrives_minute = 0.0
+
+
+func backup_arrival_text() -> String:
+	var minutes := backup_arrives_minute
+	var hour := int(minutes / 60.0) % 24
+	var minute := int(minutes) % 60
+	return "%02d:%02d" % [hour, minute]
+
+
+## Whether they will turn up. Somebody owed several weeks of wages stops
+## working, which is the only consequence Phase P models and enough of one.
+func will_work() -> bool:
+	return missed_pay_runs < 3
+
+
+func owed_text() -> String:
+	return "owed $%s" % EconomyManager.with_thousands_separator(wage_arrears)
+
+
 ## How much cleanliness one hour of this cleaner puts back.
 func cleaning_rate() -> float:
 	return lerpf(4.0, 11.0, clampf(float(skill_cleaning) / 100.0, 0.0, 1.0))
@@ -407,6 +470,14 @@ func to_dict() -> Dictionary:
 		"skill_cleaning": skill_cleaning,
 		"skill_security": skill_security,
 		"skill_entertainment": skill_entertainment,
+		"skill_logistics": skill_logistics,
+		"wage_arrears": wage_arrears,
+		"missed_pay_runs": missed_pay_runs,
+		"available_for_backup": available_for_backup,
+		"backup_business": String(backup_business_id),
+		"backup_role": backup_role,
+		"backup_until": backup_until_hour,
+		"backup_arrives": backup_arrives_minute,
 		"experience": experience,
 		"role": int(role),
 		"shift_start": shift_start_hour,
@@ -440,6 +511,16 @@ static func from_dict(state: Dictionary) -> EmployeeData:
 	worker.skill_cleaning = int(state.get("skill_cleaning", 50))
 	worker.skill_security = int(state.get("skill_security", 50))
 	worker.skill_entertainment = int(state.get("skill_entertainment", 50))
+	worker.skill_logistics = int(state.get("skill_logistics", 50))
+	# A Phase O save has nobody owed anything and nobody in the backup pool,
+	# which is exactly the right default: §147 says invent no obligations.
+	worker.wage_arrears = int(state.get("wage_arrears", 0))
+	worker.missed_pay_runs = int(state.get("missed_pay_runs", 0))
+	worker.available_for_backup = bool(state.get("available_for_backup", false))
+	worker.backup_business_id = StringName(state.get("backup_business", ""))
+	worker.backup_role = int(state.get("backup_role", -1))
+	worker.backup_until_hour = int(state.get("backup_until", -1))
+	worker.backup_arrives_minute = float(state.get("backup_arrives", 0.0))
 	worker.experience = float(state.get("experience", 0.0))
 	worker.role = int(state.get("role", 0)) as Role
 	worker.shift_start_hour = int(state.get("shift_start", 9))

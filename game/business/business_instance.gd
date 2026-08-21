@@ -120,6 +120,18 @@ var service_revenue_today: int = 0
 ## it exists so a test can create a lunch rush on purpose rather than hoping
 ## for one, and so a screenshot can show a room under pressure.
 var demand_override: float = 0.0
+## Stock in the back room promised to a transfer that has not left yet. Kept
+## apart from `storage` so the goods are still really here — they are simply
+## not available to be sold or sent anywhere else. §18.
+var reserved_stock: Dictionary = {}
+## Where the business stands financially, and whether it is trading at all.
+var distress: DistressState.State = DistressState.State.HEALTHY
+## Days it has been at CRITICAL, so closure comes with a countdown rather than
+## out of nowhere.
+var days_critical: int = 0
+## Set by a voluntary or forced closure. A closed business keeps its stock,
+## its equipment and its debts; it simply stops trading.
+var closed_on_day: int = -1
 var units_sold_today: int = 0
 
 var lifetime_revenue: int = 0
@@ -357,6 +369,84 @@ func storage_used() -> int:
 
 func storage_room_left() -> int:
 	return maxi(storage_capacity() - storage_used(), 0)
+
+
+## Stock that may actually be sold or sent: what is here, less what is
+## already promised to a transfer.
+func available_storage(item_id: StringName) -> int:
+	return maxi(storage_of(item_id) - reserved_of(item_id), 0)
+
+
+func reserved_of(item_id: StringName) -> int:
+	return int(reserved_stock.get(item_id, 0))
+
+
+func reserve_stock(item_id: StringName, quantity: int) -> int:
+	if quantity <= 0:
+		return 0
+	var promised := mini(quantity, available_storage(item_id))
+	if promised <= 0:
+		return 0
+	reserved_stock[item_id] = reserved_of(item_id) + promised
+	return promised
+
+
+func release_stock(item_id: StringName, quantity: int) -> void:
+	if quantity <= 0:
+		return
+	var left := reserved_of(item_id) - quantity
+	if left <= 0:
+		reserved_stock.erase(item_id)
+	else:
+		reserved_stock[item_id] = left
+
+
+# --- Trading state -------------------------------------------------------
+
+## Whether the doors can open at all. A closed branch keeps everything it owns
+## and stops serving anybody, which is the difference between closing a shop
+## and selling one.
+func is_trading() -> bool:
+	return DistressState.is_trading(distress)
+
+
+func is_closed() -> bool:
+	return not is_trading()
+
+
+func distress_label() -> String:
+	return DistressState.label(distress)
+
+
+func distress_colour() -> Color:
+	return DistressState.colour(distress)
+
+
+## Everything the business has failed to pay, across every kind of obligation.
+func total_arrears() -> int:
+	var total := wages_owed
+	for worker in employees:
+		total += worker.wage_arrears
+	var unit := property()
+	if unit != null and unit.has_landlord():
+		total += unit.arrears
+	for loan in loans:
+		if loan.status == Loan.Status.DEFAULTED:
+			total += loan.due_amount()
+	return total
+
+
+## How many separate payments have gone unmade. Feeds the distress rules.
+func missed_payment_count() -> int:
+	var misses := 0
+	for worker in employees:
+		misses += worker.missed_pay_runs
+	var unit := property()
+	if unit != null and unit.has_landlord() and unit.rent_amount > 0:
+		misses += int(float(unit.arrears) / float(maxi(unit.rent_amount, 1)))
+	for loan in loans:
+		misses += loan.missed_payments
+	return misses
 
 
 func storage_of(item_id: StringName) -> int:
@@ -652,9 +742,12 @@ func employee_by_id(employee_id: StringName) -> EmployeeData:
 ## Whoever should be doing a given job at this hour, if anybody.
 func rostered(role: int, hour: int) -> EmployeeData:
 	for worker in employees:
-		if worker.role == role and worker.is_on_shift(hour):
+		if worker.role == role and worker.is_on_shift(hour) and worker.will_work():
 			return worker
-	return null
+	# Nobody of our own: whoever the company sent to cover, if they have
+	# arrived. Backup is a real person from another branch, so they are found
+	# by asking the company rather than by looking down our own payroll.
+	return BusinessManager.backup_covering(business_id, role, hour)
 
 
 ## Everybody in that job at this hour. Two cooks are twice a kitchen, and
@@ -662,8 +755,11 @@ func rostered(role: int, hour: int) -> EmployeeData:
 func rostered_all(role: int, hour: int) -> Array[EmployeeData]:
 	var found: Array[EmployeeData] = []
 	for worker in employees:
-		if worker.role == role and worker.is_on_shift(hour):
+		if worker.role == role and worker.is_on_shift(hour) and worker.will_work():
 			found.append(worker)
+	var cover := BusinessManager.backup_covering(business_id, role, hour)
+	if cover != null:
+		found.append(cover)
 	return found
 
 
@@ -1253,6 +1349,13 @@ func weekly_report() -> Dictionary:
 
 # --- Internals -----------------------------------------------------------
 
+func _reserved_to_dict() -> Dictionary:
+	var out := {}
+	for id: StringName in reserved_stock:
+		out[String(id)] = int(reserved_stock[id])
+	return out
+
+
 func _check_low_stock(item_id: StringName) -> void:
 	if _low_stock_warned.has(item_id):
 		return
@@ -1330,6 +1433,10 @@ func to_dict() -> Dictionary:
 		"reputation": reputation,
 		"cleanliness": cleanliness,
 		"brand": String(brand_id),
+		"reserved_stock": _reserved_to_dict(),
+		"distress": int(distress),
+		"days_critical": days_critical,
+		"closed_on_day": closed_on_day,
 		"membership_price": membership_price,
 		"day_pass_price": day_pass_price,
 		"entry_fee": entry_fee,
@@ -1379,6 +1486,13 @@ static func from_dict(state: Dictionary) -> BusinessInstance:
 	# resetting a business that *does* track it, and it does not.
 	business.cleanliness = clampf(float(state.get("cleanliness", 100.0)), 0.0, 100.0)
 	business.brand_id = StringName(state.get("brand", ""))
+	for key in state.get("reserved_stock", {}):
+		business.reserved_stock[StringName(key)] = int(state["reserved_stock"][key])
+	# A Phase O save has no distress in it, and a business that was fine when
+	# it was saved is fine when it is loaded. §147.
+	business.distress = int(state.get("distress", 0)) as DistressState.State
+	business.days_critical = int(state.get("days_critical", 0))
+	business.closed_on_day = int(state.get("closed_on_day", -1))
 	business.membership_price = int(state.get("membership_price", 40))
 	business.day_pass_price = int(state.get("day_pass_price", 9))
 	business.entry_fee = int(state.get("entry_fee", 0))

@@ -101,6 +101,20 @@ static func describe(result: LeaseResult) -> String:
 ## Rent day. The business trading from the unit pays if it can, because that is
 ## whose overhead it is; only if there is no business, or it is short, does the
 ## bill fall to the player's own pocket.
+## Hands a unit back. The deposit is not returned — a business that failed did
+## not leave the place as it found it — but the unit becomes vacant and can be
+## let again, which is what stops a failed branch locking a good pitch forever.
+func end_lease(property: CommercialProperty) -> bool:
+	if property == null or not property.is_leased_by_player():
+		return false
+	property.end_lease()
+	GameManager.notify(
+		"LEASE ENDED\n%s" % property.address.to_upper(), GameManager.Tone.INFO
+	)
+	property_leased.emit(property)
+	return true
+
+
 func charge_due_rent() -> void:
 	for property in get_properties():
 		if not property.is_rent_due():

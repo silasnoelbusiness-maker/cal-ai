@@ -34,6 +34,13 @@ const MILESTONES: Array = [
 	[&"first_restaurant", "FIRST RESTAURANT", &"type", &"restaurant"],
 	[&"first_gym", "FIRST GYM", &"type", &"gym"],
 	[&"first_venue", "FIRST NIGHTLIFE VENUE", &"type", &"nightclub"],
+	# Phase P. These are reached by doing a thing rather than by crossing a
+	# number, so they are marked directly rather than checked each day.
+	[&"first_warehouse", "FIRST WAREHOUSE", &"manual", 0],
+	[&"first_van", "FIRST COMPANY VAN", &"manual", 0],
+	[&"thousand_units", "1,000 UNITS DISTRIBUTED", &"units", 1000],
+	[&"five_routes", "5 ACTIVE ROUTES", &"manual", 0],
+	[&"branch_saved", "FIRST BRANCH SAVED FROM DISTRESS", &"manual", 0],
 ]
 
 ## Premium a well-run chain adds to the sum of its shops. A name people know is
@@ -663,6 +670,7 @@ func _check_milestones() -> void:
 		&"employees": total_employees(),
 		&"brands": _brands.size(),
 		&"value": company_value(),
+		&"units": LogisticsManager.units_distributed,
 	}
 	for entry in MILESTONES:
 		var id: StringName = entry[0]
@@ -670,12 +678,31 @@ func _check_milestones() -> void:
 			continue
 		var kind: StringName = entry[2]
 		var reached := false
-		if kind == &"type":
+		if kind == &"manual":
+			# Marked when the thing happens, not counted from a total.
+			continue
+		elif kind == &"type":
 			reached = owned_types.has(StringName(entry[3]))
 		else:
 			reached = int(counts.get(kind, 0)) >= int(entry[3])
 		if reached:
 			_reach_milestone(id, String(entry[1]))
+
+
+## Marks a milestone that is reached by doing something rather than by a total
+## crossing a line — taking a warehouse on, buying the first van.
+func note_milestone(id: StringName) -> void:
+	if _milestones_reached.has(id):
+		return
+	for entry in MILESTONES:
+		if StringName(entry[0]) == id:
+			_reach_milestone(id, String(entry[1]))
+			return
+
+
+func note_milestone_if(id: StringName, condition: bool) -> void:
+	if condition:
+		note_milestone(id)
 
 
 func _reach_milestone(id: StringName, description: String) -> void:

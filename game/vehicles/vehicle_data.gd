@@ -63,6 +63,12 @@ extends Resource
 ## cost: a panel van is dear and says nothing, and lifestyle reads this rather
 ## than the price tag.
 @export var prestige: int = 20
+
+
+## Whether this model is the one a company buys to move stock in. Read off the
+## class rather than a flag, so a second cargo model needs no new field.
+func is_van() -> bool:
+	return vehicle_class.to_lower().contains("van")
 ## Whether the dealership will sell you one. Police cars exist and are not for
 ## sale, which is why this is off by default.
 @export var purchasable: bool = false
