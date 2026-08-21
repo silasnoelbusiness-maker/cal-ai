@@ -502,8 +502,11 @@ func _build_palette() -> void:
 			wall_mat = CityKit.make_material(Color(0.286, 0.216, 0.192))
 			trim_mat = Palette.of(&"wood_dark")
 		&"gym":
-			floor_mat = CityKit.make_material(Color(0.176, 0.192, 0.216))
-			wall_mat = CityKit.make_material(Color(0.259, 0.286, 0.322))
+			# Rubber floor and painted block, not a basement. The first pass at
+			# this was as dark as the venue, which is not what a gym at six in
+			# the morning looks like.
+			floor_mat = CityKit.make_material(Color(0.310, 0.333, 0.365))
+			wall_mat = CityKit.make_material(Color(0.522, 0.553, 0.592))
 			trim_mat = Palette.of(&"metal_mid")
 		&"office":
 			floor_mat = Palette.of(&"wood_floor")
@@ -778,7 +781,7 @@ func _dress_gym(parent: Node3D) -> void:
 	CityKit.add_box(
 		holder, "FloorMat", Vector3(0.0, 0.02, retail_area.get_center().y),
 		Vector3(retail_area.size.x - 2.4, 0.03, 2.2),
-		CityKit.make_material(Color(0.129, 0.157, 0.180)), false, false
+		CityKit.make_material(Color(0.239, 0.267, 0.298)), false, false
 	)
 	PropKit.menu_board(
 		holder, "PriceBoard",

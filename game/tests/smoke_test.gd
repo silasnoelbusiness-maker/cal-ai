@@ -262,6 +262,7 @@ func _run() -> void:
 	await _test_company_save_load()
 	await _test_pre_company_save()
 	await _test_company_and_crime()
+	_test_company_screens_reachable()
 
 	_report()
 
@@ -9999,3 +10000,56 @@ func _test_lost_customer_reasons() -> void:
 		_check(not LostReason.label(reason).is_empty(), "%s reads as something" % reason)
 	diner.lost_reasons_today.clear()
 	diner.lost_sales_today = 0
+
+
+## TEST — the company screens are actually in the game.
+##
+## Written after the three Phase O panels were built, named, wired to their
+## signals and then never added to the tree: every check about brands, rotas and
+## managers passed, because they all asked the manager rather than the screen,
+## and the entire company interface was unreachable. A screen that is not in the
+## tree is a screen that does not exist.
+func _test_company_screens_reachable() -> void:
+	var hud := _main.get_node_or_null("HUD")
+	_check(hud != null, "the HUD is in the scene")
+	if hud == null:
+		return
+	for screen_name in ["CompanyDashboard", "StaffSchedulePanel", "ManagerPanel"]:
+		var screen := hud.get_node_or_null("Root/%s" % screen_name) as Control
+		_check(screen != null, "%s is in the tree" % screen_name)
+		if screen == null:
+			continue
+		_check(screen.is_inside_tree(), "%s is really parented" % screen_name)
+		_check(not screen.visible, "%s starts closed" % screen_name)
+
+	var dashboard := hud.get_node_or_null("Root/CompanyDashboard") as Control
+	if dashboard == null:
+		return
+	dashboard.call("open")
+	_check(bool(dashboard.call("is_open")), "the company dashboard opens")
+	_check(dashboard.visible, "and is visible when it does")
+	# Every tab builds without erroring, which is the other half of "reachable".
+	for page in CompanyDashboard.Page.values():
+		dashboard.call("show_tab", page)
+		_check(
+			dashboard.visible,
+			"the %s tab draws" % String(CompanyDashboard.PAGE_NAMES[page])
+		)
+	hud.call("close_screens")
+	_check(not dashboard.visible, "and the dashboard closes with the rest")
+
+	# The two screens the dashboard hands off to open on a real subject.
+	var manager := hud.get_node_or_null("Root/ManagerPanel") as Control
+	var branch := _own_business()
+	if manager != null and branch != null:
+		if not branch.has_manager():
+			CompanyDebug.hire(branch, EmployeeData.Role.MANAGER, 0.8)
+		manager.call("open", branch)
+		_check(manager.visible, "the manager screen opens on a branch")
+		hud.call("close_screens")
+
+	var rota := hud.get_node_or_null("Root/StaffSchedulePanel") as Control
+	if rota != null and branch != null and not branch.employees.is_empty():
+		rota.call("open", branch.employees[0])
+		_check(rota.visible, "and the rota screen opens on a person")
+		hud.call("close_screens")

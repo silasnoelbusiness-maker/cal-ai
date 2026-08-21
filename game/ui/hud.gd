@@ -739,6 +739,7 @@ func _phase_m_screens() -> Array:
 		_dealership_panel, _vehicle_detail_panel, _repair_panel, _garage_panel,
 		_furniture_store_panel, _furnishing_panel, _home_storage_panel, _profile_panel,
 		_property_sale_panel, _real_estate_panel,
+		_company_dashboard, _staff_schedule_panel, _manager_panel,
 	]
 
 
