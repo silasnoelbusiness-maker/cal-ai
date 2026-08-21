@@ -9843,7 +9843,7 @@ func _test_restaurant_visible_service() -> void:
 	_check(spawner != null, "the restaurant has a floor to fill")
 	if spawner == null:
 		return
-	var meat_before := diner.storage_of(&"kitchen_meat")
+	var larder_before := diner.storage_used()
 	var revenue_before := diner.revenue_today
 	var customer := spawner.spawn_customer_now()
 	_check(customer != null, "a customer comes in")
@@ -9872,9 +9872,10 @@ func _test_restaurant_visible_service() -> void:
 		diner.revenue_today - revenue_before
 	))
 	_check(
-		diner.storage_of(&"kitchen_meat") < meat_before
-			or diner.storage_of(&"kitchen_vegetables") < 80,
-		"the ingredients for the meal were really used"
+		diner.storage_used() < larder_before,
+		"the ingredients for the meal were really used (%d -> %d)" % [
+			larder_before, diner.storage_used()
+		]
 	)
 	_check(diner.units_sold_today > 0, "and the meal is counted as sold")
 

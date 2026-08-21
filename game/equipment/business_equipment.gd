@@ -203,6 +203,18 @@ func _build_body() -> void:
 					Vector3(0.0, 0.45 + float(level) * 0.6, 0.0),
 					Vector3(size.x + 0.1, 0.06, size.y + 0.08), accent, false, false
 				)
+		EquipmentData.Role.SEATING:
+			_build_seating(size, body, accent)
+		EquipmentData.Role.MACHINE:
+			_build_machine(size, body, accent)
+		EquipmentData.Role.BAR, EquipmentData.Role.PASS, EquipmentData.Role.RECEPTION:
+			_build_counter(size, body, accent)
+		EquipmentData.Role.COOK_STATION:
+			_build_cook_station(size, body, accent)
+		EquipmentData.Role.DANCE_FLOOR:
+			_build_dance_floor(size, body, accent)
+		EquipmentData.Role.DJ_BOOTH, EquipmentData.Role.LIGHTING:
+			_build_rig(size, body, accent)
 		_:
 			CityKit.add_box(
 				self, "Unit", Vector3(0.0, _definition.height * 0.5, 0.0),
@@ -213,6 +225,140 @@ func _build_body() -> void:
 	_goods.name = "Goods"
 	_goods.position = Vector3(0.0, _definition.height + 0.12, 0.0)
 	add_child(_goods)
+
+
+## A table: a top, four legs and a chair per seat.
+##
+## Phase K's rule is that a room should read from above without a label, and a
+## single box does not read as anything. These are still primitives — the whole
+## city is — but a table with legs and chairs round it is a table, and a box is
+## a box.
+func _build_seating(size: Vector2, body: StandardMaterial3D, accent: StandardMaterial3D) -> void:
+	var top := _definition.height
+	CityKit.add_box(
+		self, "Top", Vector3(0.0, top - 0.04, 0.0),
+		Vector3(size.x, 0.08, size.y), accent
+	)
+	var leg_x := size.x * 0.5 - 0.12
+	var leg_z := size.y * 0.5 - 0.12
+	var corners := [
+		Vector3(-leg_x, 0.0, -leg_z), Vector3(leg_x, 0.0, -leg_z),
+		Vector3(-leg_x, 0.0, leg_z), Vector3(leg_x, 0.0, leg_z),
+	]
+	for i in corners.size():
+		var corner: Vector3 = corners[i]
+		CityKit.add_box(
+			self, "Leg%d" % i, Vector3(corner.x, (top - 0.08) * 0.5, corner.z),
+			Vector3(0.09, top - 0.08, 0.09), body, false, false
+		)
+	# One chair per seat, round the edge, facing in.
+	var seats := maxi(_definition.customer_slots, 1)
+	var radius := maxf(size.x, size.y) * 0.5 + 0.34
+	for i in seats:
+		var angle := TAU * float(i) / float(seats)
+		CityKit.add_box(
+			self, "Chair%d" % i,
+			Vector3(sin(angle) * radius, 0.22, cos(angle) * radius),
+			Vector3(0.42, 0.44, 0.42), body, false, false
+		)
+		CityKit.add_box(
+			self, "ChairBack%d" % i,
+			Vector3(sin(angle) * (radius + 0.16), 0.52, cos(angle) * (radius + 0.16)),
+			Vector3(0.42, 0.46, 0.10), accent, false, false
+		)
+
+
+## A gym machine: a footprint, an upright and something to hold.
+func _build_machine(size: Vector2, body: StandardMaterial3D, accent: StandardMaterial3D) -> void:
+	CityKit.add_box(
+		self, "Base", Vector3(0.0, 0.09, 0.0), Vector3(size.x, 0.18, size.y), body
+	)
+	CityKit.add_box(
+		self, "Upright", Vector3(0.0, _definition.height * 0.5, -size.y * 0.32),
+		Vector3(size.x * 0.28, _definition.height, 0.16), body, false
+	)
+	CityKit.add_box(
+		self, "Grip", Vector3(0.0, _definition.height - 0.08, -size.y * 0.14),
+		Vector3(size.x * 0.7, 0.09, 0.09), accent, false, false
+	)
+	CityKit.add_box(
+		self, "Pad", Vector3(0.0, 0.3, size.y * 0.14),
+		Vector3(size.x * 0.5, 0.14, size.y * 0.45), accent, false, false
+	)
+
+
+## A counter people are served across: a body, a worktop and a back gantry.
+func _build_counter(size: Vector2, body: StandardMaterial3D, accent: StandardMaterial3D) -> void:
+	CityKit.add_box(
+		self, "Body", Vector3(0.0, _definition.height * 0.5, 0.0),
+		Vector3(size.x, _definition.height, size.y), body
+	)
+	CityKit.add_box(
+		self, "Worktop", Vector3(0.0, _definition.height + 0.03, 0.0),
+		Vector3(size.x + 0.18, 0.08, size.y + 0.12), accent, false
+	)
+	CityKit.add_box(
+		self, "Gantry", Vector3(0.0, _definition.height + 0.42, -size.y * 0.4),
+		Vector3(size.x * 0.9, 0.06, 0.12), accent, false, false
+	)
+
+
+## A stove: a body, hob plates and an extractor above it.
+func _build_cook_station(
+	size: Vector2, body: StandardMaterial3D, accent: StandardMaterial3D
+) -> void:
+	CityKit.add_box(
+		self, "Range", Vector3(0.0, _definition.height * 0.45, 0.0),
+		Vector3(size.x, _definition.height * 0.9, size.y), body
+	)
+	for i in 4:
+		CityKit.add_box(
+			self, "Hob%d" % i,
+			Vector3(
+				-size.x * 0.3 + float(i % 2) * size.x * 0.6, _definition.height * 0.92,
+				-size.y * 0.18 + float(i / 2) * size.y * 0.36
+			),
+			Vector3(0.34, 0.04, 0.34), accent, false, false
+		)
+	CityKit.add_box(
+		self, "Extractor", Vector3(0.0, _definition.height + 0.75, 0.0),
+		Vector3(size.x + 0.2, 0.24, size.y + 0.2), body, false, false
+	)
+
+
+## A marked-out stretch of floor with a lit edge.
+func _build_dance_floor(
+	size: Vector2, body: StandardMaterial3D, _accent: StandardMaterial3D
+) -> void:
+	CityKit.add_box(
+		self, "Floor", Vector3(0.0, 0.02, 0.0), Vector3(size.x, 0.04, size.y), body, false, false
+	)
+	var glow := CityKit.make_emissive_material(_definition.accent_color, 1.1)
+	for i in 4:
+		var along := i % 2 == 0
+		var sign_of := 1.0 if i < 2 else -1.0
+		CityKit.add_box(
+			self, "Edge%d" % i,
+			Vector3(
+				0.0 if along else sign_of * size.x * 0.5,
+				0.05, sign_of * size.y * 0.5 if along else 0.0
+			),
+			Vector3(size.x if along else 0.10, 0.06, 0.10 if along else size.y),
+			glow, false, false
+		)
+
+
+## A booth or a light rig: a dark body with something lit on it.
+func _build_rig(size: Vector2, body: StandardMaterial3D, _accent: StandardMaterial3D) -> void:
+	CityKit.add_box(
+		self, "Body", Vector3(0.0, _definition.height * 0.5, 0.0),
+		Vector3(size.x, _definition.height, size.y), body
+	)
+	CityKit.add_box(
+		self, "Lamps", Vector3(0.0, _definition.height + 0.06, 0.0),
+		Vector3(size.x * 0.8, 0.10, size.y * 0.6),
+		CityKit.make_emissive_material(_definition.accent_color, 1.6), false, false
+	)
 
 
 ## How full a shelf looks, in blocks the colour of whatever is on it. Rebuilt on

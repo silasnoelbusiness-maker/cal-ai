@@ -810,8 +810,7 @@ func _run_manager(business: BusinessInstance, hour: int) -> void:
 		_manager_reorder(business, boss)
 	if business.may(&"manage_cleanliness"):
 		_manager_clean(business)
-	if business.may(&"staff_positioning"):
-		_manager_position_staff(business, hour)
+	_manager_position_staff(business, hour)
 
 
 ## Moves a spare pair of hands onto a job nobody is doing.
@@ -822,6 +821,8 @@ func _run_manager(business: BusinessInstance, hour: int) -> void:
 ## shift — so a restaurant with two servers and no cook ends up with one of
 ## each rather than a dining room full of orders nobody is making.
 func _manager_position_staff(business: BusinessInstance, hour: int) -> void:
+	if not business.may(&"staff_positioning"):
+		return
 	var uncovered := business.unstaffed_roles(hour)
 	if uncovered.is_empty():
 		return
