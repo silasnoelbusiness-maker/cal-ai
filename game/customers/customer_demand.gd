@@ -54,8 +54,20 @@ static func basket_size(business: BusinessInstance, rng: RandomNumberGenerator) 
 
 ## The price test. Everything about how customers respond to what the player
 ## charges is BusinessInstance.purchase_chance; this is the roll against it.
-static func will_buy(business: BusinessInstance, item: ItemData, rng: RandomNumberGenerator) -> bool:
-	return rng.randf() < business.purchase_chance(item)
+static func will_buy(
+	business: BusinessInstance, item: ItemData, rng: RandomNumberGenerator,
+	archetype: StringName = &""
+) -> bool:
+	var chance := business.purchase_chance(item)
+	if archetype != &"":
+		# The same price reads differently to a student and to somebody on an
+		# expense account. A sensitive customer feels the gap from a fair price
+		# more; a comfortable one barely notices it.
+		var shortfall := clampf(1.0 - chance, 0.0, 1.0)
+		chance = clampf(
+			1.0 - shortfall * CustomerArchetype.price_sensitivity(archetype), 0.0, 1.0
+		)
+	return rng.randf() < chance
 
 
 ## How many people an open shop should expect this hour.
@@ -65,7 +77,9 @@ static func will_buy(business: BusinessInstance, item: ItemData, rng: RandomNumb
 ## are earned. Nothing here looks at price — that decides whether the people who
 ## walk in buy anything, which is a different question and lives in
 ## `BusinessInstance.purchase_chance`.
-static func customers_per_hour(business: BusinessInstance, hour: int) -> float:
+static func customers_per_hour(
+	business: BusinessInstance, hour: int, weekday: int = -1
+) -> float:
 	var definition := business.type_data()
 	if definition == null:
 		return 0.0
@@ -74,15 +88,31 @@ static func customers_per_hour(business: BusinessInstance, hour: int) -> float:
 	)
 	return (
 		definition.peak_customers_per_hour
-		* time_of_day_factor(hour)
+		* definition.demand_at_hour(hour)
+		* weekday_factor(definition, weekday)
+		* definition.district_factor(business.district_id())
 		* business.reputation_multiplier()
 		* range_factor(business)
 		* business.location_multiplier()
 		* attraction
+		* business.model().demand_multiplier(business)
 	)
 
 
+## What a Saturday is worth to this kind of business. A nightclub's week is not
+## a coffee shop's week, and neither of them knows that — the type does.
+static func weekday_factor(definition: BusinessTypeData, weekday: int = -1) -> float:
+	if definition == null:
+		return 1.0
+	var day := weekday if weekday >= 0 else TimeManager.weekday
+	return definition.weekend_factor if day >= 5 else 1.0
+
+
 ## Passing trade by hour: quiet overnight, busy at lunch and after work.
+##
+## The fallback curve, used by any business type that does not supply its own
+## twenty-four. Everything written before Phase O relies on it, which is why it
+## is still here and still exactly what it was.
 static func time_of_day_factor(hour: int) -> float:
 	if hour >= 11 and hour <= 13:
 		return 1.0
@@ -102,7 +132,9 @@ static func time_of_day_factor(hour: int) -> float:
 static func range_factor(business: BusinessInstance) -> float:
 	var list := business.catalogue()
 	if list.is_empty():
-		return 0.0
+		# A gym sells the room, not goods. Judging it on an empty shelf would
+		# shut it before it opened.
+		return 1.0
 	var stocked := 0
 	for item in list:
 		if business.available_units(item) > 0:

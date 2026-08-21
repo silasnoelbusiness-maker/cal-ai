@@ -46,6 +46,10 @@ var _furniture_store_panel: FurnitureStorePanel = null
 var _furnishing_panel: FurnishingPanel = null
 var _home_storage_panel: HomeStoragePanel = null
 var _profile_panel: ProfilePanel = null
+## Phase O: the company, one person's week, and one branch's manager.
+var _company_dashboard: CompanyDashboard = null
+var _staff_schedule_panel: StaffSchedulePanel = null
+var _manager_panel: ManagerPanel = null
 var _property_sale_panel: PropertySalePanel = null
 var _real_estate_panel: RealEstatePanel = null
 @onready var _store_panel: PanelContainer = %StorePanel
@@ -351,6 +355,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			_real_estate_panel.open()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("company"):
+		if _company_dashboard.is_open():
+			close_screens()
+		else:
+			close_screens()
+			_company_dashboard.open()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("business_menu"):
 		# One key, and it opens whichever answer the player is standing in front
 		# of: the shop they are inside, or the company as a whole.
@@ -459,6 +471,17 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 				_home_storage_panel.open(cupboard.residence_id)
 		&"profile":
 			_profile_panel.open()
+		&"company":
+			_company_dashboard.open()
+		&"company_staff":
+			_company_dashboard.open(CompanyDashboard.Page.EMPLOYEES)
+		&"manager":
+			var equipment := context as BusinessEquipment
+			var branch := (
+				equipment.business if equipment != null else _business_in_reach()
+			)
+			if branch != null:
+				_manager_panel.open(branch)
 		&"property_sale":
 			_property_sale_panel.open(_property_id_of(context))
 		&"real_estate":
@@ -686,6 +709,12 @@ func _build_phase_m_screens() -> void:
 	_home_storage_panel.name = "HomeStoragePanel"
 	_profile_panel = ProfilePanel.new()
 	_profile_panel.name = "ProfilePanel"
+	_company_dashboard = CompanyDashboard.new()
+	_company_dashboard.name = "CompanyDashboard"
+	_staff_schedule_panel = StaffSchedulePanel.new()
+	_staff_schedule_panel.name = "StaffSchedulePanel"
+	_manager_panel = ManagerPanel.new()
+	_manager_panel.name = "ManagerPanel"
 	_property_sale_panel = PropertySalePanel.new()
 	_property_sale_panel.name = "PropertySalePanel"
 	_real_estate_panel = RealEstatePanel.new()
@@ -699,6 +728,10 @@ func _build_phase_m_screens() -> void:
 	# The stand beside a car offers COMPARE, and comparing is something the
 	# sales desk screen does, so the two hand off rather than stacking.
 	_vehicle_detail_panel.compare_requested.connect(_on_compare_requested)
+	# The company screen hands off to the two screens that edit one thing: a
+	# person's week, and a branch's manager. Same pattern, same reason.
+	_company_dashboard.schedule_requested.connect(_on_schedule_requested)
+	_company_dashboard.manager_requested.connect(_on_manager_requested)
 
 
 func _phase_m_screens() -> Array:
@@ -719,6 +752,16 @@ func _property_id_of(context: Node) -> StringName:
 	if block != null:
 		return block.building_id
 	return &""
+
+
+func _on_schedule_requested(worker: EmployeeData) -> void:
+	_company_dashboard.close()
+	_staff_schedule_panel.open(worker)
+
+
+func _on_manager_requested(business: BusinessInstance) -> void:
+	_company_dashboard.close()
+	_manager_panel.open(business)
 
 
 func _on_compare_requested(_model_id: StringName) -> void:

@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://equipment/equipment_data.gd" id="1_equipment_data"]
+
+[resource]
+script = ExtResource("1_equipment_data")
+equipment_id = &"treadmill"
+display_name = "Treadmill"
+description = "One runner at a time, and always the first thing to fill."
+role = 11
+purchase_price = 920
+placement_size = Vector2(2.0, 0.9)
+height = 1.45
+body_color = Color(0.31, 0.322, 0.353, 1)
+accent_color = Color(0.827, 0.427, 0.302, 1)
+capacity = 0
+business_types_allowed = Array[StringName]([&"gym"])
+customer_slots = 1
+quality_tier = 2
+soiling_per_use = 0.85
+operated_by_role = -1

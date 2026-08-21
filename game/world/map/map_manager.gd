@@ -52,8 +52,20 @@ func _business_markers() -> Array[MapMarker]:
 		var unit := PropertyManager.by_id(business.property_id)
 		if unit == null:
 			continue
+		# One marker kind for every business the player owns, whatever it is:
+		# five icons for five types is exactly the map clutter §115 warns off.
+		# What kind it is goes in the line underneath, where it is useful.
+		var definition := business.type_data()
 		var detail := business.status_text()
-		if business.total_shelf_units() == 0 and not business.serves_prepared_goods():
+		if definition != null:
+			detail = "%s · %s" % [definition.display_name.to_upper(), detail]
+		var brand := CompanyManager.brand_for_business(business)
+		if brand != null and brand.branch_count() > 1:
+			detail += " · %s" % brand.brand_name.to_upper()
+		if business.missing_requirements().has("Ingredients"):
+			detail += " · NO INGREDIENTS"
+		elif business.total_shelf_units() == 0 and not business.serves_prepared_goods() \
+				and not business.catalogue().is_empty() and not business.serves_from_storage():
 			detail += " · LOW STOCK"
 		markers.append(MapMarker.make(
 			MapMarker.Category.OWNED_BUSINESS, business.business_name,

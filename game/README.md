@@ -98,6 +98,7 @@ end never stands between a test and the game.
 | `G` | Rob the till you are stood at |
 | `B` | Open the business dashboard, or the company view outside a shop |
 | `M` | Open the city map |
+| `K` | Open the company: brands, locations, staff, operations, finance |
 | `P` | Open your profile: net worth, vehicles, home, lifestyle |
 | `H` | Open the property portfolio: holdings, mortgages, income |
 | Left mouse | Attack with whatever is in your hand · place equipment · place furniture |
@@ -592,6 +593,115 @@ is counted in net worth alongside cash, vehicles, furniture and business value,
 and the profile screen shows the value and the debt as separate lines so the two
 together are legibly the equity.
 
+## The company
+
+Phase O is where one shop becomes a company. Three new kinds of business arrive,
+and none of them is a shop with a different sign.
+
+### How a business type works
+
+`BusinessTypeData` is still one `.tres` per kind of business, and it now carries
+everything that used to be implicit: which staff roles it needs, what a property
+has to be zoned for, how many people fit inside, a twenty-four-hour demand curve,
+what a weekend is worth to it, which district suits it, who walks through the
+door and whether the place gets dirty.
+
+The one field the rest of the game switches on is `service_model`, and it picks
+an `OperatingModel` — a strategy object with no state of its own, shared by every
+branch of that kind:
+
+| Model | Business | What it is |
+| --- | --- | --- |
+| `RETAIL` | Convenience store | Goods off a shelf, paid for at a till |
+| `COUNTER_SERVICE` | Coffee shop | Made to order, handed over at a counter |
+| `TABLE_SERVICE` | Restaurant | Seated, ordered, cooked, carried, paid |
+| `MEMBERSHIP` | Gym | The customer buys access to the room |
+| `VENUE` | Nightclub | Entry, then drinks, with the night doing the work |
+
+Capacity, throughput, what a visit is worth, why somebody walked out, what is
+holding the place up and which way a customer walks through the building all
+come from the model. `BusinessManager` never asks what kind of business it is
+looking at, and the visible customers on the floor run the same `serve_one` the
+far simulation does — which is what stops a business earning differently
+depending on whether anybody is watching it.
+
+### The restaurant
+
+Six dishes, seven ingredients, and two separate bottlenecks. A cover is seated
+before it is anything else: no free table and they wait a little, then leave, and
+`NO SEATING` is counted against the day. Sitting down puts a ticket in the
+kitchen; a cook takes the oldest one, the ingredients come out of the larder
+*then*, and the plate is only paid for when a server carries it to the table. A
+cook with no server has meals nobody carries. A server with no cook has orders
+nobody makes. Which of the two is short is the thing the dashboard names, and
+buying another table when the kitchen is the problem is the mistake the
+bottleneck report exists to prevent.
+
+Food quality is the cook's skill and the tier of the stove, and nothing else.
+
+### The gym
+
+Machines are the capacity: a treadmill holds one person, a weight rack holds two,
+and the room holds no more than what is in it. Revenue is a membership rather
+than a purchase — walk-ins either sign up or buy a day pass, members pay a
+seventh of the weekly fee every day whether they come in or not, and a dirty or
+overcrowded gym loses them. That is the whole of the recurring-revenue trade: the
+equipment is dear, the income is steady, and the cleaner is the reason it stays
+steady.
+
+### The nightclub
+
+The same room is worthless at three in the afternoon and rammed at midnight, and
+nothing in the code knows that — the type's demand curve does. Security is an
+operating role rather than a fight: without somebody on the door the venue runs
+at 55% of its capacity and the dashboard says why. A DJ is a number that moves
+reputation, satisfaction and how many people are prepared to queue.
+
+### Brands, branches and the company
+
+A `BrandData` is a name several shops trade under. It holds no stock, employs
+nobody and has no till: every one of those stays with the branch, because two
+shops with the same sign still have different people in them. What a brand owns
+is the name, the colour above the door, and a reputation that drifts slowly
+towards the average of its branches — one bad day at one shop does not cost the
+name.
+
+Opening a business in a unit that suits it now offers a choice: a new brand, or
+another branch of one you already run. A branch takes the brand's name and its
+street as its identifier — `SILAS MARKET — CENTRAL` — and keeps its own
+inventory, staff, cash flow, hours and local reputation.
+
+`CompanyManager` sits above `BusinessManager` and owns everything that is true of
+several shops at once. It aggregates, compares and moves people, and it holds no
+money of its own — every figure on the company screen is derived from the
+branches, so there is exactly one place each number lives.
+
+**Company value is not net worth.** Company value is the operating business: the
+branches, plus a premium a chain with a name earns on top of them. Net worth is
+that plus the property, the cars, the furniture and the cash, less what is owed.
+Both are shown, on different screens, and the profile says so in as many words.
+
+### Staff
+
+Eleven roles now — cashier, stocker, barista, manager, cook, server,
+receptionist, cleaner, security, bartender, DJ — and eight skills, of which each
+role is paid for exactly one. A week is a list of `ShiftSlot`s: a day (or every
+day), a pair of clock hours, the job being done and the branch it is done at. A
+shift that runs past midnight belongs to the day it started on, which is how a
+nightclub is staffed.
+
+Overlaps are refused before anything is written, including the same hour at two
+different branches. Transfers move the person rather than copying them: same id,
+same skills, same history, and the old branch stops having them.
+
+### Managers
+
+A manager may open up, restock, reorder, keep the place clean, and nothing else
+unless told. Pricing is on the list and off by default — a manager quietly
+changing what you charge is not automation. Everything they spend comes out of
+one daily allowance, and they never spend past what the branch actually holds,
+whichever of the two is smaller.
+
 ## Layout
 
 ```
@@ -625,6 +735,17 @@ property/     property_manager, commercial_property, residence_property,
               real_estate, property_record, property_listing, mortgage_data,
               tenant_data, multi_unit_building, property_sign
 ui/property/  property_sale_panel, real_estate_panel
+business/     business_manager, business_instance, business_type_data,
+              business_catalogue, supplier_data, purchase_order, loan,
+              marketing_campaign, upgrade_data, brand_data, company_manager,
+              company_debug, company_terminal, kitchen_order
+business/models/  operating_model, counter_service_model, table_service_model,
+              membership_model, venue_model, operating_models, service_result,
+              lost_reason
+employees/    employee_data, employee_ai, shift_slot
+customers/    customer_ai, customer_spawner, customer_demand,
+              customer_archetype, service_queue
+ui/company/   company_dashboard, staff_schedule_panel, manager_panel
 tests/        smoke_test, screenshot
 main.tscn     entry scene
 ```
@@ -962,6 +1083,32 @@ xvfb-run -a godot --rendering-driver opengl3 --path game \
 `screen` is `menu`, `settings` or `load`, `tab` picks a settings tab, and
 `saves=1` plays the world briefly first so the load screen has real slots to
 list rather than photographing an empty one.
+
+Phase O tests the company. That the five business types are five genuinely
+different things and each resolves to its own operating model; that a restaurant
+cannot open without seats, a stove and something in the larder, and can with all
+three; that a cover really is seated, ordered, cooked out of real ingredients,
+carried and paid for — watched, with the cook at the stove and the server at the
+pass, and again as numbers with nobody in the building; that an hour with no cook
+earns nothing and says why; that a full dining room turns people away rather than
+stacking them; that a gym's machines are its ceiling, that its memberships pay
+again the next day without anybody visiting, and that it gets dirty without a
+cleaner and comes back with one; that the same venue takes more at eleven at
+night than at three in the afternoon and that the curve rather than a spawn cheat
+is why; that sending security home shrinks the room and raises a warning; that a
+second shop under one name shares the brand and nothing else; that transferring
+somebody moves them rather than copying them; that a rota clashing with itself or
+with another branch is refused; that two shifts in a day are two shifts and a
+Friday night one runs into Saturday; that a manager stays inside their
+permissions and their allowance; that a deliberate kitchen backlog is named as a
+kitchen backlog; that district and time-of-day demand tilt without deciding; that
+a business left alone keeps trading and that staffing, stock and capacity still
+matter when nobody is watching; that a unit the player owns charges the business
+no rent; that the company's figures are the sum of the branches and that company
+value is not net worth; that a company of five businesses, three brands, weekly
+rotas, manager permissions, cleanliness and milestones survives a save and a load
+exactly once; and that a Phase N save with no company in it loads, keeps every
+business, employee, wage and skill it had, and quietly grows a brand for each.
 
 ## What is next
 

@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"dish_burger"
+display_name = "Burger Meal"
+description = "A burger and what comes with it."
+category = 0
+price = 14
+max_stack = 5
+icon_color = Color(0.741, 0.494, 0.294, 1)
+wholesale_cost = 8
+recommended_price = 14
+demand_weight = 1.25
+consumable = false

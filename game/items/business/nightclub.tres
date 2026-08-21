@@ -1,0 +1,39 @@
+[gd_resource type="Resource" script_class="BusinessTypeData" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://business/business_type_data.gd" id="1_business_type"]
+[ext_resource type="Resource" path="res://items/definitions/venue_soft_drink.tres" id="2_p1"]
+[ext_resource type="Resource" path="res://items/definitions/venue_mocktail.tres" id="3_p2"]
+[ext_resource type="Resource" path="res://items/definitions/venue_premium.tres" id="4_p3"]
+[ext_resource type="Resource" path="res://items/definitions/venue_snacks.tres" id="5_p4"]
+
+[resource]
+script = ExtResource("1_business_type")
+type_id = &"nightclub"
+display_name = "Nightclub"
+description = "Worthless at three in the afternoon. That is the whole business."
+service_model = 4
+required_roles = [12, 13]
+minimum_shelf_units = 0
+required_staff_roles = [9, 8]
+staff_roles_used = [9, 8, 10, 7, 3]
+minimum_floor_area = 140
+property_class = &"large_commercial"
+startup_cost = 14000
+catalogue = [ExtResource("2_p1"), ExtResource("3_p2"), ExtResource("4_p3"), ExtResource("5_p4")]
+supply_category = &"venue_consumables"
+daily_utilities = 150
+default_opening_hour = 20
+default_closing_hour = 3
+base_storage_capacity = 80
+default_entry_fee = 8
+base_customer_capacity = 8
+maximum_customer_capacity = 60
+served_per_staff_hour = 26.0
+peak_customers_per_hour = 20.0
+basket_range = Vector2i(1, 2)
+demand_by_hour = Array[float]([0.9, 0.75, 0.45, 0.15, 0.05, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.05, 0.12, 0.25, 0.5, 0.8, 1.0, 1.0])
+weekend_factor = 1.45
+district_affinity = {&"central": 1.25, &"harbour_row": 0.85}
+archetype_weights = {&"nightlife": 1.5, &"student": 0.7, &"affluent": 0.6}
+uses_cleanliness = true
+soiling_per_hour = 1.4

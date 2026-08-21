@@ -30,6 +30,22 @@ func unit_count() -> int:
 	return total
 
 
+## What is on the lorry, in words. Several lines collapse to a count, because a
+## purchasing list has one row per order and not one per crate.
+func summary() -> String:
+	var names: Array[String] = []
+	for id: StringName in items:
+		var item := ItemCatalogue.by_id(id)
+		names.append("%s x%d" % [
+			item.display_name if item != null else String(id), int(items[id])
+		])
+	if names.is_empty():
+		return "Empty order"
+	if names.size() == 1:
+		return names[0]
+	return "%s +%d more" % [names[0], names.size() - 1]
+
+
 func is_outstanding() -> bool:
 	return status != Status.DELIVERED
 

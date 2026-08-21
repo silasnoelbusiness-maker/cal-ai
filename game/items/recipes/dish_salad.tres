@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="RecipeData" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://items/recipe_data.gd" id="1_recipe"]
+[ext_resource type="Resource" path="res://items/definitions/dish_salad.tres" id="2_product"]
+[ext_resource type="Resource" path="res://items/definitions/kitchen_vegetables.tres" id="3_kitchen_vegetables"]
+[ext_resource type="Resource" path="res://items/definitions/kitchen_sauce.tres" id="4_kitchen_sauce"]
+
+[resource]
+script = ExtResource("1_recipe")
+product = ExtResource("2_product")
+ingredients = [ExtResource("3_kitchen_vegetables"), ExtResource("4_kitchen_sauce")]
+amounts = Array[int]([2, 1])
+preparation_seconds = 80.0

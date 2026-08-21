@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"kitchen_vegetables"
+display_name = "Vegetables"
+description = "Whatever the crate held."
+category = 2
+price = 4
+max_stack = 30
+icon_color = Color(0.451, 0.616, 0.376, 1)
+wholesale_cost = 2
+recommended_price = 4
+demand_weight = 0.0
+consumable = false

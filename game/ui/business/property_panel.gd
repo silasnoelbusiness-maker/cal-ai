@@ -20,6 +20,9 @@ enum Page { LETTING, CREATE }
 var _property: CommercialProperty = null
 var _page: Page = Page.LETTING
 var _name_field: LineEdit = null
+## What is being opened here, and under whose name. Null brand means a new one.
+var _chosen_type: StringName = &""
+var _chosen_brand: BrandData = null
 
 
 func _ready() -> void:
@@ -102,26 +105,69 @@ func _build_create() -> void:
 	_title.text = "CREATE BUSINESS"
 	_subtitle.text = _property.address
 
+	# What this unit is zoned for decides what may open in it. A nightclub does
+	# not go in a corner shop, and the player is told that here rather than
+	# refused after they have typed a name.
+	var allowed := _property.allowed_business_types()
+	if allowed.is_empty():
+		_rows.add_child(BusinessUIKit.label(
+			"Nothing you can open trades from a unit like this one.",
+			14, BusinessUIKit.BAD
+		))
+		var back := BusinessUIKit.button("CLOSE", 120.0)
+		back.pressed.connect(func() -> void: GameManager.close_menus())
+		_actions.add_child(back)
+		return
+	if _chosen_type == &"" or not _type_allowed(allowed, _chosen_type):
+		_chosen_type = allowed[0].type_id
+		_chosen_brand = null
+
+	_rows.add_child(BusinessUIKit.heading("Business type"))
+	for definition in allowed:
+		var pick := BusinessUIKit.button(
+			"OPEN" if definition.type_id != _chosen_type else "CHOSEN", 100.0
+		)
+		pick.disabled = definition.type_id == _chosen_type
+		var id := definition.type_id
+		pick.pressed.connect(func() -> void:
+			_chosen_type = id
+			_chosen_brand = null
+			_rebuild()
+		)
+		_rows.add_child(BusinessUIKit.row([
+			BusinessUIKit.stretch_label(definition.display_name.to_upper(), 15),
+			BusinessUIKit.value_label(
+				"needs %s" % BusinessUIKit.money(definition.startup_cost),
+				13, BusinessUIKit.MUTED
+			),
+			pick,
+		]))
+		_rows.add_child(BusinessUIKit.label(
+			definition.description, 12, BusinessUIKit.MUTED
+		))
+
+	var chosen := BusinessCatalogue.by_id(_chosen_type)
+	_build_brand_choice(chosen)
+
 	var name_row := HBoxContainer.new()
 	name_row.add_theme_constant_override("separation", 10)
-	name_row.add_child(BusinessUIKit.label("Business name", 14, BusinessUIKit.MUTED))
+	name_row.add_child(BusinessUIKit.label(
+		"Business name" if _chosen_brand == null else "Trading as",
+		14, BusinessUIKit.MUTED
+	))
 	_name_field = LineEdit.new()
-	_name_field.text = "Silas Market"
-	_name_field.custom_minimum_size = Vector2(260, 32)
+	_name_field.text = (
+		_chosen_brand.branch_name(_property.address) if _chosen_brand != null
+		else _default_name(chosen)
+	)
+	_name_field.editable = _chosen_brand == null
+	_name_field.custom_minimum_size = Vector2(300, 32)
 	_name_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_row.add_child(_name_field)
 	_rows.add_child(name_row)
 
-	# One type today. The list is the extension point, so it is built from the
-	# catalogue rather than hard-coded to it.
-	_rows.add_child(BusinessUIKit.heading("Business type"))
-	for definition in BusinessCatalogue.TYPES:
-		_rows.add_child(BusinessUIKit.row([
-			BusinessUIKit.stretch_label(definition.display_name.to_upper(), 15),
-			BusinessUIKit.label(definition.description, 12, BusinessUIKit.MUTED),
-		]))
-
 	var create := BusinessUIKit.button("CREATE BUSINESS", 190.0)
+	create.disabled = chosen != null and not EconomyManager.can_afford(chosen.startup_cost)
 	create.pressed.connect(_on_create_pressed)
 	_actions.add_child(create)
 
@@ -129,8 +175,75 @@ func _build_create() -> void:
 	cancel.pressed.connect(func() -> void: GameManager.close_menus())
 	_actions.add_child(cancel)
 
+	if create.disabled and chosen != null:
+		_status.text = "A %s needs %s behind it before you open the doors." % [
+			chosen.display_name.to_lower(), BusinessUIKit.money(chosen.startup_cost)
+		]
+		_status.add_theme_color_override("font_color", BusinessUIKit.BAD)
+		return
 	_status.text = "Creating a business costs nothing. You fund it yourself afterwards."
 	_status.add_theme_color_override("font_color", BusinessUIKit.MUTED)
+
+
+## Whether an existing chain of this kind can take another branch, and which.
+func _build_brand_choice(definition: BusinessTypeData) -> void:
+	if definition == null:
+		return
+	var options := CompanyManager.brands_of_type(definition.type_id)
+	if options.is_empty():
+		return
+	_rows.add_child(BusinessUIKit.heading("Under which name"))
+
+	var fresh := BusinessUIKit.button(
+		"CHOSEN" if _chosen_brand == null else "NEW BRAND", 130.0
+	)
+	fresh.disabled = _chosen_brand == null
+	fresh.pressed.connect(func() -> void:
+		_chosen_brand = null
+		_rebuild()
+	)
+	_rows.add_child(BusinessUIKit.row([
+		BusinessUIKit.stretch_label("A new brand", 15),
+		BusinessUIKit.value_label("its own name and reputation", 12, BusinessUIKit.MUTED),
+		fresh,
+	]))
+
+	for brand in options:
+		var join := BusinessUIKit.button(
+			"CHOSEN" if _chosen_brand == brand else "BRANCH OF", 130.0
+		)
+		join.disabled = _chosen_brand == brand
+		var picked := brand
+		join.pressed.connect(func() -> void:
+			_chosen_brand = picked
+			_rebuild()
+		)
+		var swatch := ColorRect.new()
+		swatch.color = brand.brand_color
+		swatch.custom_minimum_size = Vector2(14, 14)
+		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		_rows.add_child(BusinessUIKit.row([
+			swatch,
+			BusinessUIKit.stretch_label(brand.brand_name, 15),
+			BusinessUIKit.value_label(
+				"%d branch%s  ·  reputation %d" % [
+					brand.branch_count(), "" if brand.branch_count() == 1 else "es",
+					roundi(brand.brand_reputation)
+				], 12, BusinessUIKit.MUTED
+			),
+			join,
+		]))
+
+
+func _type_allowed(allowed: Array[BusinessTypeData], type_id: StringName) -> bool:
+	for definition in allowed:
+		if definition.type_id == type_id:
+			return true
+	return false
+
+
+func _default_name(definition: BusinessTypeData) -> String:
+	return definition.display_name if definition != null else "Business"
 
 
 func _add_row(name: String, value: String, emphasis: bool = false) -> void:
@@ -159,8 +272,17 @@ func _on_rent_pressed() -> void:
 
 
 func _on_create_pressed() -> void:
-	var business := BusinessManager.create_business(
-		_name_field.text if _name_field != null else "", BusinessCatalogue.first().type_id, _property
+	var definition := BusinessCatalogue.by_id(_chosen_type)
+	if definition == null:
+		return
+	if not EconomyManager.can_afford(definition.startup_cost):
+		_status.text = "You need %s to open a %s." % [
+			BusinessUIKit.money(definition.startup_cost), definition.display_name.to_lower()
+		]
+		_status.add_theme_color_override("font_color", BusinessUIKit.BAD)
+		return
+	var business := CompanyManager.found_business(
+		_name_field.text if _name_field != null else "", _chosen_type, _property, _chosen_brand
 	)
 	if business == null:
 		_status.text = "Could not create the business."

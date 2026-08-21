@@ -40,6 +40,18 @@ var opening_hour: int = 8
 var closing_hour: int = 20
 var manual_override: Override = Override.NONE
 var reputation: float = 50.0
+## 0-100, and only meaningful on a type that says it uses it. A shop does not
+## get dirty in any way the player has to manage; a kitchen and a gym do.
+var cleanliness: float = 100.0
+## The brand this branch trades under, if any. Empty means an independent.
+var brand_id: StringName = &""
+
+## What the player charges for access, on a type that sells it.
+var membership_price: int = 40
+var day_pass_price: int = 9
+var entry_fee: int = 0
+## People currently paying a subscription here.
+var members: int = 0
 
 var storage: Dictionary = {}
 var prices: Dictionary = {}
@@ -60,6 +72,20 @@ var auto_order_budget: int = 500
 ## Reorder when the store room falls below this, up to this.
 var auto_order_minimum: int = 15
 var auto_order_target: int = 45
+## What else the manager is allowed to do. The three switches above predate
+## Phase O and stay where they are; these are the ones a restaurant, a gym and
+## a venue needed. Pricing is in the list and off by default on purpose — a
+## manager quietly changing what the player charges is not automation, it is
+## losing control of your own business.
+var manager_permissions: Dictionary = {
+	&"manage_cleanliness": true,
+	&"staff_positioning": true,
+	&"adjust_pricing": false,
+}
+## Cleanliness the manager works to keep the place above, when allowed.
+var cleanliness_target: int = 70
+## Spent by the manager today, against auto_order_budget. Reset with the day.
+var manager_spent_today: int = 0
 
 var revenue_today: int = 0
 var inventory_spend_today: int = 0
@@ -81,6 +107,14 @@ var wages_owed: int = 0
 var cogs_today: int = 0
 var customer_count_today: int = 0
 var lost_sales_today: int = 0
+## Lost sales broken down by LostReason, so "we lost fourteen" becomes "we lost
+## fourteen for want of a table" and the player knows what to buy.
+var lost_reasons_today: Dictionary = {}
+## Rolling samples of how hard each role and each fitting was worked today,
+## kept as [total, count] so an average survives an hour with no trade.
+var role_load_today: Dictionary = {}
+var equipment_load_today: Dictionary = {}
+var service_revenue_today: int = 0
 var units_sold_today: int = 0
 
 var lifetime_revenue: int = 0
@@ -96,9 +130,25 @@ var _ledger: Array[Dictionary] = []
 var _next_slot: int = 1
 var _open: bool = false
 var _low_stock_warned: Dictionary = {}
+## Tickets the kitchen is working through. Transient on purpose: a reload
+## clears the floor and the kitchen with it, and nothing about the business's
+## money, stock or staff depends on an order that was half cooked.
+var kitchen: Array[KitchenOrder] = []
+var _next_order_id: int = 1
 
 
 # --- Identity ------------------------------------------------------------
+
+## How this business trades, as a strategy object. Everything a restaurant does
+## differently from a shop is on the far side of this call.
+func model() -> OperatingModel:
+	return OperatingModels.for_business(self)
+
+
+func district_id() -> StringName:
+	var unit := property()
+	return unit.district_id if unit != null else &"harbour_row"
+
 
 func type_data() -> BusinessTypeData:
 	return BusinessCatalogue.by_id(type_id)
@@ -118,6 +168,12 @@ func sells(item: ItemData) -> bool:
 func orderable() -> Array[ItemData]:
 	var definition := type_data()
 	return definition.orderable() if definition != null else [] as Array[ItemData]
+
+
+## Whether staff fetch the goods rather than customers taking them off a shelf.
+## True of a bar, false of a shop.
+func serves_from_storage() -> bool:
+	return model().serves_from_storage()
 
 
 func serves_prepared_goods() -> bool:
@@ -140,7 +196,10 @@ func available_units(item: ItemData) -> int:
 		return 0
 	var recipe := recipe_for(item)
 	if recipe == null:
-		return shelf_stock_of(item.id)
+		# Goods a customer picks up themselves come off a shelf; goods handed
+		# across a bar come out of the cellar. Which of the two this is belongs
+		# to the operating model, not to the item.
+		return storage_of(item.id) if serves_from_storage() else shelf_stock_of(item.id)
 
 	var possible := 999
 	for i in recipe.ingredients.size():
@@ -159,6 +218,8 @@ func take_for_sale(item: ItemData, quantity: int) -> int:
 		return 0
 	var recipe := recipe_for(item)
 	if recipe == null:
+		if serves_from_storage():
+			return take_storage(item.id, quantity)
 		return take_from_shelves(item.id, quantity)
 
 	var possible := mini(quantity, available_units(item))
@@ -487,6 +548,11 @@ func missing_requirements() -> Array[String]:
 		if count_of_role(int(role)) <= 0:
 			var label := String(EquipmentData.Role.keys()[int(role)]).capitalize()
 			missing.append(label)
+	# Whatever this kind of business needs that no equipment role describes —
+	# seats in a restaurant, somewhere to stand in a venue.
+	for line in model().extra_requirements(self):
+		if not missing.has(line):
+			missing.append(line)
 
 	# What "having stock" means depends on the business. A shop needs goods on a
 	# shelf where somebody can pick them up; a kitchen needs enough in the back
@@ -586,6 +652,28 @@ func rostered(role: int, hour: int) -> EmployeeData:
 	return null
 
 
+## Everybody in that job at this hour. Two cooks are twice a kitchen, and
+## Phase O is the point at which that started to matter.
+func rostered_all(role: int, hour: int) -> Array[EmployeeData]:
+	var found: Array[EmployeeData] = []
+	for worker in employees:
+		if worker.role == role and worker.is_on_shift(hour):
+			found.append(worker)
+	return found
+
+
+## Staff roles the type says it needs, that nobody is covering right now.
+func unstaffed_roles(hour: int) -> Array[int]:
+	var definition := type_data()
+	if definition == null:
+		return []
+	var missing: Array[int] = []
+	for role in definition.required_staff_roles:
+		if rostered(int(role), hour) == null:
+			missing.append(int(role))
+	return missing
+
+
 ## Whoever is serving customers at this hour.
 ##
 ## A coffee shop's barista takes the order as well as making it — one person
@@ -649,14 +737,205 @@ func record_sale(item: ItemData, quantity: int) -> int:
 	return revenue
 
 
+## Money taken for something that is not an item off a list: a membership, a
+## day pass, a fee at the door. Goes through the same ledger and the same
+## day's figures as a sale, because to the books it is one.
+func record_service_sale(amount: int, reason: String, units: int = 0) -> int:
+	if amount <= 0:
+		return 0
+	service_revenue_today += amount
+	units_sold_today += units
+	lifetime_units_sold += units
+	credit(amount, reason, &"revenue")
+	changed.emit()
+	return amount
+
+
+# --- The kitchen ---------------------------------------------------------
+
+## Puts a ticket in. Nothing is taken from the store and nothing is charged
+## for until a cook picks it up.
+func place_order(who: Object, dish: ItemData, at: float) -> KitchenOrder:
+	if dish == null:
+		return null
+	var order := KitchenOrder.make(_next_order_id, who, dish, at)
+	_next_order_id += 1
+	kitchen.append(order)
+	changed.emit()
+	return order
+
+
+func open_orders() -> Array[KitchenOrder]:
+	var found: Array[KitchenOrder] = []
+	for order in kitchen:
+		if order.is_open():
+			found.append(order)
+	return found
+
+
+func orders_waiting() -> int:
+	var count := 0
+	for order in kitchen:
+		if order.stage == KitchenOrder.Stage.WAITING:
+			count += 1
+	return count
+
+
+## The oldest ticket nobody has started. First in, first cooked.
+func next_unstarted_order() -> KitchenOrder:
+	for order in kitchen:
+		if order.stage == KitchenOrder.Stage.WAITING:
+			return order
+	return null
+
+
+func next_ready_order() -> KitchenOrder:
+	for order in kitchen:
+		if order.stage == KitchenOrder.Stage.READY:
+			return order
+	return null
+
+
+## Forgets everything settled or walked out on, so the list stays the kitchen
+## rather than the day's history.
+func tidy_kitchen() -> void:
+	for i in range(kitchen.size() - 1, -1, -1):
+		var order := kitchen[i]
+		if order.stage == KitchenOrder.Stage.DELIVERED or order.stage == KitchenOrder.Stage.ABANDONED:
+			kitchen.remove_at(i)
+
+
+func clear_kitchen() -> void:
+	kitchen.clear()
+
+
+## Takes the ingredients for one order out of the store without charging for
+## it. The money follows when the plate reaches the table, which is the whole
+## reason a restaurant sale is two steps and a shop sale is one.
+func reserve_for_order(item: ItemData, quantity: int = 1) -> int:
+	if item == null or quantity <= 0:
+		return 0
+	var taken := take_for_sale(item, quantity)
+	if taken > 0:
+		cogs_today += cost_basis(item) * taken
+	return taken
+
+
+## The plate is on the table and paid for. The stock went when it was cooked.
+func record_prepared_sale(item: ItemData, quantity: int) -> int:
+	if item == null or quantity <= 0:
+		return 0
+	var revenue := price_of(item) * quantity
+	units_sold_today += quantity
+	lifetime_units_sold += quantity
+	credit(revenue, "%s x%d" % [item.display_name, quantity], &"revenue")
+	sale_made.emit(item, quantity, revenue)
+	return revenue
+
+
 func record_customer_visit() -> void:
 	customer_count_today += 1
 	changed.emit()
 
 
-func record_lost_sale() -> void:
+func record_lost_sale(reason: StringName = &"") -> void:
 	lost_sales_today += 1
+	if reason != &"":
+		lost_reasons_today[reason] = int(lost_reasons_today.get(reason, 0)) + 1
 	changed.emit()
+
+
+## The day's lost customers, worst reason first.
+func lost_reason_breakdown() -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	for reason: StringName in lost_reasons_today:
+		rows.append({
+			"reason": reason,
+			"label": LostReason.label(reason),
+			"count": int(lost_reasons_today[reason]),
+		})
+	rows.sort_custom(func(a, b): return int(a["count"]) > int(b["count"]))
+	return rows
+
+
+# --- The manager ---------------------------------------------------------
+
+func may(permission: StringName) -> bool:
+	return bool(manager_permissions.get(permission, false))
+
+
+func set_permission(permission: StringName, allowed: bool) -> void:
+	manager_permissions[permission] = allowed
+	changed.emit()
+
+
+## What is left of today's allowance. A manager may never spend past it, and
+## never past what the business actually holds — the tighter of the two wins,
+## which is why this is one number rather than two checks at the call site.
+func manager_budget_left() -> int:
+	return maxi(mini(auto_order_budget - manager_spent_today, cash_balance), 0)
+
+
+func note_manager_spend(amount: int) -> void:
+	manager_spent_today += maxi(amount, 0)
+
+
+# --- Cleanliness ---------------------------------------------------------
+
+func uses_cleanliness() -> bool:
+	var definition := type_data()
+	return definition != null and definition.uses_cleanliness
+
+
+## Dirt. Silently ignored on a type that does not model it, so the caller never
+## has to ask first.
+func soil(amount: float) -> void:
+	if amount <= 0.0 or not uses_cleanliness():
+		return
+	cleanliness = clampf(cleanliness - amount, 0.0, 100.0)
+
+
+func clean(amount: float) -> void:
+	if amount <= 0.0:
+		return
+	cleanliness = clampf(cleanliness + amount, 0.0, 100.0)
+
+
+func cleanliness_label() -> String:
+	if not uses_cleanliness():
+		return "n/a"
+	if cleanliness >= 85.0:
+		return "Spotless"
+	if cleanliness >= 65.0:
+		return "Clean"
+	if cleanliness >= 45.0:
+		return "Tired"
+	if cleanliness >= 25.0:
+		return "Dirty"
+	return "Filthy"
+
+
+# --- Load ----------------------------------------------------------------
+
+## Notes how hard something was worked this hour. Averages rather than the last
+## reading, so a quiet hour does not wipe out a busy morning.
+func note_load(store: Dictionary, key: Variant, value: float) -> void:
+	var entry: Array = store.get(key, [0.0, 0])
+	store[key] = [float(entry[0]) + clampf(value, 0.0, 1.0), int(entry[1]) + 1]
+
+
+func note_role_load(role: int, value: float) -> void:
+	note_load(role_load_today, role, value)
+
+
+func note_equipment_load(id: StringName, value: float) -> void:
+	note_load(equipment_load_today, id, value)
+
+
+static func average_load(store: Dictionary, key: Variant) -> float:
+	var entry: Array = store.get(key, [0.0, 0])
+	var count := int(entry[1])
+	return float(entry[0]) / float(count) if count > 0 else 0.0
 
 
 # --- Upgrades ------------------------------------------------------------
@@ -901,6 +1180,10 @@ func end_day(day_index: int) -> Dictionary:
 		"gross_margin": revenue_today - cogs_today,
 		"units_sold": units_sold_today,
 		"lost_sales": lost_sales_today,
+		"lost_reasons": lost_reasons_today.duplicate(),
+		"service_revenue": service_revenue_today,
+		"members": members,
+		"cleanliness": roundi(cleanliness),
 		"reputation": roundi(reputation),
 		"cash": cash_balance,
 		"value": estimated_value(),
@@ -926,6 +1209,11 @@ func end_day(day_index: int) -> Dictionary:
 	customer_count_today = 0
 	lost_sales_today = 0
 	units_sold_today = 0
+	service_revenue_today = 0
+	manager_spent_today = 0
+	lost_reasons_today.clear()
+	role_load_today.clear()
+	equipment_load_today.clear()
 	for worker in employees:
 		worker.hours_worked_today = 0.0
 		worker.customers_served_today = 0
@@ -1026,6 +1314,8 @@ func to_dict() -> Dictionary:
 		"auto_order_budget": auto_order_budget,
 		"auto_order_minimum": auto_order_minimum,
 		"auto_order_target": auto_order_target,
+		"manager_permissions": manager_permissions.duplicate(),
+		"cleanliness_target": cleanliness_target,
 		"wages_owed": wages_owed,
 		"lifetime_interest_paid": lifetime_interest_paid,
 		"recent_reports": recent_reports,
@@ -1033,6 +1323,12 @@ func to_dict() -> Dictionary:
 		"closing_hour": closing_hour,
 		"override": int(manual_override),
 		"reputation": reputation,
+		"cleanliness": cleanliness,
+		"brand": String(brand_id),
+		"membership_price": membership_price,
+		"day_pass_price": day_pass_price,
+		"entry_fee": entry_fee,
+		"members": members,
 		"storage": stored,
 		"prices": priced,
 		"equipment": placed_equipment,
@@ -1054,6 +1350,8 @@ func to_dict() -> Dictionary:
 		"loans_today": loan_payments_today,
 		"customers_today": customer_count_today,
 		"lost_sales_today": lost_sales_today,
+		"lost_reasons_today": lost_reasons_today.duplicate(),
+		"service_revenue_today": service_revenue_today,
 		"units_today": units_sold_today,
 		"last_report": last_report,
 	}
@@ -1071,6 +1369,15 @@ static func from_dict(state: Dictionary) -> BusinessInstance:
 	business.closing_hour = int(state.get("closing_hour", 20))
 	business.manual_override = int(state.get("override", 0)) as Override
 	business.reputation = float(state.get("reputation", 50.0))
+	# A save written before cleanliness existed describes a business nobody had
+	# to clean, so it loads spotless rather than filthy. §123 is about not
+	# resetting a business that *does* track it, and it does not.
+	business.cleanliness = clampf(float(state.get("cleanliness", 100.0)), 0.0, 100.0)
+	business.brand_id = StringName(state.get("brand", ""))
+	business.membership_price = int(state.get("membership_price", 40))
+	business.day_pass_price = int(state.get("day_pass_price", 9))
+	business.entry_fee = int(state.get("entry_fee", 0))
+	business.members = int(state.get("members", 0))
 	business.founded_on_day = int(state.get("founded_on_day", 0))
 	business._next_slot = int(state.get("next_slot", 1))
 
@@ -1098,6 +1405,9 @@ static func from_dict(state: Dictionary) -> BusinessInstance:
 	business.cogs_today = int(state.get("cogs_today", 0))
 	business.customer_count_today = int(state.get("customers_today", 0))
 	business.lost_sales_today = int(state.get("lost_sales_today", 0))
+	for key in state.get("lost_reasons_today", {}):
+		business.lost_reasons_today[StringName(key)] = int(state["lost_reasons_today"][key])
+	business.service_revenue_today = int(state.get("service_revenue_today", 0))
 	business.units_sold_today = int(state.get("units_today", 0))
 	business.last_report = state.get("last_report", {})
 
@@ -1120,6 +1430,9 @@ static func from_dict(state: Dictionary) -> BusinessInstance:
 	business.auto_order_budget = int(state.get("auto_order_budget", 500))
 	business.auto_order_minimum = int(state.get("auto_order_minimum", 15))
 	business.auto_order_target = int(state.get("auto_order_target", 45))
+	for key in state.get("manager_permissions", {}):
+		business.manager_permissions[StringName(key)] = bool(state["manager_permissions"][key])
+	business.cleanliness_target = int(state.get("cleanliness_target", 70))
 	business.wages_owed = int(state.get("wages_owed", 0))
 	business.lifetime_interest_paid = int(state.get("lifetime_interest_paid", 0))
 	return business

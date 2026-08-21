@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"dish_breakfast"
+display_name = "Breakfast Plate"
+description = "The one people queue for at nine."
+category = 0
+price = 11
+max_stack = 5
+icon_color = Color(0.796, 0.616, 0.404, 1)
+wholesale_cost = 6
+recommended_price = 11
+demand_weight = 0.9
+consumable = false

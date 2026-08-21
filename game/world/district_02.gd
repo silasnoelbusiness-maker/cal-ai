@@ -782,6 +782,14 @@ func _venue_table() -> Array:
 			"KingstonRoadUnit", Vector3(-30.0, 1.2, -224.6), Vector3.BACK,
 			"View Property", "property", "unit_kingston_40",
 		],
+		[
+			"VaultStreetUnit", Vector3(74.0, 1.2, -279.6), Vector3.BACK,
+			"View Property", "property", "unit_vault_03",
+		],
+		[
+			"ExchangeCourtOffice", Vector3(-88.0, 1.2, -224.6), Vector3.BACK,
+			"View Office", "property", "office_exchange_11",
+		],
 		# NPC-run places, so the district reads as occupied rather than as a set
 		# of empty units waiting for the player.
 		[
@@ -898,9 +906,36 @@ func _make_commercial_property(
 			unit.customer_capacity = 7
 			unit.queue_capacity = 4
 			unit.location_demand_modifier = 1.05
+		&"unit_vault_03":
+			# A basement off Vault Street. No windows, one door, and the only
+			# licence in Central that runs past midnight.
+			unit.address = "3 Vault Street"
+			unit.property_type = "Large Commercial"
+			unit.size_class = CommercialProperty.SizeClass.LARGE
+			unit.floor_area = 168
+			unit.rent_amount = 3200
+			unit.deposit = 2600
+			unit.customer_capacity = 40
+			unit.queue_capacity = 10
+			unit.location_demand_modifier = 1.3
+			unit.business_classes = [&"large_commercial"]
+		&"office_exchange_11":
+			# Two rooms above the Exchange. Not a business — somewhere to run
+			# the ones you already have from.
+			unit.address = "11 Exchange Court"
+			unit.property_type = "Office"
+			unit.size_class = CommercialProperty.SizeClass.SMALL
+			unit.floor_area = 38
+			unit.rent_amount = 700
+			unit.deposit = 600
+			unit.customer_capacity = 4
+			unit.queue_capacity = 2
+			unit.location_demand_modifier = 1.0
+			unit.business_classes = [&"office"]
 		&"unit_plaza_03":
 			unit.address = "3 Central Plaza"
 			unit.property_type = "Premium Retail"
+			unit.business_classes = [&"retail", &"food_service"]
 			unit.size_class = CommercialProperty.SizeClass.MEDIUM
 			unit.floor_area = 88
 			unit.rent_amount = 2400
@@ -911,6 +946,9 @@ func _make_commercial_property(
 		_:
 			unit.address = "40 Kingston Road"
 			unit.property_type = "Food Service Unit"
+			# It has always been called a food service unit. Phase O is where
+			# that started to mean something.
+			unit.business_classes = [&"retail", &"food_service"]
 			unit.size_class = CommercialProperty.SizeClass.SMALL
 			unit.floor_area = 54
 			unit.rent_amount = 1100

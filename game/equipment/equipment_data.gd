@@ -11,7 +11,18 @@ extends Resource
 ## than the id, so two different shelves are both SHELF.
 ## Appended to rather than reordered: the saved .tres files store these as
 ## numbers, and renumbering them would quietly turn every shelf into a counter.
-enum Role { SHELF, CHECKOUT, STORAGE, FITTING, BREW }
+enum Role {
+	SHELF, CHECKOUT, STORAGE, FITTING, BREW,
+	SEATING, COOK_STATION, PREP, COLD_STORE, PASS,
+	RECEPTION, MACHINE, BAR, DANCE_FLOOR, DJ_BOOTH,
+	SECURITY_POST, LIGHTING, CLEANING, DESK,
+}
+
+## Roles that seat or hold customers rather than goods. What a business can
+## take through its doors at once is the sum of these.
+const CUSTOMER_ROLES: Array[int] = [
+	Role.SEATING, Role.MACHINE, Role.DANCE_FLOOR,
+]
 
 @export var equipment_id: StringName = &""
 @export var display_name: String = "Equipment"
@@ -33,6 +44,21 @@ enum Role { SHELF, CHECKOUT, STORAGE, FITTING, BREW }
 @export var capacity: int = 0
 ## Business type ids allowed to buy this. Empty means any.
 @export var business_types_allowed: Array[StringName] = []
+## Customers this one piece holds at once: seats round a table, stations on a
+## machine, bodies on a stretch of dance floor. Zero for anything that serves
+## nobody directly.
+@export var customer_slots: int = 0
+## 1-3. A dearer machine is not faster, it is nicer to be in the room with, so
+## the tier feeds satisfaction and prestige rather than throughput.
+@export var quality_tier: int = 1
+## Points of cleanliness this costs per customer that uses it. Kitchens and gym
+## machines make a mess; a shelf does not.
+@export var soiling_per_use: float = 0.0
+
+@export_group("Operating")
+## Staff role that has to be on shift for this to do anything, or -1 for a
+## piece that works by standing there.
+@export var operated_by_role: int = -1
 
 
 func allows(business_type: StringName) -> bool:
@@ -54,4 +80,20 @@ func is_storage() -> bool:
 ## A workstation where a prepared product is made — the coffee machine, and
 ## whatever a later business type cooks on.
 func is_workstation() -> bool:
-	return role == Role.BREW
+	return role == Role.BREW or role == Role.COOK_STATION
+
+
+## Whether customers occupy this rather than take goods off it.
+func holds_customers() -> bool:
+	return customer_slots > 0 and CUSTOMER_ROLES.has(role)
+
+
+## A tier as the shop floor says it.
+func quality_label() -> String:
+	match clampi(quality_tier, 1, 3):
+		3:
+			return "Premium"
+		2:
+			return "Commercial"
+		_:
+			return "Basic"

@@ -13,7 +13,7 @@ extends Node
 
 signal state_changed(state: State)
 
-enum State { NONE, MENU, DAY, NIGHT, WANTED }
+enum State { NONE, MENU, DAY, NIGHT, WANTED, VENUE }
 
 ## Track per state. Empty means silence, which is the current shipping answer
 ## for everything except the menu — and the menu's is the ambience bed rather
@@ -24,6 +24,12 @@ const TRACKS := {
 	State.DAY: &"",
 	State.NIGHT: &"",
 	State.WANTED: &"",
+	# A nightclub is the one room in the game that would obviously have music
+	# in it, and there is no original track to put there. Rather than reach for
+	# one that is not ours (§110), the state exists and plays nothing: the
+	# venue's pulse comes from its ambience bed, and the day a licensed track
+	# is written this is the one line that changes.
+	State.VENUE: &"",
 }
 
 const FADE := 2.0
@@ -75,6 +81,9 @@ func set_state(state: State) -> void:
 func refresh_world_state() -> void:
 	if WantedManager.is_wanted():
 		set_state(State.WANTED)
+		return
+	if AmbienceDirector.current_space() == AmbienceDirector.Space.VENUE:
+		set_state(State.VENUE)
 		return
 	set_state(
 		State.NIGHT if TimeManager.get_phase() == TimeManager.Phase.NIGHT else State.DAY

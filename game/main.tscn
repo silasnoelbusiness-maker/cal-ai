@@ -80,6 +80,24 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 1800)
 property_id = &"unit_kingston_40"
 unit_name = "40 Kingston Road"
 
+[node name="DockRoadUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 2400)
+property_id = &"unit_dock_09"
+unit_name = "9 Dock Road"
+size_class = 2
+
+[node name="VaultStreetUnit" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 2600)
+property_id = &"unit_vault_03"
+unit_name = "3 Vault Street"
+size_class = 2
+
+[node name="ExchangeCourtOffice" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 2800)
+property_id = &"office_exchange_11"
+unit_name = "11 Exchange Court"
+interior_style = &"office"
+
 [node name="MeridianApartment" parent="Interiors" instance=ExtResource("6_apartment")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 2000)
 residence_id = &"meridian"

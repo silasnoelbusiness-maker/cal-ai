@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"venue_mocktail"
+display_name = "House Mocktail"
+description = "The one with the garnish."
+category = 1
+price = 9
+max_stack = 30
+icon_color = Color(0.769, 0.435, 0.522, 1)
+wholesale_cost = 3
+recommended_price = 9
+demand_weight = 1.0
+consumable = false

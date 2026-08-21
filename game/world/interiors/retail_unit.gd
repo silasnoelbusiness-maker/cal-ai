@@ -16,7 +16,8 @@ signal player_exited()
 
 ## How big the unit is. Bigger rooms hold more equipment and more customers, and
 ## are what a dearer lease buys.
-enum Size { SMALL, MEDIUM }
+## LARGE arrived with Phase O: a gym and a venue need a room a shop does not.
+enum Size { SMALL, MEDIUM, LARGE }
 
 const WALL_HEIGHT := 3.2
 const WALL_THICKNESS := 0.3
@@ -29,6 +30,9 @@ const PARTITION_INSET := 3.6
 @export var property_id: StringName = &"unit_a"
 @export var unit_name: String = "Retail Unit"
 @export var size_class: Size = Size.SMALL
+## Forces a dressing on a unit that will never hold a business — the company
+## office. Empty means "whatever trades here", which is every other unit.
+@export var interior_style: StringName = &""
 
 ## The room, derived from the size class in _ready. Everything that used to be a
 ## constant is now per-instance, because two units of different sizes share this
@@ -58,7 +62,11 @@ var _player_inside: bool = false
 ## built, so the geometry, the placement bounds and the walkable test can never
 ## disagree about how big the unit is.
 func _measure_room() -> void:
-	var size := Vector2(14.0, 12.0) if size_class == Size.SMALL else Vector2(18.0, 15.0)
+	var size := Vector2(18.0, 15.0)
+	if size_class == Size.SMALL:
+		size = Vector2(14.0, 12.0)
+	elif size_class == Size.LARGE:
+		size = Vector2(24.0, 20.0)
 	room = Rect2(-size.x * 0.5, -size.y * 0.5, size.x, size.y)
 	partition_z = room.position.y + PARTITION_INSET
 	partition_gap = Vector2(room.end.x - 5.1, room.end.x - 2.6)
@@ -268,6 +276,24 @@ func equipment_nodes() -> Array[BusinessEquipment]:
 	return found
 
 
+## The first piece of a given kind on the floor, or null. The one lookup every
+## new role and every new customer route needs, and the reason none of them
+## have to know what a business is fitted with.
+func first_of_role(role: int) -> BusinessEquipment:
+	for node in equipment_nodes():
+		if node.is_role(role):
+			return node
+	return null
+
+
+func nodes_of_role(role: int) -> Array[BusinessEquipment]:
+	var found: Array[BusinessEquipment] = []
+	for node in equipment_nodes():
+		if node.is_role(role):
+			found.append(node)
+	return found
+
+
 func first_checkout() -> BusinessEquipment:
 	for node in equipment_nodes():
 		if node.is_checkout():
@@ -309,6 +335,23 @@ func _on_minute_passed(_hour: int, _minute: int) -> void:
 		_refresh_staff()
 
 
+## One node per job. A room only ever grows the jobs its business has, because
+## a role nobody is rostered in never spawns anybody.
+const STAFF_NODES := {
+	"Cashier": EmployeeData.Role.CASHIER,
+	"Barista": EmployeeData.Role.BARISTA,
+	"Stocker": EmployeeData.Role.STOCKER,
+	"Manager": EmployeeData.Role.MANAGER,
+	"Cook": EmployeeData.Role.COOK,
+	"Server": EmployeeData.Role.SERVER,
+	"Receptionist": EmployeeData.Role.RECEPTIONIST,
+	"Cleaner": EmployeeData.Role.CLEANER,
+	"Security": EmployeeData.Role.SECURITY,
+	"Bartender": EmployeeData.Role.BARTENDER,
+	"Entertainer": EmployeeData.Role.ENTERTAINER,
+}
+
+
 ## Staff only exist as people while somebody is here to see them. Out of sight
 ## the same employee is a line in the far simulation, which is why walking out
 ## of the shop does not stop them working.
@@ -317,14 +360,8 @@ func _on_minute_passed(_hour: int, _minute: int) -> void:
 ## counter, somebody on the machine and somebody on the floor, and which of the
 ## payroll that is comes from the roster.
 func _refresh_staff() -> void:
-	var jobs := {
-		"Cashier": EmployeeData.Role.CASHIER,
-		"Barista": EmployeeData.Role.BARISTA,
-		"Stocker": EmployeeData.Role.STOCKER,
-		"Manager": EmployeeData.Role.MANAGER,
-	}
-	for node_name in jobs:
-		_refresh_one(String(node_name), int(jobs[node_name]))
+	for node_name in STAFF_NODES:
+		_refresh_one(String(node_name), int(STAFF_NODES[node_name]))
 
 
 func _refresh_one(node_name: String, role: int) -> void:
@@ -348,7 +385,9 @@ func _refresh_one(node_name: String, role: int) -> void:
 		if present.employee == rostered:
 			return
 		present.free()
-	if first_checkout() == null:
+	# Nothing on the floor at all means nowhere to stand. A half-fitted room
+	# still gets its staff — they simply have fewer places to be.
+	if equipment_nodes().is_empty():
 		return
 
 	var arrival := get_node_or_null("CustomerArrival") as Marker3D
@@ -377,7 +416,7 @@ func _clear_visible_people() -> void:
 		spawner.stop_player_working()
 		for customer in spawner.active_customers():
 			customer.queue_free()
-	for node_name in ["Cashier", "Barista", "Stocker", "Manager"]:
+	for node_name in STAFF_NODES.keys():
 		var worker := get_node_or_null(node_name) as EmployeeAI
 		if worker != null:
 			worker.queue_free()
@@ -435,9 +474,11 @@ func _mat(key: String) -> StandardMaterial3D:
 ## different floors, walls and light, which is exactly what separates them in
 ## real life — and it means one interior serves both without a second scene.
 func _style_id() -> StringName:
-	if _business == null:
-		return &"vacant"
-	return _business.type_id
+	if _business != null:
+		return _business.type_id
+	if interior_style != &"":
+		return interior_style
+	return &"vacant"
 
 
 func _build_palette() -> void:
@@ -454,6 +495,26 @@ func _build_palette() -> void:
 			floor_mat = Palette.of(&"tile_checker")
 			wall_mat = Palette.of(&"wall_paint")
 			trim_mat = Palette.of(&"metal_mid")
+		&"restaurant":
+			# Warmer and darker than the cafe: a room people sit down in for an
+			# hour rather than lean on a counter in for five minutes.
+			floor_mat = Palette.of(&"wood_floor")
+			wall_mat = CityKit.make_material(Color(0.286, 0.216, 0.192))
+			trim_mat = Palette.of(&"wood_dark")
+		&"gym":
+			floor_mat = CityKit.make_material(Color(0.176, 0.192, 0.216))
+			wall_mat = CityKit.make_material(Color(0.259, 0.286, 0.322))
+			trim_mat = Palette.of(&"metal_mid")
+		&"office":
+			floor_mat = Palette.of(&"wood_floor")
+			wall_mat = CityKit.make_material(Color(0.808, 0.796, 0.769))
+			trim_mat = Palette.of(&"metal_mid")
+		&"nightclub":
+			# Nearly black, so the emissive fittings are the only real light in
+			# the room and the place reads as a venue from the first frame.
+			floor_mat = CityKit.make_material(Color(0.075, 0.067, 0.098))
+			wall_mat = CityKit.make_material(Color(0.106, 0.090, 0.137))
+			trim_mat = CityKit.make_material(Color(0.180, 0.145, 0.231))
 		_:
 			# Vacant: bare but finished. An empty unit is a rental, not a
 			# debug room, so it gets a real floor and a real skirting.
@@ -596,6 +657,19 @@ func _build_shopfront(parent: Node3D) -> void:
 ## stuck customers rather than a table — by hugging the side walls.
 func _build_trade_dressing(parent: Node3D) -> void:
 	var style := _style_id()
+	match style:
+		&"office":
+			_dress_office(parent)
+			return
+		&"restaurant":
+			_dress_restaurant(parent)
+			return
+		&"gym":
+			_dress_gym(parent)
+			return
+		&"nightclub":
+			_dress_nightclub(parent)
+			return
 	if style != &"coffee_shop" and style != &"convenience_store":
 		return
 	var holder := Node3D.new()
@@ -644,6 +718,159 @@ func _build_trade_dressing(parent: Node3D) -> void:
 			Vector3(0.0, 2.05, partition_z + WALL_THICKNESS + 0.08),
 			["TODAY", "WATER   1.60", "SODA    1.90", "SNACKS  1.40"]
 		)
+
+
+
+
+## The bits of a restaurant nobody buys: the menu on the wall, a service station
+## against the side, and the plants that make a room look like it has been open
+## for a while. The tables and the kitchen are equipment the player places.
+func _dress_restaurant(parent: Node3D) -> void:
+	var holder := Node3D.new()
+	holder.name = "TradeDressing"
+	parent.add_child(holder)
+	var east := room.end.x - 1.2
+
+	PropKit.menu_board(
+		holder, "MenuBoard",
+		Vector3(0.0, 2.05, partition_z + WALL_THICKNESS + 0.08),
+		["BURGER MEAL   14", "PASTA BOWL    12", "CHICKEN       16", "SALAD          9"]
+	)
+	PropKit.pot_plant(holder, "DiningPlant", Vector3(east, 0.0, retail_area.end.y - 1.3), 1.2)
+	PropKit.pot_plant(holder, "DiningPlantB", Vector3(east, 0.0, retail_area.position.y + 1.3), 1.0)
+	# A pass-through hatch in the partition, so the kitchen reads as a kitchen
+	# from the dining side even before the equipment is bought.
+	CityKit.add_box(
+		holder, "Hatch", Vector3(2.4, 1.35, partition_z + WALL_THICKNESS * 0.5),
+		Vector3(2.2, 1.1, WALL_THICKNESS + 0.1),
+		CityKit.make_material(Color(0.129, 0.106, 0.098)), false, false
+	)
+	CityKit.add_box(
+		holder, "HatchLight", Vector3(2.4, 1.86, partition_z + WALL_THICKNESS * 0.5 - 0.12),
+		Vector3(2.0, 0.07, 0.06),
+		CityKit.make_emissive_material(Color(0.980, 0.808, 0.545), 0.9), false, false
+	)
+
+
+## Mirrors down one wall and a rubber-mat strip down the middle: the two things
+## that say gym from above without a single machine in the room.
+func _dress_gym(parent: Node3D) -> void:
+	var holder := Node3D.new()
+	holder.name = "TradeDressing"
+	parent.add_child(holder)
+	var west := room.position.x + 0.22
+
+	var mirror := CityKit.make_material(Color(0.616, 0.678, 0.729))
+	mirror.metallic = 0.7
+	mirror.roughness = 0.12
+	var panels := clampi(int(retail_area.size.y / 2.4), 2, 5)
+	for i in panels:
+		CityKit.add_box(
+			holder, "Mirror%d" % i,
+			Vector3(
+				west, 1.55,
+				retail_area.position.y + 1.4 + float(i) * (retail_area.size.y - 2.8)
+					/ float(maxi(panels - 1, 1))
+			),
+			Vector3(0.06, 1.9, 2.0), mirror, false, false
+		)
+	CityKit.add_box(
+		holder, "FloorMat", Vector3(0.0, 0.02, retail_area.get_center().y),
+		Vector3(retail_area.size.x - 2.4, 0.03, 2.2),
+		CityKit.make_material(Color(0.129, 0.157, 0.180)), false, false
+	)
+	PropKit.menu_board(
+		holder, "PriceBoard",
+		Vector3(0.0, 2.05, partition_z + WALL_THICKNESS + 0.08),
+		["MEMBERSHIP", "PER WEEK", "DAY PASS", "OPEN 06-22"]
+	)
+
+
+## The room is the effect. Everything here is emissive and small, because a
+## venue lit by its own fittings reads at a glance and costs nothing to draw.
+func _dress_nightclub(parent: Node3D) -> void:
+	var holder := Node3D.new()
+	holder.name = "TradeDressing"
+	parent.add_child(holder)
+
+	var strip_colours: Array[Color] = [
+		Color(0.541, 0.286, 0.878), Color(0.196, 0.749, 0.831),
+		Color(0.910, 0.361, 0.541),
+	]
+	var west := room.position.x + 0.25
+	var east := room.end.x - 0.25
+	var strips := clampi(int(retail_area.size.y / 2.0), 2, 5)
+	for i in strips:
+		var z := retail_area.position.y + 1.2 + float(i) * (retail_area.size.y - 2.4) \
+			/ float(maxi(strips - 1, 1))
+		var tint: Color = strip_colours[i % strip_colours.size()]
+		for side: float in [west, east]:
+			CityKit.add_box(
+				holder, "Strip%d_%d" % [i, int(side * 10.0)],
+				Vector3(side, 2.35, z), Vector3(0.08, 0.10, 1.6),
+				CityKit.make_emissive_material(tint, 1.6), false, false
+			)
+	# A band of light across the back wall behind where the booth goes.
+	CityKit.add_box(
+		holder, "BackWash", Vector3(0.0, 2.10, partition_z + WALL_THICKNESS + 0.06),
+		Vector3(retail_area.size.x * 0.6, 0.14, 0.05),
+		CityKit.make_emissive_material(strip_colours[0], 1.9), false, false
+	)
+
+
+## The company office: a desk, a computer, a meeting table and the name on the
+## wall. Built rather than bought, because the office is not a business — it is
+## somewhere to run the ones you have from, and nothing here is for sale.
+func _dress_office(parent: Node3D) -> void:
+	var holder := Node3D.new()
+	holder.name = "TradeDressing"
+	parent.add_child(holder)
+
+	var wood := CityKit.make_material(Color(0.478, 0.412, 0.337))
+	var dark := CityKit.make_material(Color(0.271, 0.286, 0.322))
+	var centre := retail_area.get_center()
+
+	CityKit.add_box(
+		holder, "Desk", Vector3(centre.x - 3.4, 0.36, centre.y - 1.0),
+		Vector3(1.8, 0.72, 0.85), wood, true
+	)
+	CityKit.add_box(
+		holder, "DeskScreen", Vector3(centre.x - 3.4, 0.95, centre.y - 1.15),
+		Vector3(0.56, 0.36, 0.05),
+		CityKit.make_emissive_material(Color(0.365, 0.635, 0.741), 0.7), false, false
+	)
+	CityKit.add_box(
+		holder, "DeskStand", Vector3(centre.x - 3.4, 0.76, centre.y - 1.05),
+		Vector3(0.10, 0.14, 0.10), dark, false, false
+	)
+	CityKit.add_box(
+		holder, "MeetingTable", Vector3(centre.x + 2.2, 0.36, centre.y + 0.6),
+		Vector3(2.6, 0.72, 1.3), wood, true
+	)
+	for i in 4:
+		CityKit.add_box(
+			holder, "MeetingChair%d" % i,
+			Vector3(
+				centre.x + 1.2 + float(i % 2) * 2.0, 0.24,
+				centre.y + 0.6 + (1.05 if i < 2 else -1.05)
+			),
+			Vector3(0.5, 0.48, 0.5), dark, false
+		)
+	# The company name, in whatever colour the company happens to use.
+	var accent := Color(0.353, 0.612, 0.788)
+	var first_brand := CompanyManager.brands()
+	if not first_brand.is_empty():
+		accent = first_brand[0].brand_color
+	CityKit.add_box(
+		holder, "CompanySign", Vector3(0.0, 2.15, partition_z + WALL_THICKNESS + 0.06),
+		Vector3(2.6, 0.34, 0.06), CityKit.make_emissive_material(accent, 0.55), false, false
+	)
+
+	var terminal := CompanyTerminal.new()
+	terminal.name = "CompanyTerminal"
+	CityKit.attach_interactable(
+		holder, terminal, Vector3(centre.x - 3.4, 0.9, centre.y - 1.0), 2.0
+	)
 
 
 ## The back of house. A vacant unit gets an empty room with a rack in it; a

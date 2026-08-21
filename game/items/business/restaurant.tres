@@ -1,0 +1,55 @@
+[gd_resource type="Resource" script_class="BusinessTypeData" load_steps=21 format=3]
+
+[ext_resource type="Script" path="res://business/business_type_data.gd" id="1_business_type"]
+[ext_resource type="Resource" path="res://items/definitions/dish_burger.tres" id="2_d1"]
+[ext_resource type="Resource" path="res://items/definitions/dish_pasta.tres" id="3_d2"]
+[ext_resource type="Resource" path="res://items/definitions/dish_chicken.tres" id="4_d3"]
+[ext_resource type="Resource" path="res://items/definitions/dish_salad.tres" id="5_d4"]
+[ext_resource type="Resource" path="res://items/definitions/dish_breakfast.tres" id="6_d5"]
+[ext_resource type="Resource" path="res://items/definitions/dish_soup.tres" id="7_d6"]
+[ext_resource type="Resource" path="res://items/definitions/kitchen_meat.tres" id="8_i1"]
+[ext_resource type="Resource" path="res://items/definitions/kitchen_bread.tres" id="9_i2"]
+[ext_resource type="Resource" path="res://items/definitions/kitchen_vegetables.tres" id="10_i3"]
+[ext_resource type="Resource" path="res://items/definitions/kitchen_pasta.tres" id="11_i4"]
+[ext_resource type="Resource" path="res://items/definitions/kitchen_sauce.tres" id="12_i5"]
+[ext_resource type="Resource" path="res://items/definitions/kitchen_chicken.tres" id="13_i6"]
+[ext_resource type="Resource" path="res://items/definitions/kitchen_oil.tres" id="14_i7"]
+[ext_resource type="Resource" path="res://items/recipes/dish_burger.tres" id="15_r1"]
+[ext_resource type="Resource" path="res://items/recipes/dish_pasta.tres" id="16_r2"]
+[ext_resource type="Resource" path="res://items/recipes/dish_chicken.tres" id="17_r3"]
+[ext_resource type="Resource" path="res://items/recipes/dish_salad.tres" id="18_r4"]
+[ext_resource type="Resource" path="res://items/recipes/dish_breakfast.tres" id="19_r5"]
+[ext_resource type="Resource" path="res://items/recipes/dish_soup.tres" id="20_r6"]
+
+[resource]
+script = ExtResource("1_business_type")
+type_id = &"restaurant"
+display_name = "Restaurant"
+description = "Seats, a kitchen and two ways to fall behind."
+service_model = 2
+required_roles = [5, 6, 9]
+minimum_shelf_units = 0
+required_staff_roles = [4, 5]
+staff_roles_used = [4, 5, 7, 3, 0]
+minimum_floor_area = 50
+property_class = &"food_service"
+startup_cost = 6500
+catalogue = [ExtResource("2_d1"), ExtResource("3_d2"), ExtResource("4_d3"), ExtResource("5_d4"), ExtResource("6_d5"), ExtResource("7_d6")]
+supply_catalogue = [ExtResource("8_i1"), ExtResource("9_i2"), ExtResource("10_i3"), ExtResource("11_i4"), ExtResource("12_i5"), ExtResource("13_i6"), ExtResource("14_i7")]
+recipes = [ExtResource("15_r1"), ExtResource("16_r2"), ExtResource("17_r3"), ExtResource("18_r4"), ExtResource("19_r5"), ExtResource("20_r6")]
+supply_category = &"food_ingredients"
+daily_utilities = 95
+default_opening_hour = 11
+default_closing_hour = 23
+base_storage_capacity = 70
+base_customer_capacity = 0
+maximum_customer_capacity = 40
+served_per_staff_hour = 17.0
+peak_customers_per_hour = 16.0
+basket_range = Vector2i(1, 1)
+demand_by_hour = Array[float]([0.02, 0.02, 0.02, 0.02, 0.02, 0.04, 0.08, 0.2, 0.35, 0.3, 0.3, 0.75, 1.0, 0.95, 0.55, 0.35, 0.35, 0.6, 0.95, 1.0, 0.9, 0.6, 0.3, 0.12])
+weekend_factor = 1.15
+district_affinity = {&"central": 1.2, &"harbour_row": 0.9}
+archetype_weights = {&"office": 0.9, &"worker": 0.8, &"affluent": 0.6, &"student": 0.4}
+uses_cleanliness = true
+soiling_per_hour = 1.1

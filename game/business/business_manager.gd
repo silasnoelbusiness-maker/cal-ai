@@ -141,6 +141,14 @@ func create_business(
 	var definition := BusinessCatalogue.by_id(type_id)
 	if definition == null:
 		return null
+	# A nightclub does not go in a thirty-metre shop. The property says what it
+	# is zoned for and how big it is, and the type says what it needs.
+	if not property.accepts_business(definition):
+		GameManager.notify(
+			"THIS UNIT IS NOT SUITABLE FOR A %s" % definition.display_name.to_upper(),
+			GameManager.Tone.BAD
+		)
+		return null
 
 	var business := BusinessInstance.new()
 	business.business_id = StringName("business_%d" % _next_business_number)
@@ -153,6 +161,11 @@ func create_business(
 	business.opening_hour = definition.default_opening_hour
 	business.closing_hour = definition.default_closing_hour
 	business.founded_on_day = TimeManager.day_index
+	# What a type charges for access starts at what the type thinks is fair.
+	# The player moves it from there; nobody has to type a number to open.
+	business.membership_price = definition.default_membership_price
+	business.day_pass_price = definition.default_day_pass_price
+	business.entry_fee = definition.default_entry_fee
 
 	_register(business)
 	_add_statistic(&"businesses_founded")
@@ -278,7 +291,11 @@ func order_stock(
 	if quantity <= 0:
 		return PurchaseResult.NO_ROOM
 
-	var cost := _supplier.price_for(item, quantity)
+	# Each kind of business deals with the wholesaler that stocks what it needs,
+	# so a restaurant's ingredients and a shop's groceries have their own prices
+	# and their own lead times.
+	var supplier := SupplierData.for_business(business)
+	var cost := supplier.price_for(item, quantity)
 	if not business.debit(
 		cost, "Stock — %s x%d" % [item.display_name, quantity], &"inventory"
 	):
@@ -288,12 +305,12 @@ func order_stock(
 	order.order_id = StringName("order_%d" % _next_order_number)
 	_next_order_number += 1
 	order.business_id = business.business_id
-	order.supplier_id = _supplier.supplier_id
+	order.supplier_id = supplier.supplier_id
 	order.items[item_id] = quantity
 	order.total_cost = cost
 	order.automatic = automatic
 	order.placed_at = TimeManager.total_minutes
-	order.arrives_at = order.placed_at + _supplier.delivery_minutes(_rng)
+	order.arrives_at = order.placed_at + supplier.delivery_minutes(_rng)
 	_orders.append(order)
 
 	GameManager.notify(
@@ -324,6 +341,41 @@ func outstanding_orders(business: BusinessInstance = null) -> Array[PurchaseOrde
 		if business == null or order.business_id == business.business_id:
 			found.append(order)
 	return found
+
+
+## The wholesaler a given business deals with. Passing nothing asks for the
+## general one, which is what every caller written before Phase O wanted.
+func supplier_for(business: BusinessInstance) -> SupplierData:
+	return SupplierData.for_business(business)
+
+
+## Every branch waiting on a delivery, and every branch that has run short.
+## The company-wide purchasing view, and deliberately a report rather than a
+## shared pool: nothing is moved between branches by looking at this.
+func purchasing_overview() -> Dictionary:
+	var pending: Array[Dictionary] = []
+	for order in outstanding_orders():
+		var business := by_id(order.business_id)
+		pending.append({
+			"order": order,
+			"business": business.business_name if business != null else "",
+			"summary": order.summary(),
+			"cost": order.total_cost,
+			"arrives": order.arrival_text(),
+		})
+	var short: Array[Dictionary] = []
+	for business in get_businesses():
+		for item in business.orderable():
+			if business.storage_of(item.id) > business.auto_order_minimum:
+				continue
+			short.append({
+				"business": business.business_name,
+				"business_id": business.business_id,
+				"item": item.display_name,
+				"held": business.storage_of(item.id),
+				"incoming": _incoming(business, item.id),
+			})
+	return {"pending": pending, "low_stock": short}
 
 
 func get_supplier() -> SupplierData:
@@ -688,6 +740,7 @@ func _on_day_passed(day_index: int) -> void:
 			GameManager.notify(
 				"CAMPAIGN ENDED\n%s" % business.business_name.to_upper(), GameManager.Tone.INFO
 			)
+		business.model().on_day(business, day_index)
 		var report := business.end_day(day_index)
 		_tally_report(report)
 		day_report_ready.emit(business, report)
@@ -755,6 +808,72 @@ func _run_manager(business: BusinessInstance, hour: int) -> void:
 		_manager_restock(business, boss)
 	if business.auto_order:
 		_manager_reorder(business, boss)
+	if business.may(&"manage_cleanliness"):
+		_manager_clean(business)
+	if business.may(&"staff_positioning"):
+		_manager_position_staff(business, hour)
+
+
+## Moves a spare pair of hands onto a job nobody is doing.
+##
+## The one thing a manager can do about a rota gap without the player being
+## there. Only ever moves somebody the business has more than one of, only ever
+## into a role the type actually needs, and only for as long as they are on
+## shift — so a restaurant with two servers and no cook ends up with one of
+## each rather than a dining room full of orders nobody is making.
+func _manager_position_staff(business: BusinessInstance, hour: int) -> void:
+	var uncovered := business.unstaffed_roles(hour)
+	if uncovered.is_empty():
+		return
+	var definition := business.type_data()
+	for role in uncovered:
+		var moved := false
+		for worker in business.employees:
+			if moved:
+				break
+			if not worker.is_on_shift(hour) or worker.is_manager():
+				continue
+			# Never strip the last person off a job the business also needs.
+			if definition.requires_role(int(worker.role)) \
+					and business.rostered_all(int(worker.role), hour).size() <= 1:
+				continue
+			worker.assign_role(role as EmployeeData.Role)
+			for slot in worker.shifts:
+				if slot.covers(hour, TimeManager.weekday):
+					slot.role = role
+			moved = true
+			GameManager.notify(
+				"MOVED ONTO %s\n%s  ·  %s" % [
+					EmployeeData.name_of_role(role).to_upper(),
+					business.business_name.to_upper(), worker.employee_name,
+				],
+				GameManager.Tone.INFO
+			)
+		if moved:
+			business.changed.emit()
+
+
+## A manager who is allowed to keep the place clean calls somebody in when it
+## drops below the mark. It costs money, it comes out of the same allowance as
+## the stock, and a business with no cleaner and no allowance simply gets
+## dirty — which is the player's problem to notice.
+func _manager_clean(business: BusinessInstance) -> void:
+	if not business.uses_cleanliness():
+		return
+	if business.cleanliness >= float(business.cleanliness_target):
+		return
+	# Nothing to do if somebody is already on the rota to do it.
+	if not business.rostered_all(EmployeeData.Role.CLEANER, TimeManager.hour).is_empty():
+		return
+	var shortfall := float(business.cleanliness_target) - business.cleanliness
+	var points := minf(shortfall, 12.0)
+	var cost := maxi(roundi(points * 3.5), 1)
+	if cost > business.manager_budget_left():
+		return
+	if not business.debit(cost, "Cleaning", &"other"):
+		return
+	business.note_manager_spend(cost)
+	business.clean(points)
 
 
 ## Fills the shelves from the store room. A better manager gets more of it done;
@@ -803,7 +922,9 @@ func _best_restock_item(business: BusinessInstance) -> StringName:
 ## budget the player set. One order per product at a time — the check counts what
 ## is already on its way, so a manager cannot order the same thing every hour.
 func _manager_reorder(business: BusinessInstance, boss: EmployeeData) -> void:
-	var budget := business.auto_order_budget
+	# The allowance, less whatever the manager has already spent today, and
+	# never more than the business actually holds. One number, checked once.
+	var budget := business.manager_budget_left()
 	for item in business.orderable():
 		if budget <= 0:
 			return
@@ -824,7 +945,9 @@ func _manager_reorder(business: BusinessInstance, boss: EmployeeData) -> void:
 			continue
 		if order_stock(business, item.id, quantity, true) != PurchaseResult.OK:
 			continue
-		budget -= item.get_wholesale_cost() * quantity
+		var spent := item.get_wholesale_cost() * quantity
+		budget -= spent
+		business.note_manager_spend(spent)
 		GameManager.notify(
 			"MANAGER ORDERED\n%s  ·  %s x%d" % [
 				business.business_name.to_upper(), item.display_name, quantity
@@ -943,39 +1066,59 @@ func _settle_trade(business: BusinessInstance) -> void:
 
 
 func _simulate_far_hour(business: BusinessInstance, hour: int) -> void:
+	var model := business.model()
 	var owed := (
 		float(_pending_customers.get(business.business_id, 0.0))
 		+ CustomerDemand.customers_per_hour(business, hour)
 	)
 	# However many people want serving, only so many can be served: one counter,
-	# one member of staff, one hour. The rest walk out, which is what makes a
-	# bigger unit and a quicker cashier worth paying for.
-	var servable := _servable_per_hour(business, hour)
+	# one kitchen, one hour. The rest walk out, which is what makes a bigger
+	# unit, another cook and a quicker cashier worth paying for.
+	var servable := model.throughput_per_hour(business, hour)
+	var overflow := model.overflow_reason()
 	var served := 0
 	while owed >= 1.0:
 		owed -= 1.0
+		business.record_customer_visit()
 		if served >= servable:
-			business.record_customer_visit()
-			business.record_lost_sale()
+			business.record_lost_sale(overflow)
 			business.add_satisfaction(-0.4)
 			continue
 		served += 1
-		_resolve_remote_visit(business, hour)
+		_resolve_remote_visit(business, model, hour)
 	_pending_customers[business.business_id] = owed
+	_note_hour_load(business, model, hour)
+	_soil_and_clean(business, model, hour, served)
 
 
-## How many customers one hour of service can get through, from whoever is on
-## the till and whatever the shop has been fitted with.
-func _servable_per_hour(business: BusinessInstance, hour: int) -> int:
-	var cashier := business.rostered_cashier(hour)
-	if cashier == null:
-		return 0
-	var seconds := cashier.checkout_seconds()
-	# A drink has to be made as well as rung up.
-	if business.serves_prepared_goods():
-		seconds += business.preparation_seconds(business.catalogue()[0], cashier)
-	seconds *= 1.0 - business.upgrade_magnitude(BusinessUpgrade.Effect.CHECKOUT_SPEED)
-	return maxi(floori(3600.0 / maxf(seconds, 0.5)), 1)
+## How hard the hour worked everybody and everything, kept so the operations
+## screen can name which of them is the problem rather than guess.
+func _note_hour_load(business: BusinessInstance, model: OperatingModel, hour: int) -> void:
+	var roles := model.role_utilisation(business, hour)
+	for role: int in roles:
+		business.note_role_load(role, float(roles[role]))
+	var fittings := model.equipment_utilisation(business, hour)
+	for id: StringName in fittings:
+		business.note_equipment_load(id, float(fittings[id]))
+
+
+## An hour of trading makes a mess; whoever is on the rota to clean it, cleans
+## it. Both halves are skipped entirely by a type that does not model dirt.
+func _soil_and_clean(
+	business: BusinessInstance, model: OperatingModel, hour: int, served: int
+) -> void:
+	if not business.uses_cleanliness():
+		return
+	var definition := business.type_data()
+	business.soil(definition.soiling_per_hour + model.visit_soiling(business) * float(served))
+	for cleaner in business.rostered_all(EmployeeData.Role.CLEANER, hour):
+		business.clean(cleaner.cleaning_rate())
+
+
+## How many customers one hour of service can get through. A thin call through
+## to the operating model, kept so a screen or a test can still ask directly.
+func servable_per_hour(business: BusinessInstance, hour: int) -> int:
+	return business.model().throughput_per_hour(business, hour)
 
 
 ## Development and testing entry point: trades one hour right now, without
@@ -986,34 +1129,19 @@ func simulate_hour_now(business: BusinessInstance, hour: int = -1) -> void:
 	_simulate_far_hour(business, hour if hour >= 0 else TimeManager.hour)
 
 
-## One shopping trip, resolved as data. Without somebody on the till the visit
-## is a lost sale however good the shop is, which is the whole reason to hire.
-func _resolve_remote_visit(business: BusinessInstance, hour: int) -> void:
-	business.record_customer_visit()
-
-	var cashier := business.rostered_cashier(hour)
-	if cashier == null:
-		business.record_lost_sale()
-		business.add_satisfaction(-0.35)
-		return
-
-	var bought := 0
-	for i in CustomerDemand.basket_size(business, _rng):
-		var item := CustomerDemand.pick_item(business, _rng)
-		if item == null:
-			break
-		if not CustomerDemand.will_buy(business, item, _rng):
-			continue
-		if business.record_sale(item, 1) > 0:
-			bought += 1
-
-	if bought > 0:
-		cashier.customers_served_today += 1
-		cashier.sales_processed_today += bought
-		business.add_satisfaction(0.12)
-	else:
-		business.record_lost_sale()
-		business.add_satisfaction(-0.25)
+## One visit, resolved as data.
+##
+## What a customer is worth now lives in the operating model, so a restaurant
+## cover, a gym check-in and a shopping trip are the same call with different
+## arithmetic behind it — and the visible customers walking the floor run the
+## identical code, which is what keeps near and far honest with each other.
+func _resolve_remote_visit(
+	business: BusinessInstance, model: OperatingModel, hour: int
+) -> void:
+	var result := model.serve_one(business, hour, _rng)
+	if not result.served:
+		business.record_lost_sale(result.lost_reason)
+	business.add_satisfaction(result.satisfaction)
 
 
 # --- The portfolio -------------------------------------------------------

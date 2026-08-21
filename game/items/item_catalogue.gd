@@ -23,6 +23,25 @@ const ITEMS: Array[ItemData] = [
 	preload("res://items/definitions/milk_carton.tres"),
 	preload("res://items/definitions/paper_cup.tres"),
 	preload("res://items/definitions/tea_leaves.tres"),
+	# Restaurant: the menu, then the ingredients the kitchen turns into it.
+	preload("res://items/definitions/dish_burger.tres"),
+	preload("res://items/definitions/dish_pasta.tres"),
+	preload("res://items/definitions/dish_chicken.tres"),
+	preload("res://items/definitions/dish_salad.tres"),
+	preload("res://items/definitions/dish_breakfast.tres"),
+	preload("res://items/definitions/dish_soup.tres"),
+	preload("res://items/definitions/kitchen_meat.tres"),
+	preload("res://items/definitions/kitchen_bread.tres"),
+	preload("res://items/definitions/kitchen_vegetables.tres"),
+	preload("res://items/definitions/kitchen_pasta.tres"),
+	preload("res://items/definitions/kitchen_sauce.tres"),
+	preload("res://items/definitions/kitchen_chicken.tres"),
+	preload("res://items/definitions/kitchen_oil.tres"),
+	# Venue: consumables kept as classes rather than a drinks list.
+	preload("res://items/definitions/venue_soft_drink.tres"),
+	preload("res://items/definitions/venue_mocktail.tres"),
+	preload("res://items/definitions/venue_premium.tres"),
+	preload("res://items/definitions/venue_snacks.tres"),
 ]
 
 

@@ -13,7 +13,13 @@ extends Pedestrian
 
 signal finished(customer: CustomerAI)
 
-enum Stage { ARRIVING, BROWSING, QUEUEING, PAYING, WAITING, LEAVING, DONE }
+## Appended to as Phase O added routes through a building. The first seven are
+## the shop and the coffee counter and behave exactly as they did.
+enum Stage {
+	ARRIVING, BROWSING, QUEUEING, PAYING, WAITING, LEAVING, DONE,
+	SEEKING_SEAT, SEATED, AWAITING_FOOD, EATING,
+	CHECKING_IN, EXERCISING, AT_THE_DOOR, IN_THE_ROOM,
+}
 
 ## How long they stand at a shelf deciding.
 @export var browse_seconds: float = 1.6
@@ -46,6 +52,18 @@ var _own_rng := RandomNumberGenerator.new()
 var _prepared: bool = false
 ## Seconds left of watching their drink being made.
 var _collection_wait: float = 0.0
+## Which route through the building this business puts people on, from its
+## operating model. The customer walks a restaurant differently from a shop,
+## and the type is what knows the difference.
+var _route: StringName = &"retail"
+## Who they are, which decides how much the price and the wait bother them.
+var archetype: StringName = &"worker"
+## The table, machine or stretch of floor they are occupying.
+var _spot: BusinessEquipment = null
+## The ticket they are waiting on, in a restaurant.
+var _order: KitchenOrder = null
+## Machines used so far, so a gym visit is one or two rather than all night.
+var _stations_used: int = 0
 
 
 func setup(
@@ -64,6 +82,9 @@ func setup(
 	_own_rng.seed = rng.randi()
 	wanders = false
 	_prepared = business.serves_prepared_goods()
+	_route = business.model().customer_route()
+	archetype = CustomerArchetype.pick(business, _own_rng)
+	patience_seconds *= CustomerArchetype.patience(archetype)
 
 	# Decided on the way in, like a real shopping list: what they came for is
 	# not affected by what they find.
@@ -150,6 +171,23 @@ func _process(delta: float) -> void:
 			_collection_wait -= delta
 			if _collection_wait <= 0.0:
 				_leave()
+		Stage.SEEKING_SEAT:
+			_tick_seeking_seat(delta)
+		Stage.SEATED:
+			_tick_seated()
+		Stage.AWAITING_FOOD:
+			_tick_awaiting_food(delta)
+		Stage.EATING:
+			if _timer <= 0.0:
+				_finish_meal()
+		Stage.CHECKING_IN:
+			_tick_checking_in(delta)
+		Stage.EXERCISING:
+			_tick_exercising()
+		Stage.AT_THE_DOOR:
+			_tick_at_the_door(delta)
+		Stage.IN_THE_ROOM:
+			_tick_in_the_room()
 		Stage.LEAVING:
 			if _arrived():
 				_finish()
@@ -162,12 +200,19 @@ func _process(delta: float) -> void:
 ## Where the two kinds of business part company. In a shop the customer walks
 ## the aisles and picks things up; at a counter they read the board and order.
 func _begin_shopping() -> void:
-	if _prepared:
-		_order_from_the_counter()
-		return
-	stage = Stage.BROWSING
-	_timer = 0.0
-	_next_shelf()
+	match _route:
+		&"table":
+			_seek_a_table()
+		&"membership":
+			_go_to_reception()
+		&"venue":
+			_join_the_door()
+		&"counter":
+			_order_from_the_counter()
+		_:
+			stage = Stage.BROWSING
+			_timer = 0.0
+			_next_shelf()
 
 
 ## Everything they want that the shop can actually make and they will pay for,
@@ -263,15 +308,273 @@ func _abandon(_reason: String) -> void:
 func _leave() -> void:
 	if _spawner != null:
 		_spawner.leave_queue(self)
+		_spawner.leave_entry_queue(self)
+	# Whatever they were sitting on, standing on or using goes back to the
+	# floor the moment they head for the door, rather than when they reach it.
+	_release_spot()
+	if _order != null:
+		_order.stage = KitchenOrder.Stage.ABANDONED
+		_order = null
 	stage = Stage.LEAVING
 	set_running(false)
 	_go_to(_exit_point)
+
+
+func _exit_tree() -> void:
+	# A customer freed mid-visit must not leave a table booked forever.
+	_release_spot()
 
 
 func _finish() -> void:
 	stage = Stage.DONE
 	finished.emit(self)
 	queue_free()
+
+
+
+# --- Table service -------------------------------------------------------
+
+## A restaurant begins with a question a shop never asks: is there anywhere to
+## sit? Everything else waits on the answer.
+func _seek_a_table() -> void:
+	var seat := _free_spot(EquipmentData.Role.SEATING)
+	if seat == null:
+		# The floor is full. They will hover by the door for a little while,
+		# because a full restaurant is worth a short wait and not a long one.
+		stage = Stage.SEEKING_SEAT
+		_waited = 0.0
+		_go_to(_threshold)
+		return
+	_take_spot(seat)
+	stage = Stage.SEEKING_SEAT
+	_go_to(seat.approach_point_from(global_position))
+
+
+func _tick_seeking_seat(delta: float) -> void:
+	if _spot != null:
+		if _arrived():
+			stage = Stage.SEATED
+			stop()
+		return
+	# Waiting for a table to come free.
+	_waited += delta
+	var seat := _free_spot(EquipmentData.Role.SEATING)
+	if seat != null:
+		_take_spot(seat)
+		_go_to(seat.approach_point_from(global_position))
+		return
+	if _waited >= patience_seconds * 0.5:
+		_business.record_lost_sale(LostReason.NO_SEATING)
+		_business.add_satisfaction(-0.35)
+		_abandon("no table")
+
+
+## Sitting down, reading the menu, deciding. The ticket goes in from here.
+func _tick_seated() -> void:
+	var dish := _pick_dish()
+	if dish == null:
+		_business.record_lost_sale(LostReason.NO_STOCK)
+		_business.add_satisfaction(-0.3)
+		_abandon("nothing on")
+		return
+	_order = _business.place_order(self, dish, TimeManager.total_minutes)
+	stage = Stage.AWAITING_FOOD
+	_waited = 0.0
+	stop()
+
+
+## Something on the menu the kitchen can make and they will pay for.
+func _pick_dish() -> ItemData:
+	for item in _shopping_list:
+		if _business.available_units(item) > 0 and CustomerDemand.will_buy(
+			_business, item, _own_rng, archetype
+		):
+			return item
+	var fallback := CustomerDemand.pick_item(_business, _own_rng)
+	if fallback != null and CustomerDemand.will_buy(_business, fallback, _own_rng, archetype):
+		return fallback
+	return null
+
+
+func _tick_awaiting_food(delta: float) -> void:
+	_waited += delta
+	if _order == null:
+		_abandon("order lost")
+		return
+	if _order.stage == KitchenOrder.Stage.DELIVERED:
+		# The plate arrived. They pay for it and eat it.
+		var paid := _business.record_prepared_sale(_order.recipe, 1)
+		var wait_share := clampf(_waited / maxf(patience_seconds, 1.0), 0.0, 1.0)
+		_business.add_satisfaction(0.16 if wait_share < 0.5 else 0.04)
+		_order = null
+		stage = Stage.EATING
+		_timer = 6.0 + _own_rng.randf_range(0.0, 4.0)
+		if paid <= 0:
+			_finish_meal()
+		return
+	if _waited < patience_seconds:
+		return
+	# Nobody cooked it, or nobody carried it. Either way they leave hungry, and
+	# the kitchen keeps whatever it already spent on them.
+	_order.stage = KitchenOrder.Stage.ABANDONED
+	_order = null
+	_business.record_lost_sale(LostReason.SERVICE_TOO_SLOW)
+	_business.add_satisfaction(-0.6)
+	_abandon("waited too long for food")
+
+
+func _finish_meal() -> void:
+	_release_spot()
+	_leave()
+
+
+# --- Memberships ---------------------------------------------------------
+
+func _go_to_reception() -> void:
+	var desk := _first_of_role(EquipmentData.Role.RECEPTION)
+	stage = Stage.CHECKING_IN
+	_waited = 0.0
+	if desk == null:
+		# No desk to check in at, so nothing is sold and nobody is signed up.
+		_business.record_lost_sale(LostReason.NO_STAFF)
+		_abandon("no reception")
+		return
+	_go_to(desk.approach_point_from(global_position))
+
+
+func _tick_checking_in(delta: float) -> void:
+	_waited += delta
+	if not _arrived() and _waited < patience_seconds:
+		return
+	# The money is the operating model's business, and it is the same call the
+	# far simulation makes — which is what stops a gym earning differently
+	# depending on whether anybody is watching it.
+	var result := _business.model().serve_one(_business, TimeManager.hour, _own_rng)
+	if not result.served:
+		_business.record_lost_sale(result.lost_reason)
+	_business.add_satisfaction(result.satisfaction)
+	_start_exercise()
+
+
+func _start_exercise() -> void:
+	_release_spot()
+	var machine := _free_spot(EquipmentData.Role.MACHINE)
+	if machine == null:
+		_business.record_lost_sale(LostReason.BUSINESS_FULL)
+		_abandon("everything busy")
+		return
+	_take_spot(machine)
+	_stations_used += 1
+	stage = Stage.EXERCISING
+	_timer = 9.0 + _own_rng.randf_range(0.0, 7.0)
+	_go_to(machine.approach_point_from(global_position))
+
+
+func _tick_exercising() -> void:
+	if not _arrived():
+		return
+	stop()
+	if _timer > 0.0:
+		return
+	# One more machine, or a shower and out. Two is a workout; six is a life.
+	if _stations_used < 2 and _own_rng.randf() < 0.55:
+		_start_exercise()
+		return
+	_release_spot()
+	_leave()
+
+
+# --- The venue -----------------------------------------------------------
+
+func _join_the_door() -> void:
+	stage = Stage.AT_THE_DOOR
+	_waited = 0.0
+	if _spawner == null or not _spawner.join_entry_queue(self):
+		_business.record_lost_sale(LostReason.QUEUE_TOO_LONG)
+		_abandon("queue round the block")
+
+
+func _tick_at_the_door(delta: float) -> void:
+	_waited += delta
+	if _waited < patience_seconds * 1.6:
+		return
+	# A queue is part of a night out; an hour of one is not.
+	if _spawner != null:
+		_spawner.leave_entry_queue(self)
+	_business.record_lost_sale(LostReason.QUEUE_TOO_LONG)
+	_business.add_satisfaction(-0.3)
+	_abandon("gave up at the door")
+
+
+## Called by the door when they are let in.
+func admit() -> void:
+	if stage != Stage.AT_THE_DOOR:
+		return
+	var result := _business.model().serve_one(_business, TimeManager.hour, _own_rng)
+	if not result.served:
+		_business.record_lost_sale(result.lost_reason)
+	_business.add_satisfaction(result.satisfaction)
+
+	var spot := _free_spot(EquipmentData.Role.DANCE_FLOOR)
+	if spot == null:
+		spot = _free_spot(EquipmentData.Role.SEATING)
+	if spot == null:
+		_business.record_lost_sale(LostReason.BUSINESS_FULL)
+		_abandon("nowhere to stand")
+		return
+	_take_spot(spot)
+	stage = Stage.IN_THE_ROOM
+	_timer = 20.0 + _own_rng.randf_range(0.0, 25.0)
+	_go_to(spot.approach_point_from(global_position))
+
+
+func _tick_in_the_room() -> void:
+	if not _arrived():
+		return
+	stop()
+	if _timer > 0.0:
+		return
+	_release_spot()
+	_leave()
+
+
+# --- Places ---------------------------------------------------------------
+
+## The nearest piece of the given kind with room on it.
+func _free_spot(role: int) -> BusinessEquipment:
+	if _unit == null:
+		return null
+	var best: BusinessEquipment = null
+	var best_distance := INF
+	for node in _unit.equipment_nodes():
+		if not node.is_role(role) or not node.has_room():
+			continue
+		var distance := global_position.distance_squared_to(node.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			best = node
+	return best
+
+
+func _first_of_role(role: int) -> BusinessEquipment:
+	if _unit == null:
+		return null
+	for node in _unit.equipment_nodes():
+		if node.is_role(role):
+			return node
+	return null
+
+
+func _take_spot(node: BusinessEquipment) -> void:
+	_release_spot()
+	if node != null and node.take_slot():
+		_spot = node
+
+
+func _release_spot() -> void:
+	if _spot != null and is_instance_valid(_spot):
+		_spot.release_slot()
+	_spot = null
 
 
 # --- Helpers -------------------------------------------------------------

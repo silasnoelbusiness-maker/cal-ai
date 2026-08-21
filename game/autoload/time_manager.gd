@@ -75,6 +75,18 @@ var day_fraction: float:
 	get: return fmod(_elapsed_minutes, float(MINUTES_PER_DAY)) / float(MINUTES_PER_DAY)
 
 
+## 0 is Monday. Shifts, demand curves and anything else that cares which day
+## it is reads this rather than doing its own modulo.
+var weekday: int:
+	get: return day_index % DAY_NAMES.size()
+
+
+## Saturday and Sunday. What that is worth to a business is the business type's
+## business, not the clock's.
+func is_weekend() -> bool:
+	return weekday >= 5
+
+
 func get_day_name() -> String:
 	return DAY_NAMES[day_index % DAY_NAMES.size()]
 

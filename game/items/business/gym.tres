@@ -1,0 +1,36 @@
+[gd_resource type="Resource" script_class="BusinessTypeData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://business/business_type_data.gd" id="1_business_type"]
+
+[resource]
+script = ExtResource("1_business_type")
+type_id = &"gym"
+display_name = "Gym"
+description = "Machines are the capacity, the membership is the money."
+service_model = 3
+required_roles = [11, 10]
+minimum_shelf_units = 0
+required_staff_roles = [6]
+staff_roles_used = [6, 7, 3]
+minimum_floor_area = 110
+property_class = &"large_commercial"
+startup_cost = 7200
+supply_category = &"gym_supplies"
+daily_utilities = 70
+default_opening_hour = 6
+default_closing_hour = 22
+base_storage_capacity = 40
+sells_memberships = true
+default_membership_price = 40
+default_day_pass_price = 9
+base_customer_capacity = 0
+maximum_customer_capacity = 40
+served_per_staff_hour = 22.0
+peak_customers_per_hour = 14.0
+basket_range = Vector2i(1, 1)
+demand_by_hour = Array[float]([0.03, 0.03, 0.03, 0.03, 0.03, 0.25, 0.7, 0.95, 0.8, 0.5, 0.4, 0.4, 0.55, 0.5, 0.4, 0.45, 0.7, 0.95, 1.0, 0.9, 0.7, 0.45, 0.2, 0.08])
+weekend_factor = 0.85
+district_affinity = {&"central": 1.05, &"harbour_row": 0.95}
+archetype_weights = {&"fitness": 1.4, &"worker": 0.7, &"office": 0.5}
+uses_cleanliness = true
+soiling_per_hour = 0.9

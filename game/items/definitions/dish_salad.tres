@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"dish_salad"
+display_name = "Garden Salad"
+description = "Cold, green, quick."
+category = 0
+price = 9
+max_stack = 5
+icon_color = Color(0.494, 0.663, 0.416, 1)
+wholesale_cost = 5
+recommended_price = 9
+demand_weight = 0.75
+consumable = false

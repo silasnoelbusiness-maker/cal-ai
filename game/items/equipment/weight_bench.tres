@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://equipment/equipment_data.gd" id="1_equipment_data"]
+
+[resource]
+script = ExtResource("1_equipment_data")
+equipment_id = &"weight_bench"
+display_name = "Weight Bench"
+description = "A bench, a bar, and somewhere to put them."
+role = 11
+purchase_price = 430
+placement_size = Vector2(1.9, 0.9)
+height = 0.85
+body_color = Color(0.278, 0.29, 0.318, 1)
+accent_color = Color(0.588, 0.6, 0.624, 1)
+capacity = 0
+business_types_allowed = Array[StringName]([&"gym"])
+customer_slots = 1
+quality_tier = 1
+soiling_per_use = 0.8
+operated_by_role = -1

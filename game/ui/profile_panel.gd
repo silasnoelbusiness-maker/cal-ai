@@ -87,6 +87,19 @@ func _build_worth() -> void:
 	if debt > 0:
 		_body.add_child(ScreenKit.row("Debt", "-%s" % ScreenKit.money(debt)))
 	_body.add_child(ScreenKit.row("Net worth", ScreenKit.money(BusinessManager.net_worth()), true))
+	# The company is worth its own number, and it is not this one. Shown beside
+	# net worth rather than folded into it, because confusing the two is how a
+	# player talks themselves into thinking a house is an asset of the business.
+	if BusinessManager.owned_count() > 0:
+		_body.add_child(ScreenKit.row(
+			"%s value" % CompanyManager.get_company_name(),
+			ScreenKit.money(CompanyManager.company_value())
+		))
+		_body.add_child(BusinessUIKit.label(
+			"Company value is the operating business alone. Net worth is that "
+			+ "plus your property, your cars and your cash, less what you owe.",
+			12, ScreenKit.MUTED
+		))
 
 
 func _build_lifestyle() -> void:

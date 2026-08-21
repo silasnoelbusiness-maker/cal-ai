@@ -16,7 +16,20 @@ const COMMANDS := [
 	"8 trade an hour", "9 end the day", "0 reputation 50",
 	"Q next business", "W deliver now", "E start campaign", "R hire a manager",
 	"T take a loan", "Y pay a loan", "U advance 7 days", "I force far sim",
+	"A stand up a restaurant", "S stand up a gym", "D stand up a nightclub",
+	"F fill ingredients", "G set cleanliness 30", "H trade a whole day",
+	"J fill to capacity", "Z make a brand", "X open a branch",
+	"C transfer somebody", "V manager: all permissions",
 ]
+
+## Where the three Phase O types get stood up by the debug keys. The same units
+## the tests and the screenshot tool use, so what a key builds is what a test
+## checks.
+const DEBUG_SITES := {
+	KEY_A: [&"unit_plaza_07", &"restaurant", "Debug Kitchen"],
+	KEY_S: [&"unit_dock_09", &"gym", "Debug Fitness"],
+	KEY_D: [&"unit_vault_03", &"nightclub", "Debug Venue"],
+}
 
 var _label: Label = null
 var _timer: float = 0.0
@@ -86,6 +99,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_8: BusinessManager.simulate_hour_now(business)
 		KEY_9: BusinessManager._on_day_passed(TimeManager.day_index)
 		KEY_0: business.reputation = 50.0
+		# Phase O.
+		KEY_A, KEY_S, KEY_D: _stand_up(int((event as InputEventKey).keycode))
+		KEY_F: CompanyDebug.stock_up(business, 90)
+		KEY_G: CompanyDebug.set_cleanliness(business, 30.0)
+		KEY_H: CompanyDebug.advance_business_day(business)
+		KEY_J: _fill_up(business)
+		KEY_Z: CompanyManager.create_brand("Debug Brand", business.type_id)
+		KEY_X: _open_a_branch(business)
+		KEY_C: _transfer_somebody(business)
+		KEY_V: _grant_everything(business)
 		_: return
 	get_viewport().set_input_as_handled()
 	_refresh()
@@ -117,6 +140,58 @@ func _hire_manager(business: BusinessInstance) -> void:
 	business.auto_open = true
 	business.auto_restock = true
 	business.auto_order = true
+
+
+## Leases, founds, fits, stocks and staffs one of the Phase O types.
+func _stand_up(keycode: int) -> void:
+	var site: Array = DEBUG_SITES.get(keycode, [])
+	if site.size() < 3:
+		return
+	EconomyManager.restore(maxi(EconomyManager.cash, 120000))
+	CompanyDebug.stand_up(site[0], site[1], String(site[2]), get_tree(), 30000)
+
+
+func _fill_up(business: BusinessInstance) -> void:
+	var unit := RetailUnit.for_business(business, get_tree())
+	if unit != null:
+		CompanyDebug.fill_to_capacity(business, unit)
+
+
+## Another branch of whatever this business trades under, in the first unit
+## that will take one.
+func _open_a_branch(business: BusinessInstance) -> void:
+	var brand := CompanyManager.brand_for_business(business)
+	if brand == null:
+		return
+	var definition := business.type_data()
+	for unit in PropertyManager.get_properties():
+		if not unit.is_vacant() or not unit.accepts_business(definition):
+			continue
+		EconomyManager.restore(maxi(EconomyManager.cash, 120000))
+		PropertyManager.lease(unit)
+		CompanyManager.found_business("", business.type_id, unit, brand)
+		return
+
+
+## Moves the first member of staff to the next business along, which is the
+## quickest way to see a transfer land on both screens.
+func _transfer_somebody(business: BusinessInstance) -> void:
+	if business.employees.is_empty():
+		return
+	var owned := BusinessManager.get_businesses()
+	if owned.size() < 2:
+		return
+	var target: BusinessInstance = owned[(_focus + 1) % owned.size()]
+	CompanyManager.transfer_employee(business.employees[0], target)
+
+
+func _grant_everything(business: BusinessInstance) -> void:
+	business.auto_open = true
+	business.auto_restock = true
+	business.auto_order = true
+	for key in business.manager_permissions.keys():
+		business.set_permission(StringName(key), true)
+	business.auto_order_budget = 2000
 
 
 func _pay_a_loan(business: BusinessInstance) -> void:

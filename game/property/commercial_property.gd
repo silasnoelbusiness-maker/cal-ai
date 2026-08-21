@@ -22,7 +22,7 @@ signal sign_changed()
 enum Status { VACANT, LEASED }
 ## How big the unit is. The interior is built to match, and a bigger room holds
 ## more equipment and more customers at once.
-enum SizeClass { SMALL, MEDIUM }
+enum SizeClass { SMALL, MEDIUM, LARGE }
 
 @export var property_id: StringName = &""
 ## Which part of the city this stands in. Set by whoever builds the street, and
@@ -48,6 +48,11 @@ enum SizeClass { SMALL, MEDIUM }
 ## How much passing trade the address itself brings. A premium pitch costs more
 ## rent and is worth more customers; a back street is the other way round.
 @export_range(0.5, 2.0, 0.05) var location_demand_modifier: float = 1.0
+## What may trade here. A retail unit takes a shop or a cafe; a food-service
+## unit is plumbed and extracted for a kitchen; a large commercial unit is the
+## only thing a gym or a venue fits in. Empty means retail, which is what every
+## unit built before Phase O was.
+@export var business_classes: Array[StringName] = [&"retail"]
 
 @export_group("Terms")
 @export var rent_amount: int = 650
@@ -170,6 +175,40 @@ func has_landlord() -> bool:
 func refresh_state() -> void:
 	_refresh_prompt()
 	_refresh_sign()
+
+
+## Whether this unit is zoned and big enough for a given kind of business.
+## The one place §113 lives: nothing else has to know that a nightclub needs
+## more than a corner shop.
+func accepts_business(definition: BusinessTypeData) -> bool:
+	if definition == null:
+		return false
+	var classes := business_classes if not business_classes.is_empty() else [&"retail"]
+	if not classes.has(definition.property_class):
+		return false
+	return floor_area >= definition.minimum_floor_area
+
+
+## Kinds of business the player could put in here, for the founding screen.
+func allowed_business_types() -> Array[BusinessTypeData]:
+	var found: Array[BusinessTypeData] = []
+	for definition in BusinessCatalogue.TYPES:
+		if accepts_business(definition):
+			found.append(definition)
+	return found
+
+
+func class_label() -> String:
+	var classes := business_classes if not business_classes.is_empty() else [&"retail"]
+	match StringName(classes[0]):
+		&"food_service":
+			return "Food service unit"
+		&"large_commercial":
+			return "Large commercial unit"
+		&"office":
+			return "Office"
+		_:
+			return "Retail unit"
 
 
 func is_leased_by_player() -> bool:

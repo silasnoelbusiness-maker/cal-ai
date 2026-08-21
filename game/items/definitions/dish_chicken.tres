@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"dish_chicken"
+display_name = "Chicken Plate"
+description = "Chicken, vegetables, a plate."
+category = 0
+price = 16
+max_stack = 5
+icon_color = Color(0.808, 0.686, 0.494, 1)
+wholesale_cost = 9
+recommended_price = 16
+demand_weight = 0.95
+consumable = false

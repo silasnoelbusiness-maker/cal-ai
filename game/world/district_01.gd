@@ -1304,6 +1304,10 @@ func _venue_table() -> Array:
 			"CentralPlazaUnit", Vector3(42.0, 1.2, -12.4), Vector3.BACK, "View Property",
 			"property", "unit_plaza_07",
 		],
+		[
+			"DockRoadUnit", Vector3(-38.0, 1.2, 14.4), Vector3.FORWARD, "View Property",
+			"property", "unit_dock_09",
+		],
 	]
 
 
@@ -1427,9 +1431,25 @@ func _make_commercial_property(
 			unit.customer_capacity = 5
 			unit.queue_capacity = 3
 			unit.location_demand_modifier = 0.8
+		&"unit_dock_09":
+			# The only room in Harbour Row big enough for a gym or a venue, and
+			# priced like it. An old chandlery: high ceiling, no frontage.
+			unit.address = "9 Dock Road"
+			unit.property_type = "Large Commercial"
+			unit.size_class = CommercialProperty.SizeClass.LARGE
+			unit.floor_area = 152
+			unit.rent_amount = 1850
+			unit.deposit = 1500
+			unit.customer_capacity = 26
+			unit.queue_capacity = 8
+			unit.location_demand_modifier = 0.9
+			unit.business_classes = [&"large_commercial"]
 		&"unit_harbour_42":
 			unit.address = "42 Harbour Avenue"
 			unit.property_type = "Retail Unit"
+			# Plumbed and extracted, so a kitchen can go in it. The Harbour
+			# half of the two-district comparison a restaurant makes possible.
+			unit.business_classes = [&"retail", &"food_service"]
 			unit.size_class = CommercialProperty.SizeClass.MEDIUM
 			unit.floor_area = 76
 			unit.rent_amount = 1100
@@ -1440,6 +1460,7 @@ func _make_commercial_property(
 		&"unit_plaza_07":
 			unit.address = "7 Anchor Plaza"
 			unit.property_type = "Premium Retail"
+			unit.business_classes = [&"retail", &"food_service"]
 			unit.size_class = CommercialProperty.SizeClass.MEDIUM
 			unit.floor_area = 84
 			unit.rent_amount = 1800

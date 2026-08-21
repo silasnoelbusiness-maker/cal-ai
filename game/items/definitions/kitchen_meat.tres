@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"kitchen_meat"
+display_name = "Meat"
+description = "Portions for the grill."
+category = 2
+price = 9
+max_stack = 24
+icon_color = Color(0.663, 0.318, 0.298, 1)
+wholesale_cost = 4
+recommended_price = 9
+demand_weight = 0.0
+consumable = false

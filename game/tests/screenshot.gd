@@ -39,7 +39,13 @@ extends Node
 ##             tenant_applicants, tenant_signed, mortgage_tab, income_tab,
 ##             renovation_screen, property_sale_confirm, property_map,
 ##             property_profile, owned_shop_unit, multi_unit_detail,
-##             property_empire
+##             property_empire, restaurant_exterior, restaurant_empty,
+##             restaurant_furnished, restaurant_kitchen, restaurant_customers,
+##             restaurant_cook, restaurant_server, restaurant_dashboard,
+##             gym_exterior, gym_furnished, gym_customers, gym_management,
+##             club_exterior_night, club_interior, club_queue, club_operating,
+##             brand_screen, company_dashboard, company_staff, multi_shift,
+##             manager_permissions, bottleneck_report, company_portfolio
 ##   distance  camera distance override, for overview shots
 ##   yaw       camera yaw override
 ##   pitch     camera pitch override
@@ -336,6 +342,15 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"property_profile", "owned_shop_unit", "multi_unit_detail", \
 		"property_empire":
 			await _phase_n_scenario(main, scenario)
+
+		"restaurant_exterior", "restaurant_empty", "restaurant_furnished", \
+		"restaurant_kitchen", "restaurant_customers", "restaurant_cook", \
+		"restaurant_server", "restaurant_dashboard", "gym_exterior", \
+		"gym_furnished", "gym_customers", "gym_management", "club_exterior_night", \
+		"club_interior", "club_queue", "club_operating", "brand_screen", \
+		"company_dashboard", "company_staff", "multi_shift", \
+		"manager_permissions", "bottleneck_report", "company_portfolio":
+			await _phase_o_scenario(main, scenario)
 
 		"characters":
 			# The five people the game draws, lined up at reading distance:
@@ -1942,3 +1957,240 @@ func _invite_applicants(record: PropertyRecord, count: int) -> void:
 			TenantData.Kind.RESIDENTIAL, record.asking_rent, rng, 4000 + i
 		))
 	RealEstate._candidates[RealEstate._candidate_key(record.property_id, -1)] = waiting
+
+
+# --- Phase O: the company -------------------------------------------------
+
+## The three new business types, built through the real systems, and the
+## screens that manage them. Nothing here pokes a number into a business that
+## the player could not have put there themselves.
+func _phase_o_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	EconomyManager.restore(500000)
+	await _wait(90)
+
+	match scenario:
+		"restaurant_exterior":
+			await _stand_outside(player, &"unit_plaza_07", 7.0)
+
+		"restaurant_empty":
+			var empty := PropertyManager.by_id(&"unit_plaza_07")
+			PropertyManager.lease(empty)
+			var bare: RetailUnit = main.get_node("Interiors/CentralPlazaUnit")
+			bare.ensure_built()
+			await _stand_in(player, bare, Vector3(0.0, 0.0, 2.0))
+
+		"restaurant_furnished", "restaurant_kitchen", "restaurant_customers", \
+		"restaurant_cook", "restaurant_server", "restaurant_dashboard":
+			var diner := _open_restaurant(main)
+			var room: RetailUnit = main.get_node("Interiors/CentralPlazaUnit")
+			if scenario == "restaurant_kitchen":
+				await _stand_in(player, room, Vector3(0.0, 0.0, room.storage_area.get_center().y))
+			elif scenario == "restaurant_dashboard":
+				await _stand_in(player, room, Vector3(0.0, 0.0, 2.0))
+				var dashboard: Node = main.get_node("HUD/BusinessDashboard")
+				dashboard.call("open", diner)
+				dashboard.call("show_tab", 0)
+				await _wait(10)
+			else:
+				await _stand_in(player, room, Vector3(0.0, 0.0, 3.4))
+				await _fill_the_floor(room, 5, 260)
+
+		"gym_exterior":
+			await _stand_outside(player, &"unit_dock_09", 8.0)
+
+		"gym_furnished", "gym_customers", "gym_management":
+			var gym := _open_gym(main)
+			var floor_room: RetailUnit = main.get_node("Interiors/DockRoadUnit")
+			if scenario == "gym_management":
+				CompanyDebug.set_cleanliness(gym, 38.0)
+				await _stand_in(player, floor_room, Vector3(0.0, 0.0, 2.0))
+				var manager: Node = _hud_screen(hud, "ManagerPanel")
+				manager.call("open", gym)
+				await _wait(10)
+			else:
+				await _stand_in(player, floor_room, Vector3(0.0, 0.0, 4.0))
+				if scenario == "gym_customers":
+					await _fill_the_floor(floor_room, 6, 240)
+
+		"club_exterior_night":
+			await _stand_outside(player, &"unit_vault_03", 8.0)
+
+		"club_interior", "club_queue", "club_operating":
+			var club := _open_club(main)
+			var venue: RetailUnit = main.get_node("Interiors/VaultStreetUnit")
+			await _stand_in(player, venue, Vector3(0.0, 0.0, 4.5))
+			if scenario != "club_interior":
+				await _fill_the_floor(venue, 9, 320)
+
+		"brand_screen", "company_dashboard", "company_staff", "multi_shift", \
+		"manager_permissions", "bottleneck_report", "company_portfolio":
+			await _build_a_company(main, scenario)
+
+	await _wait(10)
+
+
+## Everything the company screens need behind them: a chain of two shops, a
+## restaurant, a gym and a venue, all trading.
+func _build_a_company(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	CompanyManager.set_company_name("Noel Group")
+
+	var market := _open_shop_at(
+		main, &"unit_main_18", "Interiors/MainStreetUnit", "Silas Market"
+	)
+	var brand := CompanyManager.brand_for_business(market)
+	var branch_door := PropertyManager.by_id(&"unit_central_88")
+	PropertyManager.lease(branch_door)
+	var branch := CompanyManager.found_business("", &"convenience_store", branch_door, brand)
+	if branch != null:
+		BusinessManager.deposit_to_business(branch, 4000)
+		var branch_unit: RetailUnit = main.get_node("Interiors/CentralBoulevardUnit")
+		branch_unit.ensure_built()
+		CompanyDebug.fit_out(branch, branch_unit)
+		CompanyDebug.stock_up(branch, 40)
+		CompanyDebug.hire(branch, EmployeeData.Role.CASHIER, 0.7)
+		branch.manual_override = BusinessInstance.Override.FORCE_OPEN
+
+	var diner := _open_restaurant(main)
+	var gym := _open_gym(main)
+	var club := _open_club(main)
+
+	# A day's trade behind the figures, so nothing on the screens reads zero.
+	for business in [market, branch, diner, gym]:
+		if business == null:
+			continue
+		for i in 5:
+			BusinessManager.simulate_hour_now(business, 12)
+	if club != null:
+		for i in 4:
+			BusinessManager.simulate_hour_now(club, 23)
+
+	if scenario == "bottleneck_report" and diner != null:
+		# One cook against a full dining room: the problem the report is for.
+		var cooks := diner.rostered_all(EmployeeData.Role.COOK, 12)
+		while cooks.size() > 1:
+			diner.fire(cooks.pop_back().employee_id)
+		for i in 4:
+			if BusinessManager.buy_equipment(diner, &"dining_table") == BusinessManager.PurchaseResult.OK \
+					and BusinessManager.consume_unplaced(diner, &"dining_table"):
+				diner.place_equipment(&"dining_table", Vector3(float(i) * 2.2 - 4.0, 0.0, 3.2), 0.0)
+		for i in 3:
+			BusinessManager.simulate_hour_now(diner, 12)
+
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	await _wait(30)
+
+	var company: Node = _hud_screen(hud, "CompanyDashboard")
+	match scenario:
+		"brand_screen":
+			company.call("open", CompanyDashboard.Page.BRANDS)
+		"company_staff":
+			company.call("open", CompanyDashboard.Page.EMPLOYEES)
+		"bottleneck_report":
+			company.call("open", CompanyDashboard.Page.OPERATIONS)
+		"company_portfolio":
+			company.call("open", CompanyDashboard.Page.LOCATIONS)
+		"multi_shift":
+			var rota: Node = _hud_screen(hud, "StaffSchedulePanel")
+			var worker := _two_shift_worker(diner)
+			if worker != null:
+				rota.call("open", worker)
+		"manager_permissions":
+			var manager: Node = _hud_screen(hud, "ManagerPanel")
+			if diner != null:
+				if not diner.has_manager():
+					CompanyDebug.hire(diner, EmployeeData.Role.MANAGER, 0.8)
+				diner.auto_open = true
+				diner.auto_order = true
+				diner.auto_order_budget = 1500
+				manager.call("open", diner)
+		_:
+			company.call("open", CompanyDashboard.Page.OVERVIEW)
+	await _wait(12)
+
+
+## Somebody working lunch and dinner, so the rota screen has a week to show.
+func _two_shift_worker(diner: BusinessInstance) -> EmployeeData:
+	if diner == null:
+		return null
+	var worker := CompanyDebug.hire(diner, EmployeeData.Role.SERVER, 0.7)
+	if worker == null:
+		return null
+	worker.clear_shifts()
+	worker.set_weekly_shifts([
+		ShiftSlot.make(11, 15, EmployeeData.Role.SERVER, ShiftSlot.EVERY_DAY, diner.business_id),
+		ShiftSlot.make(18, 23, EmployeeData.Role.SERVER, ShiftSlot.EVERY_DAY, diner.business_id),
+		ShiftSlot.make(10, 15, EmployeeData.Role.SERVER, 5, diner.business_id),
+	])
+	return worker
+
+
+func _open_restaurant(main: Node) -> BusinessInstance:
+	var diner := CompanyDebug.stand_up(
+		&"unit_plaza_07", &"restaurant", "Anchor Kitchen", get_tree(), 30000
+	)
+	if diner != null:
+		diner.manual_override = BusinessInstance.Override.FORCE_OPEN
+		diner.set_open(true)
+		var room: RetailUnit = main.get_node("Interiors/CentralPlazaUnit")
+		room.rebuild_equipment()
+	return diner
+
+
+func _open_gym(main: Node) -> BusinessInstance:
+	var gym := CompanyDebug.stand_up(
+		&"unit_dock_09", &"gym", "Dock Road Fitness", get_tree(), 30000
+	)
+	if gym != null:
+		CompanyDebug.hire(gym, EmployeeData.Role.CLEANER, 0.8)
+		gym.manual_override = BusinessInstance.Override.FORCE_OPEN
+		gym.set_open(true)
+		var room: RetailUnit = main.get_node("Interiors/DockRoadUnit")
+		room.rebuild_equipment()
+	return gym
+
+
+func _open_club(main: Node) -> BusinessInstance:
+	var club := CompanyDebug.stand_up(
+		&"unit_vault_03", &"nightclub", "Vault", get_tree(), 45000
+	)
+	if club != null:
+		club.manual_override = BusinessInstance.Override.FORCE_OPEN
+		club.set_open(true)
+		var room: RetailUnit = main.get_node("Interiors/VaultStreetUnit")
+		room.rebuild_equipment()
+	return club
+
+
+## Drops the player on the pavement outside a unit's door, facing it.
+func _stand_outside(player: Node3D, property_id: StringName, back_off: float) -> void:
+	var door := PropertyManager.by_id(property_id)
+	if door == null:
+		return
+	var facing := Vector3.FORWARD.rotated(Vector3.UP, deg_to_rad(door.sign_yaw))
+	player.global_position = door.global_position + facing * back_off + Vector3(0.0, 0.6, 0.0)
+	await _wait(45)
+
+
+## Puts the player inside a unit and waits for the room to settle.
+func _stand_in(player: Node3D, unit: RetailUnit, offset: Vector3) -> void:
+	unit.ensure_built()
+	player.global_position = unit.global_position + offset + Vector3(0.0, 0.6, 0.0)
+	await _wait(60)
+	unit.call("_refresh_staff")
+	await _wait(30)
+
+
+## Spawns customers and lets them find their way to a table, a machine or the
+## floor. They are the real customer AI, so the frames show what the game does.
+func _fill_the_floor(unit: RetailUnit, count: int, settle_frames: int) -> void:
+	var spawner := unit.get_spawner()
+	if spawner == null:
+		return
+	for i in count:
+		spawner.spawn_customer_now()
+		await _wait(14)
+	await _wait(settle_frames)

@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"venue_snacks"
+display_name = "Bar Snacks"
+description = "Something to hold."
+category = 0
+price = 6
+max_stack = 40
+icon_color = Color(0.769, 0.667, 0.4, 1)
+wholesale_cost = 2
+recommended_price = 6
+demand_weight = 0.7
+consumable = false

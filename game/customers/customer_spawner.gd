@@ -29,6 +29,11 @@ var _pending: float = 0.0
 var _serve_timer: float = 0.0
 var _rng := RandomNumberGenerator.new()
 var _player_register: BusinessEquipment = null
+## The rope outside a venue. Same structure as the till queue, different door.
+var _door_queue := ServiceQueue.new()
+var _door_timer: float = 0.0
+## Seconds until the kitchen and the floor are looked at again.
+var _kitchen_timer: float = 0.0
 var _arrival: Marker3D = null
 var _threshold: Marker3D = null
 var _spawn_count: int = 0
@@ -117,12 +122,17 @@ func spawn_customer_now() -> CustomerAI:
 	return _spawn_one()
 
 
-## How many will fit inside. The property decides — a small unit is a small shop
-## — and the hard ceiling above is only there to protect the frame rate.
+## How many will fit inside. The operating model decides — seats in a
+## restaurant, machines in a gym, floor in a venue, and the room itself in a
+## shop — and the hard ceiling above is only there to protect the frame rate.
 func capacity() -> int:
-	if _business == null:
+	# Resolved rather than assumed: the business is normally set by the minute
+	# tick, and anything asking before the player has walked in — a screen, a
+	# test — would otherwise be told the hard ceiling instead of the truth.
+	var business := _business if _business != null else _unit.get_business()
+	if business == null:
 		return max_active_customers
-	return mini(_business.customer_capacity(), max_active_customers)
+	return mini(business.model().customer_capacity(business), max_active_customers)
 
 
 func queue_limit() -> int:
@@ -197,6 +207,152 @@ func leave_queue(customer: CustomerAI) -> void:
 		_reposition_queue()
 
 
+# --- The door ------------------------------------------------------------
+
+## The queue outside a venue. Longer than a shop's, because standing in one is
+## part of the evening, and worked by security rather than by a till.
+func join_entry_queue(customer: CustomerAI) -> bool:
+	if _threshold == null:
+		return false
+	_door_queue.prune()
+	var post := _unit.first_of_role(EquipmentData.Role.SECURITY_POST)
+	var head := post.service_point() if post != null else _threshold.global_position
+	var back := (head - _unit.global_position).normalized()
+	_door_queue.configure(head, back, door_limit(), queue_spacing)
+	if not _door_queue.join(customer):
+		return false
+	_reposition_door()
+	return true
+
+
+func leave_entry_queue(customer: CustomerAI) -> void:
+	if _door_queue.leave(customer):
+		_reposition_door()
+
+
+func door_queue_length() -> int:
+	_door_queue.prune()
+	return _door_queue.size()
+
+
+## How long a line the venue will let build before people stop joining it.
+func door_limit() -> int:
+	if _business == null:
+		return 6
+	var security := _business.rostered_all(EmployeeData.Role.SECURITY, TimeManager.hour).size()
+	# Somebody working the door is what makes a long queue orderly rather than
+	# a crowd, so it is what lets the line grow.
+	return maxi(_business.queue_capacity() + security * 4, 3)
+
+
+func _reposition_door() -> void:
+	for who in _door_queue.members():
+		var customer := who as CustomerAI
+		if customer != null and is_instance_valid(customer):
+			customer.set_queue_slot(
+				_door_queue.place_of(customer), _door_queue.position_of(customer)
+			)
+
+
+## Lets people in as fast as the door can work and as the room allows.
+func _work_the_door(delta: float) -> void:
+	if _business == null or _door_queue.is_empty():
+		return
+	_door_queue.prune()
+	_door_timer -= delta
+	if _door_timer > 0.0:
+		return
+	var model := _business.model()
+	var inside := 0
+	for customer in active_customers():
+		if customer.stage == CustomerAI.Stage.IN_THE_ROOM:
+			inside += 1
+	if inside >= model.customer_capacity(_business):
+		# Full. The rope stays across, which is the queue doing its job.
+		_door_timer = 1.5
+		return
+	var security := _business.rostered_all(EmployeeData.Role.SECURITY, TimeManager.hour)
+	# Unworked, the door still moves — slowly, and to a smaller room.
+	_door_timer = 1.2 if security.is_empty() else 0.45
+	var next := _door_queue.take_front() as CustomerAI
+	_reposition_door()
+	if next != null and is_instance_valid(next):
+		next.admit()
+
+
+# --- The kitchen ---------------------------------------------------------
+
+## Tickets, cooks and the walk to the table.
+##
+## The one part of the game where three people have to co-operate to make a
+## sale: whoever sat down, whoever is on the stove and whoever carries it. Any
+## of the three missing and the order sits there, which is exactly what the
+## player should be able to see happening.
+func _work_the_kitchen(delta: float) -> void:
+	if _business == null or _business.kitchen.is_empty():
+		return
+	_kitchen_timer -= delta
+	if _kitchen_timer > 0.0:
+		return
+	_kitchen_timer = 0.4
+
+	var hour := TimeManager.hour
+	var now := TimeManager.total_minutes
+	var model := _business.model() as TableServiceModel
+
+	# Anybody who walked out takes their ticket with them.
+	for order in _business.kitchen:
+		if order.is_open() and order.customer_is_gone():
+			order.stage = KitchenOrder.Stage.ABANDONED
+
+	var cook := _cook_at_the_stove(hour)
+	if cook != null:
+		var ticket := _business.next_unstarted_order()
+		if ticket != null:
+			# Nothing is charged for yet — this is the food being taken out of
+			# the store and put on the heat.
+			if _business.reserve_for_order(ticket.recipe, 1) > 0:
+				ticket.stage = KitchenOrder.Stage.COOKING
+				ticket.assigned_cook = cook
+				ticket.quality = (
+					model.food_quality(_business, cook) if model != null else 70.0
+				)
+				ticket.ready_time = now + _business.preparation_seconds(
+					ticket.recipe, cook
+				) / 60.0
+			else:
+				# The larder is empty. The customer is told rather than left.
+				ticket.stage = KitchenOrder.Stage.ABANDONED
+				_business.record_lost_sale(LostReason.NO_STOCK)
+
+	for order in _business.kitchen:
+		if order.stage == KitchenOrder.Stage.COOKING and now >= order.ready_time:
+			order.stage = KitchenOrder.Stage.READY
+
+	if _server_on_the_floor(hour) != null:
+		var plate := _business.next_ready_order()
+		if plate != null:
+			plate.stage = KitchenOrder.Stage.DELIVERED
+	_business.tidy_kitchen()
+
+
+## Whoever is actually in the kitchen. The visible cook is preferred so the
+## player can watch the person doing it; the rota answers when nobody has been
+## spawned in, which is what keeps a test honest without a body on the floor.
+func _cook_at_the_stove(hour: int) -> EmployeeData:
+	var visible := _unit.get_node_or_null("Cook") as EmployeeAI
+	if visible != null and visible.is_at_station():
+		return visible.employee
+	return _business.rostered(EmployeeData.Role.COOK, hour)
+
+
+func _server_on_the_floor(hour: int) -> EmployeeData:
+	var visible := _unit.get_node_or_null("Server") as EmployeeAI
+	if visible != null and visible.is_at_station():
+		return visible.employee
+	return _business.rostered(EmployeeData.Role.SERVER, hour)
+
+
 ## Everybody shuffles up one. Positions run back from the counter rather than
 ## sideways, so the line reads as a line from above.
 func _reposition_queue() -> void:
@@ -215,7 +371,11 @@ func _reposition_queue() -> void:
 
 func _process(delta: float) -> void:
 	_business = _unit.get_business()
-	if _business == null or queue_length() == 0:
+	if _business == null:
+		return
+	_work_the_kitchen(delta)
+	_work_the_door(delta)
+	if queue_length() == 0:
 		return
 
 	# The player has to actually be stood at the till they claimed.

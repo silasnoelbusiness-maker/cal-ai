@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://equipment/equipment_data.gd" id="1_equipment_data"]
+
+[resource]
+script = ExtResource("1_equipment_data")
+equipment_id = &"dining_table"
+display_name = "Dining Table"
+description = "Four covers, one table. Seats are what a restaurant sells."
+role = 5
+purchase_price = 150
+placement_size = Vector2(1.5, 1.5)
+height = 0.78
+body_color = Color(0.435, 0.325, 0.259, 1)
+accent_color = Color(0.878, 0.855, 0.812, 1)
+capacity = 0
+business_types_allowed = Array[StringName]([&"restaurant"])
+customer_slots = 4
+quality_tier = 1
+soiling_per_use = 0.18
+operated_by_role = -1

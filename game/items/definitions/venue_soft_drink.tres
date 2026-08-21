@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://items/item_data.gd" id="1_item_data"]
+
+[resource]
+script = ExtResource("1_item_data")
+id = &"venue_soft_drink"
+display_name = "Soft Drink"
+description = "Sold by the glass at the bar."
+category = 1
+price = 5
+max_stack = 40
+icon_color = Color(0.494, 0.639, 0.749, 1)
+wholesale_cost = 1
+recommended_price = 5
+demand_weight = 1.2
+consumable = false

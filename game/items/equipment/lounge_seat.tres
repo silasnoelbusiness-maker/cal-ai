@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="EquipmentData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://equipment/equipment_data.gd" id="1_equipment_data"]
+
+[resource]
+script = ExtResource("1_equipment_data")
+equipment_id = &"lounge_seat"
+display_name = "Lounge Seating"
+description = "A booth for the people who came to sit down."
+role = 5
+purchase_price = 260
+placement_size = Vector2(2.2, 1.0)
+height = 0.9
+body_color = Color(0.259, 0.22, 0.29, 1)
+accent_color = Color(0.518, 0.404, 0.596, 1)
+capacity = 0
+business_types_allowed = Array[StringName]([&"nightclub"])
+customer_slots = 3
+quality_tier = 2
+soiling_per_use = 0.2
+operated_by_role = -1

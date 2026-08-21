@@ -44,6 +44,7 @@ static func ids() -> Array[StringName]:
 		&"siren", &"alert", &"busted",
 		&"amb_city_day", &"amb_city_night", &"amb_park", &"amb_room",
 		&"amb_store", &"amb_cafe",
+		&"amb_kitchen", &"amb_gym", &"amb_venue",
 	]
 
 
@@ -143,12 +144,39 @@ static func _build(id: StringName) -> AudioStreamWAV:
 			return _hum_loop(120.0, 2.0, 0.09)
 		&"amb_cafe":
 			return _hum_loop(88.0, 2.0, 0.10)
+		# Phase O rooms. All three are the same two builders the rest of the
+		# beds use, at different frequencies — original synthesis, nothing
+		# sampled, nothing licensed.
+		&"amb_kitchen":
+			# Extractor fan, and the clatter of a room with hard surfaces.
+			return _hum_loop(146.0, 2.0, 0.11)
+		&"amb_gym":
+			return _noise_loop(2.6, 340.0, 0.08, 0.40)
+		&"amb_venue":
+			# A slow pulse under a low bed: the shape of music heard through a
+			# wall, without being music. See §110.
+			return _pulse_loop(58.0, 2.0, 0.13, 2.0)
 		_:
 			push_warning("ToneBank has no sound called '%s'." % id)
 			return _blip(440.0, 0.05, 0.1)
 
 
 # --- Builders --------------------------------------------------------------
+
+## A low tone that swells and falls on a fixed beat. Deliberately not a tune:
+## it is the felt part of a room with a system in it, and it is ours.
+static func _pulse_loop(
+	hz: float, seconds: float, amplitude: float, beats_per_second: float
+) -> AudioStreamWAV:
+	var count := int(RATE * seconds)
+	var data := PackedFloat32Array()
+	data.resize(count)
+	for i in count:
+		var t := float(i) / RATE
+		var beat := 0.55 + 0.45 * pow(maxf(sin(TAU * beats_per_second * t * 0.5), 0.0), 2.0)
+		var body := sin(TAU * hz * t) * 0.7 + sin(TAU * hz * 2.0 * t) * 0.3
+		data[i] = body * beat * amplitude
+	return _to_stream(data, true)
 
 ## A burst of noise through a one-pole low-pass, with an optional resonant thump
 ## under it. The workhorse: footsteps, doors, impacts.

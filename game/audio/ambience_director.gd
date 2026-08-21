@@ -11,7 +11,18 @@ extends Node
 
 signal profile_changed(profile: StringName)
 
-enum Space { EXTERIOR, STORE, CAFE, HOME }
+## Appended to in Phase O: a kitchen, a gym and a venue each sound like
+## themselves, and none of them sound like a corner shop.
+enum Space { EXTERIOR, STORE, CAFE, HOME, KITCHEN, GYM, VENUE }
+
+## Which room tone each kind of business gets. A type not listed here sounds
+## like a shop, which is the right answer for a shop.
+const SPACE_BY_TYPE := {
+	&"coffee_shop": Space.CAFE,
+	&"restaurant": Space.KITCHEN,
+	&"gym": Space.GYM,
+	&"nightclub": Space.VENUE,
+}
 
 ## Seconds to cross from one bed to another.
 const FADE := 1.4
@@ -62,6 +73,12 @@ func get_space() -> Space:
 
 
 ## What is currently playing, for the debug panel and for tests.
+## Which kind of room the player is standing in. Read by the music director,
+## which has a state for a venue and nothing to play in it yet.
+func current_space() -> Space:
+	return _space
+
+
 func current_profile() -> StringName:
 	return _profile
 
@@ -92,8 +109,10 @@ func _detect_space() -> Space:
 		var unit := node as RetailUnit
 		if unit == null or not unit.is_player_inside():
 			continue
-		return Space.CAFE if unit.get_business() != null \
-			and unit.get_business().type_id == &"coffee_shop" else Space.STORE
+		var business := unit.get_business()
+		if business == null:
+			return Space.STORE
+		return SPACE_BY_TYPE.get(business.type_id, Space.STORE)
 
 	for node in get_tree().get_nodes_in_group(&"interior_room"):
 		var room := node as Node3D
@@ -122,6 +141,17 @@ func _refresh_profile() -> void:
 		Space.CAFE:
 			interior_bed = &"amb_cafe"
 			interior_db = BED_DB + 1.0
+		Space.KITCHEN:
+			interior_bed = &"amb_kitchen"
+			interior_db = BED_DB + 2.0
+		Space.GYM:
+			interior_bed = &"amb_gym"
+			interior_db = BED_DB
+		Space.VENUE:
+			# The loudest room in the game, and the only one where the bed is
+			# meant to be felt rather than heard past.
+			interior_bed = &"amb_venue"
+			interior_db = BED_DB + 4.0
 		Space.HOME:
 			interior_bed = &"amb_room"
 			# A flat is the quietest place in the game, on purpose.

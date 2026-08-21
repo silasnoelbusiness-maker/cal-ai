@@ -19,6 +19,10 @@ var unit: Node3D = null
 var _definition: EquipmentData = null
 var _interactable: Interactable = null
 var _goods: Node3D = null
+## Customers using this right now: people at a table, on a machine, on the
+## floor. Kept on the node rather than in the record because it is a fact about
+## the room the player is standing in, not about the business.
+var occupants: int = 0
 
 
 ## Builds the whole object. Called once, straight after instancing.
@@ -39,6 +43,38 @@ func setup(
 	_build_body()
 	_build_interactable()
 	refresh()
+
+
+## Places for customers this piece offers, from its definition.
+func customer_slots() -> int:
+	return _definition.customer_slots if _definition != null else 0
+
+
+func free_slots() -> int:
+	return maxi(customer_slots() - occupants, 0)
+
+
+func has_room() -> bool:
+	return free_slots() > 0
+
+
+func take_slot() -> bool:
+	if not has_room():
+		return false
+	occupants += 1
+	return true
+
+
+func release_slot() -> void:
+	occupants = maxi(occupants - 1, 0)
+
+
+func role() -> int:
+	return int(_definition.role) if _definition != null else -1
+
+
+func is_role(value: int) -> bool:
+	return _definition != null and int(_definition.role) == value
 
 
 func slot_id() -> int:

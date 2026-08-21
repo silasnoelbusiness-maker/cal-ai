@@ -66,6 +66,20 @@ func _colour_for_role() -> Color:
 			return Color(0.290, 0.400, 0.310)
 		EmployeeData.Role.MANAGER:
 			return Color(0.361, 0.290, 0.451)
+		EmployeeData.Role.COOK:
+			return Color(0.898, 0.882, 0.847)
+		EmployeeData.Role.SERVER:
+			return Color(0.239, 0.278, 0.333)
+		EmployeeData.Role.RECEPTIONIST:
+			return Color(0.290, 0.443, 0.478)
+		EmployeeData.Role.CLEANER:
+			return Color(0.451, 0.494, 0.290)
+		EmployeeData.Role.SECURITY:
+			return Color(0.145, 0.153, 0.180)
+		EmployeeData.Role.BARTENDER:
+			return Color(0.478, 0.333, 0.400)
+		EmployeeData.Role.ENTERTAINER:
+			return Color(0.353, 0.427, 0.612)
 		_:
 			return Color(0.318, 0.396, 0.502)
 
@@ -218,14 +232,37 @@ func _refresh_station() -> void:
 	_facing = (post.service_point() - _station).normalized()
 
 
-## The thing this role stands behind. A barista wants the machine and falls back
-## to the counter; everybody else wants the counter.
+## Where each job stands, in order of preference.
+##
+## Read off the equipment rather than hard-coded to a room: a cook wants a stove
+## and will settle for a prep counter, a doorman wants the door, and everybody
+## whose station has not been bought yet falls back to the till so they are at
+## least in the building.
+const STATIONS := {
+	EmployeeData.Role.BARISTA: [EquipmentData.Role.BREW],
+	EmployeeData.Role.COOK: [EquipmentData.Role.COOK_STATION, EquipmentData.Role.PREP],
+	EmployeeData.Role.SERVER: [EquipmentData.Role.PASS],
+	EmployeeData.Role.RECEPTIONIST: [EquipmentData.Role.RECEPTION],
+	EmployeeData.Role.BARTENDER: [EquipmentData.Role.BAR],
+	EmployeeData.Role.SECURITY: [EquipmentData.Role.SECURITY_POST],
+	EmployeeData.Role.ENTERTAINER: [EquipmentData.Role.DJ_BOOTH],
+	EmployeeData.Role.CLEANER: [EquipmentData.Role.CLEANING],
+}
+
+
 func _workstation() -> BusinessEquipment:
-	if employee != null and employee.role == EmployeeData.Role.BARISTA:
-		for node in _unit.equipment_nodes():
-			if node.placed != null and node.placed.data() != null and node.placed.data().is_workstation():
-				return node
-	return _unit.first_checkout()
+	if employee != null:
+		for role: int in STATIONS.get(employee.role, []):
+			var post := _unit.first_of_role(role)
+			if post != null:
+				return post
+	var till := _unit.first_checkout()
+	if till != null:
+		return till
+	# Nothing they recognise. Anything with a staff side is better than the
+	# doorway, and this is what stops a half-fitted room leaving people stuck.
+	var nodes := _unit.equipment_nodes()
+	return nodes[0] if not nodes.is_empty() else null
 
 
 func _face_the_shop() -> void:
