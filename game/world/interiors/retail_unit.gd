@@ -511,11 +511,11 @@ func _build_palette() -> void:
 			trim_mat = Palette.of(&"metal_mid")
 		&"nightclub":
 			# Dark enough that the fittings are what light the room, light
-			# enough that there is a room to see. The first pass at this was
-			# nearly black and rendered a frame nobody could read.
-			floor_mat = CityKit.make_material(Color(0.145, 0.129, 0.180))
-			wall_mat = CityKit.make_material(Color(0.180, 0.157, 0.224))
-			trim_mat = CityKit.make_material(Color(0.286, 0.235, 0.353))
+			# enough that there is a room to see. Two passes at this were too
+			# black to read; a venue floor is not the same thing as no floor.
+			floor_mat = CityKit.make_material(Color(0.243, 0.216, 0.290))
+			wall_mat = CityKit.make_material(Color(0.278, 0.243, 0.337))
+			trim_mat = CityKit.make_material(Color(0.396, 0.325, 0.478))
 		_:
 			# Vacant: bare but finished. An empty unit is a rental, not a
 			# debug room, so it gets a real floor and a real skirting.
@@ -980,10 +980,11 @@ func _build_lighting() -> void:
 		light.name = "CeilingLight"
 		light.position = spot
 		light.light_color = tone
-		# A venue is dim, not invisible: enough to read the room by, and no
-		# more, with the rig doing the rest.
-		light.light_energy = 0.55 if venue else (0.8 if warm else 0.95)
-		light.omni_range = maxf(room.size.x, room.size.y) * 0.62
+		# A venue is dim, not invisible. Dark surfaces reflect little, so the
+		# fittings need to throw *more* at them rather than less — the first
+		# pass turned the energy down and rendered a black rectangle.
+		light.light_energy = 1.35 if venue else (0.8 if warm else 0.95)
+		light.omni_range = maxf(room.size.x, room.size.y) * 0.9
 		light.shadow_enabled = false
 		holder.add_child(light)
 

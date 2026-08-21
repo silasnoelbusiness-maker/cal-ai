@@ -2010,7 +2010,7 @@ func _phase_o_scenario(main: Node, scenario: String) -> void:
 				manager.call("open", gym)
 				await _wait(10)
 			else:
-				await _stand_in(player, floor_room, Vector3(0.0, 0.0, 4.0))
+				await _stand_in(player, floor_room, Vector3(-4.0, 0.0, 2.5))
 				if scenario == "gym_customers":
 					await _fill_the_floor(floor_room, 6, 420)
 
@@ -2020,7 +2020,7 @@ func _phase_o_scenario(main: Node, scenario: String) -> void:
 		"club_interior", "club_queue", "club_operating":
 			var club := _open_club(main)
 			var venue: RetailUnit = main.get_node("Interiors/VaultStreetUnit")
-			await _stand_in(player, venue, Vector3(0.0, 0.0, 4.5))
+			await _stand_in(player, venue, Vector3(-4.5, 0.0, 2.0))
 			if scenario != "club_interior":
 				await _fill_the_floor(venue, 9, 520)
 
