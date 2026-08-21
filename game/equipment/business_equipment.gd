@@ -259,32 +259,52 @@ func _build_interactable() -> void:
 	_refresh_prompt()
 
 
+## What standing in front of a piece of equipment offers.
+##
+## Phase H had two answers and a fall-through to "Manage Shelf", which was fine
+## while everything was either a till, a stock room or a shelf. It is not fine
+## in a restaurant: a dining table is not a shelf, and being told to manage one
+## is the interface lying about what the object is.
 func _refresh_prompt() -> void:
 	if _interactable == null or placed == null:
 		return
 	match _definition.role:
-		EquipmentData.Role.CHECKOUT:
-			_interactable.prompt_action = "Work Register"
-			_interactable.prompt_subtitle = business.business_name if business != null else ""
-		EquipmentData.Role.STORAGE:
-			_interactable.prompt_action = "Store Room"
-			_interactable.prompt_subtitle = "%d / %d units" % [
-				business.storage_used(), business.storage_capacity()
-			] if business != null else ""
-		_:
+		EquipmentData.Role.SHELF:
 			var item := placed.item()
 			_interactable.prompt_action = "Manage Shelf"
 			_interactable.prompt_subtitle = (
 				"empty" if item == null
 				else "%s  %d / %d" % [item.display_name, placed.stock_quantity, placed.capacity()]
 			)
+		EquipmentData.Role.CHECKOUT, EquipmentData.Role.PASS, EquipmentData.Role.BAR, \
+		EquipmentData.Role.RECEPTION:
+			_interactable.prompt_action = "Work Here"
+			_interactable.prompt_subtitle = business.business_name if business != null else ""
+		EquipmentData.Role.STORAGE, EquipmentData.Role.COLD_STORE:
+			_interactable.prompt_action = "Store Room"
+			_interactable.prompt_subtitle = "%d / %d units" % [
+				business.storage_used(), business.storage_capacity()
+			] if business != null else ""
+		EquipmentData.Role.SEATING, EquipmentData.Role.MACHINE, \
+		EquipmentData.Role.DANCE_FLOOR:
+			_interactable.prompt_action = _definition.display_name
+			_interactable.prompt_subtitle = "%d of %d in use" % [
+				occupants, maxi(_definition.customer_slots, 1)
+			]
+		_:
+			# Cook stations, booths, rigs, doors: things staff work at rather
+			# than things the player operates. The dashboard is where they are
+			# managed, so that is where the prompt goes.
+			_interactable.prompt_action = _definition.display_name
+			_interactable.prompt_subtitle = business.business_name if business != null else ""
 
 
 func _on_interacted(interactor: Node3D) -> void:
 	match _definition.role:
-		EquipmentData.Role.CHECKOUT:
-			register_requested.emit(self)
-		EquipmentData.Role.STORAGE:
-			GameManager.request_screen(&"business", self, interactor)
-		_:
+		EquipmentData.Role.SHELF:
 			GameManager.request_screen(&"shelf", self, interactor)
+		EquipmentData.Role.CHECKOUT, EquipmentData.Role.PASS, EquipmentData.Role.BAR, \
+		EquipmentData.Role.RECEPTION:
+			register_requested.emit(self)
+		_:
+			GameManager.request_screen(&"business", self, interactor)

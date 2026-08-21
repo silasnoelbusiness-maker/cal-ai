@@ -334,10 +334,14 @@ func checkout_seconds() -> float:
 	return lerpf(4.5, 1.6, clampf(float(skill_checkout) / 100.0, 0.0, 1.0))
 
 
-## Multiplier on a drink's preparation time. A good barista is about twice the
-## speed of a poor one.
+## Multiplier on how long it takes them to make something. A good one is about
+## twice the speed of a poor one.
+##
+## Reads the skill their *role* is paid for rather than the barista skill it was
+## written against, because Phase O put cooks in kitchens and a cook whose speed
+## came from how well they pull an espresso is nobody's idea of a kitchen.
 func preparation_scale() -> float:
-	return lerpf(1.6, 0.7, clampf(float(skill_barista) / 100.0, 0.0, 1.0))
+	return lerpf(1.6, 0.7, clampf(float(relevant_skill()) / 100.0, 0.0, 1.0))
 
 
 ## Units of stock a stocker moves per minute on shift.

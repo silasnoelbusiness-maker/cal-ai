@@ -120,9 +120,26 @@ static func _grid_point(unit: RetailUnit, index: int, data: EquipmentData) -> Ve
 static func stock_up(business: BusinessInstance, quantity: int = 40) -> int:
 	if business == null:
 		return 0
+	var definition := business.type_data()
+	var lines := business.orderable()
+	if lines.is_empty():
+		return 0
+	# Room is finite and the list is ordered, so ordering greedily down it
+	# leaves whatever is last with nothing — and a menu where every dish needs
+	# one of the last three lines is a kitchen that cannot cook anything. The
+	# room is divided by how hard each line is used instead.
+	var weights: Array[float] = []
+	var total_weight := 0.0
+	for item in lines:
+		var weight := definition.ingredient_usage(item) if definition != null else 1.0
+		weights.append(weight)
+		total_weight += weight
+	var room := BusinessManager.room_left_after_orders(business)
 	var ordered := 0
-	for item in business.orderable():
-		if BusinessManager.order_stock(business, item.id, quantity) == BusinessManager.PurchaseResult.OK:
+	for i in lines.size():
+		var share := int(float(room) * weights[i] / maxf(total_weight, 0.01))
+		var wanted := mini(maxi(roundi(float(quantity) * weights[i]), 1), maxi(share, 1))
+		if BusinessManager.order_stock(business, lines[i].id, wanted) == BusinessManager.PurchaseResult.OK:
 			ordered += 1
 	BusinessManager.deliver_now(business)
 	return ordered
@@ -197,6 +214,12 @@ static func _property(property_id: StringName) -> CommercialProperty:
 
 
 # --- Single-purpose pokes -------------------------------------------------
+
+## Forces a rush, or clears one. §132 asks for this; nothing else sets it.
+static func force_demand(business: BusinessInstance, multiplier: float) -> void:
+	if business != null:
+		business.demand_override = maxf(multiplier, 0.0)
+
 
 static func set_cleanliness(business: BusinessInstance, value: float) -> void:
 	if business != null:

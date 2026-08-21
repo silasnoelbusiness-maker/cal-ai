@@ -115,6 +115,11 @@ var lost_reasons_today: Dictionary = {}
 var role_load_today: Dictionary = {}
 var equipment_load_today: Dictionary = {}
 var service_revenue_today: int = 0
+## Development lever (§132's "force demand"). Multiplies the arrival rate, and
+## is off at zero. Not saved and never set by anything the player can reach —
+## it exists so a test can create a lunch rush on purpose rather than hoping
+## for one, and so a screenshot can show a room under pressure.
+var demand_override: float = 0.0
 var units_sold_today: int = 0
 
 var lifetime_revenue: int = 0

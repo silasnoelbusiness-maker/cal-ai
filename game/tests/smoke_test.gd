@@ -253,6 +253,7 @@ func _run() -> void:
 	_test_manager_permissions()
 	_test_manager_positioning()
 	await _test_bottlenecks()
+	_test_forced_demand()
 	_test_district_demand()
 	_test_time_of_day_demand()
 	await _test_far_simulation()
@@ -9372,6 +9373,9 @@ func _test_bottlenecks() -> void:
 	while cooks.size() > 1:
 		diner.fire(cooks.pop_back().employee_id)
 	_check(diner.rostered_all(EmployeeData.Role.COOK, 12).size() <= 1, "one cook is left")
+	# A lunch rush, on purpose. Left to the curve this test would pass or fail
+	# on how good the cook the hiring board happened to offer was.
+	CompanyDebug.force_demand(diner, 4.0)
 
 	var model := diner.model() as TableServiceModel
 	var demand := CustomerDemand.customers_per_hour(diner, 12)
@@ -9409,6 +9413,37 @@ func _test_bottlenecks() -> void:
 	for i in range(1, severities.size()):
 		sorted = sorted and severities[i] <= severities[i - 1]
 	_check(sorted, "worst first")
+
+	# A second cook is the answer, and the report should stop saying it.
+	CompanyDebug.hire(diner, EmployeeData.Role.COOK, 0.9)
+	CompanyDebug.force_demand(diner, 0.0)
+	var after: Array[String] = []
+	for issue in model.bottlenecks(diner, 12):
+		after.append(String(issue["headline"]))
+	_check(
+		not after.has("KITCHEN BACKLOG"),
+		"another cook and the rush over, the kitchen stops being the problem"
+	)
+
+
+## TEST — the development demand lever does what it says and nothing more.
+func _test_forced_demand() -> void:
+	var gym := _o_gym()
+	if gym == null:
+		return
+	CompanyDebug.force_demand(gym, 0.0)
+	var natural := CustomerDemand.customers_per_hour(gym, 18)
+	_check(natural > 0.0, "the gym has an arrival rate of its own (%.1f)" % natural)
+	CompanyDebug.force_demand(gym, 2.0)
+	_check(
+		absf(CustomerDemand.customers_per_hour(gym, 18) - natural * 2.0) < 0.01,
+		"forcing demand doubles it and nothing else"
+	)
+	CompanyDebug.force_demand(gym, 0.0)
+	_check(
+		absf(CustomerDemand.customers_per_hour(gym, 18) - natural) < 0.01,
+		"and clearing it puts the rate back"
+	)
 
 
 ## TEST §148 — the same business is worth more in one district than the other.

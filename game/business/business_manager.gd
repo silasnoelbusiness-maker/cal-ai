@@ -933,10 +933,14 @@ func _manager_reorder(business: BusinessInstance, boss: EmployeeData) -> void:
 		# quietly spends a week's budget on one afternoon's beans.
 		if _incoming(business, item.id) > 0:
 			continue
+		# A kitchen gets through its vegetables faster than its pasta, so the
+		# targets follow the menu rather than treating every line alike.
+		var definition := business.type_data()
+		var weight := definition.ingredient_usage(item) if definition != null else 1.0
 		var held := business.storage_of(item.id)
-		if held >= business.auto_order_minimum:
+		if held >= roundi(float(business.auto_order_minimum) * weight):
 			continue
-		var wanted := business.auto_order_target - held
+		var wanted := roundi(float(business.auto_order_target) * weight) - held
 		if wanted <= 0:
 			continue
 		var affordable := budget / maxi(item.get_wholesale_cost(), 1)

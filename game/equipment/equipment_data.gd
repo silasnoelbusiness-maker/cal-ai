@@ -73,8 +73,11 @@ func is_checkout() -> bool:
 	return role == Role.CHECKOUT
 
 
+## Anything the back room keeps stock in. A dry store and a fridge are both
+## store rooms as far as capacity is concerned; only the temperature differs,
+## and nothing in the game models temperature.
 func is_storage() -> bool:
-	return role == Role.STORAGE
+	return role == Role.STORAGE or role == Role.COLD_STORE
 
 
 ## A workstation where a prepared product is made — the coffee machine, and

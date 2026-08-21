@@ -86,8 +86,10 @@ static func customers_per_hour(
 	var attraction := 1.0 + business.marketing_bonus() + business.upgrade_magnitude(
 		BusinessUpgrade.Effect.ATTRACTION
 	)
+	var forced := business.demand_override
 	return (
-		definition.peak_customers_per_hour
+		(forced if forced > 0.0 else 1.0)
+		* definition.peak_customers_per_hour
 		* definition.demand_at_hour(hour)
 		* weekday_factor(definition, weekday)
 		* definition.district_factor(business.district_id())

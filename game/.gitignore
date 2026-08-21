@@ -7,3 +7,7 @@ export_presets.cfg
 
 # Editor scratch
 *.translation
+
+# Dev screenshots: rendered on demand by tests/screenshot.gd and handed to
+# whoever asked for them. Not build inputs, and not small.
+/screenshots/

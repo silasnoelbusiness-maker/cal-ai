@@ -174,7 +174,13 @@ func food_quality(business: BusinessInstance, cook: EmployeeData) -> float:
 
 
 func bottlenecks(business: BusinessInstance, hour: int) -> Array[Dictionary]:
-	var found := super(business, hour)
+	var found: Array[Dictionary] = []
+	# The general "service cannot keep up" line is dropped: this model says
+	# which of the kitchen, the floor and the tables is short, and a fourth
+	# entry saying "one of those three" underneath them is noise.
+	for issue in super(business, hour):
+		if StringName(issue["id"]) != &"checkout":
+			found.append(issue)
 	var demand := CustomerDemand.customers_per_hour(business, hour)
 	var kitchen := float(kitchen_throughput(business, hour))
 	var floor_rate := float(floor_throughput(business, hour))

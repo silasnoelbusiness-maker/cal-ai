@@ -1995,7 +1995,7 @@ func _phase_o_scenario(main: Node, scenario: String) -> void:
 				await _wait(10)
 			else:
 				await _stand_in(player, room, Vector3(0.0, 0.0, 3.4))
-				await _fill_the_floor(room, 5, 260)
+				await _fill_the_floor(room, 5, 900)
 
 		"gym_exterior":
 			await _stand_outside(player, &"unit_dock_09", 8.0)
@@ -2012,7 +2012,7 @@ func _phase_o_scenario(main: Node, scenario: String) -> void:
 			else:
 				await _stand_in(player, floor_room, Vector3(0.0, 0.0, 4.0))
 				if scenario == "gym_customers":
-					await _fill_the_floor(floor_room, 6, 240)
+					await _fill_the_floor(floor_room, 6, 420)
 
 		"club_exterior_night":
 			await _stand_outside(player, &"unit_vault_03", 8.0)
@@ -2022,7 +2022,7 @@ func _phase_o_scenario(main: Node, scenario: String) -> void:
 			var venue: RetailUnit = main.get_node("Interiors/VaultStreetUnit")
 			await _stand_in(player, venue, Vector3(0.0, 0.0, 4.5))
 			if scenario != "club_interior":
-				await _fill_the_floor(venue, 9, 320)
+				await _fill_the_floor(venue, 9, 520)
 
 		"brand_screen", "company_dashboard", "company_staff", "multi_shift", \
 		"manager_permissions", "bottleneck_report", "company_portfolio":
@@ -2132,11 +2132,25 @@ func _open_restaurant(main: Node) -> BusinessInstance:
 	var diner := CompanyDebug.stand_up(
 		&"unit_plaza_07", &"restaurant", "Anchor Kitchen", get_tree(), 30000
 	)
-	if diner != null:
-		diner.manual_override = BusinessInstance.Override.FORCE_OPEN
-		diner.set_open(true)
-		var room: RetailUnit = main.get_node("Interiors/CentralPlazaUnit")
-		room.rebuild_equipment()
+	if diner == null:
+		return null
+	# Six tables rather than the three a bare fit-out gives, so the dining room
+	# reads as a dining room and there is somewhere for everybody to sit.
+	for i in 3:
+		if BusinessManager.buy_equipment(diner, &"dining_table") == BusinessManager.PurchaseResult.OK \
+				and BusinessManager.consume_unplaced(diner, &"dining_table"):
+			diner.place_equipment(
+				&"dining_table", Vector3(3.6, 0.0, 1.0 + float(i) * 2.6), 0.0
+			)
+	diner.manual_override = BusinessInstance.Override.FORCE_OPEN
+	diner.set_open(true)
+	# A lunchtime already behind it, so the sign over the door reads as a
+	# restaurant that has been trading rather than one that just unlocked.
+	for i in 3:
+		BusinessManager.simulate_hour_now(diner, 12)
+	CompanyDebug.stock_up(diner, 90)
+	var room: RetailUnit = main.get_node("Interiors/CentralPlazaUnit")
+	room.rebuild_equipment()
 	return diner
 
 
@@ -2148,6 +2162,8 @@ func _open_gym(main: Node) -> BusinessInstance:
 		CompanyDebug.hire(gym, EmployeeData.Role.CLEANER, 0.8)
 		gym.manual_override = BusinessInstance.Override.FORCE_OPEN
 		gym.set_open(true)
+		for i in 4:
+			BusinessManager.simulate_hour_now(gym, 18)
 		var room: RetailUnit = main.get_node("Interiors/DockRoadUnit")
 		room.rebuild_equipment()
 	return gym
@@ -2160,6 +2176,9 @@ func _open_club(main: Node) -> BusinessInstance:
 	if club != null:
 		club.manual_override = BusinessInstance.Override.FORCE_OPEN
 		club.set_open(true)
+		for i in 3:
+			BusinessManager.simulate_hour_now(club, 23)
+		CompanyDebug.stock_up(club, 90)
 		var room: RetailUnit = main.get_node("Interiors/VaultStreetUnit")
 		room.rebuild_equipment()
 	return club

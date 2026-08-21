@@ -203,7 +203,7 @@ func bottlenecks(business: BusinessInstance, hour: int) -> Array[Dictionary]:
 	var throughput := float(throughput_per_hour(business, hour))
 	if throughput > 0.0 and demand > throughput * 1.1:
 		found.append(_issue(
-			&"checkout", "CHECKOUT BOTTLENECK",
+			&"checkout", service_bottleneck_headline(),
 			"About %d people an hour want serving and %d can be." % [
 				roundi(demand), roundi(throughput)
 			],
@@ -224,6 +224,21 @@ func bottlenecks(business: BusinessInstance, hour: int) -> Array[Dictionary]:
 			clampf((CLEANLINESS_TOLERANCE - business.cleanliness) / CLEANLINESS_TOLERANCE, 0.0, 1.0)
 		))
 	return found
+
+
+## What to call it when service cannot keep up. A gym does not have a checkout
+## and a nightclub does not have a till, and telling the player otherwise is the
+## interface describing a business that is not theirs.
+func service_bottleneck_headline() -> String:
+	match station_role():
+		EquipmentData.Role.BAR:
+			return "THE BAR CANNOT KEEP UP"
+		EquipmentData.Role.RECEPTION:
+			return "RECEPTION CANNOT KEEP UP"
+		EquipmentData.Role.PASS:
+			return "THE FLOOR CANNOT KEEP UP"
+		_:
+			return "CHECKOUT BOTTLENECK"
 
 
 func _bare_lines(business: BusinessInstance) -> int:

@@ -11,4 +11,4 @@ script = ExtResource("1_recipe")
 product = ExtResource("2_product")
 ingredients = [ExtResource("3_kitchen_vegetables"), ExtResource("4_kitchen_sauce"), ExtResource("5_kitchen_bread")]
 amounts = Array[int]([2, 1, 1])
-preparation_seconds = 110.0
+preparation_seconds = 48.0

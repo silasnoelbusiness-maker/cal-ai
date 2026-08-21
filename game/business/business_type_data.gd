@@ -136,6 +136,44 @@ func orderable() -> Array[ItemData]:
 	return supply_catalogue if not supply_catalogue.is_empty() else catalogue
 
 
+## How much of one ingredient the menu gets through, relative to the rest.
+##
+## Every dish but two uses vegetables and only one uses pasta, so ordering the
+## same number of each empties the crate that matters first and closes the
+## kitchen while the store room is still full. Anything that reorders for a
+## kitchen weights by this.
+func ingredient_usage(item: ItemData) -> float:
+	if item == null or recipes.is_empty():
+		return 1.0
+	var used := 0.0
+	for recipe in recipes:
+		if recipe == null:
+			continue
+		for i in recipe.ingredients.size():
+			if recipe.ingredients[i] != item:
+				continue
+			used += float(maxi(int(recipe.amounts[i]) if i < recipe.amounts.size() else 1, 1))
+	if used <= 0.0:
+		return 1.0
+	# Against the average line, so the weights hover around one.
+	var total := 0.0
+	for other in supply_catalogue:
+		total += _raw_usage(other)
+	var average := total / float(maxi(supply_catalogue.size(), 1))
+	return clampf(used / maxf(average, 0.01), 0.35, 3.0)
+
+
+func _raw_usage(item: ItemData) -> float:
+	var used := 0.0
+	for recipe in recipes:
+		if recipe == null:
+			continue
+		for i in recipe.ingredients.size():
+			if recipe.ingredients[i] == item:
+				used += float(maxi(int(recipe.amounts[i]) if i < recipe.amounts.size() else 1, 1))
+	return used
+
+
 ## The hour multiplier for this type. Falls back to the shared passing-trade
 ## curve, so a type written before Phase O behaves exactly as it did.
 func demand_at_hour(hour: int) -> float:
