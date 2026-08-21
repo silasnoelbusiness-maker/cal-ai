@@ -15,8 +15,16 @@ func _ready() -> void:
 
 
 func get_prompt_text() -> String:
-	prompt_subtitle = "%s  ·  %d locations" % [
-		CompanyManager.get_company_name(), BusinessManager.owned_count()
+	# §113 — the desk says whether it is worth sitting down at. A count of
+	# locations alone never changes; a count of locations in trouble is the
+	# reason a player walks into their own office.
+	var troubled := 0
+	for business in BusinessManager.get_businesses():
+		if DistressState.is_alarming(business.distress):
+			troubled += 1
+	prompt_subtitle = "%s  ·  %d locations%s" % [
+		CompanyManager.get_company_name(), BusinessManager.owned_count(),
+		"  ·  %d in trouble" % troubled if troubled > 0 else "",
 	]
 	return super.get_prompt_text()
 

@@ -98,6 +98,12 @@ func is_moving() -> bool:
 	return status == Status.IN_TRANSIT
 
 
+## Whether the goods have landed. The one status the rest of the game asks
+## about by name, so it gets a name rather than a comparison.
+func is_delivered() -> bool:
+	return status == Status.DELIVERED
+
+
 ## §135: once the van has gone, it has gone. Cancelling mid-journey would mean
 ## deciding where the cargo lands, and "wherever it started" is a lie once the
 ## van is halfway across the city.

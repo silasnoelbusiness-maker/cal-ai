@@ -342,9 +342,9 @@ func _shipment_card(order: TransferOrder, now: float) -> PanelContainer:
 	column.add_child(BusinessUIKit.row([
 		BusinessUIKit.stretch_label(
 			"%s → %s" % [
-				LogisticsManager.call("_place_name", order.source_kind, order.source_id),
-				LogisticsManager.call(
-					"_place_name", order.destination_kind, order.destination_id
+				LogisticsManager.place_name(order.source_kind, order.source_id),
+				LogisticsManager.place_name(
+					order.destination_kind, order.destination_id
 				),
 			], 15, ScreenKit.TEXT
 		),
@@ -372,12 +372,54 @@ func _shipment_card(order: TransferOrder, now: float) -> PanelContainer:
 			LogisticsManager.cancel_transfer(order)
 			_rebuild()
 		)
+		# §110 — the player can always drive it themselves. Free, and slower
+		# than a van only because they have to be there.
+		var mine := BusinessUIKit.button("DRIVE IT", 120.0)
+		mine.pressed.connect(func() -> void: _take(order))
 		var send := BusinessUIKit.button("SEND NOW", 120.0)
 		send.pressed.connect(func() -> void: _send(order))
 		column.add_child(BusinessUIKit.row([
-			BusinessUIKit.stretch_label("", 12, ScreenKit.MUTED), send, cancel,
+			BusinessUIKit.stretch_label("", 12, ScreenKit.MUTED), mine, send, cancel,
+		]))
+	elif order.player_driven and order.is_moving():
+		var here := LogisticsManager.can_hand_over(order)
+		var unload := BusinessUIKit.button("UNLOAD", 120.0)
+		unload.disabled = not here
+		unload.pressed.connect(func() -> void:
+			LogisticsManager.hand_over(order)
+			_rebuild()
+		)
+		var turn_back := BusinessUIKit.button("TURN BACK", 130.0)
+		turn_back.pressed.connect(func() -> void:
+			LogisticsManager.abandon_run(order)
+			_rebuild()
+		)
+		column.add_child(BusinessUIKit.row([
+			BusinessUIKit.stretch_label(
+				"" if here else "Drive to %s to unload." % LogisticsManager.place_name(
+					order.destination_kind, order.destination_id
+				),
+				12, ScreenKit.MUTED
+			),
+			unload, turn_back,
 		]))
 	return card
+
+
+## §110 — takes the run out personally.
+func _take(order: TransferOrder) -> void:
+	var result := LogisticsManager.take_run(order)
+	if result != LogisticsManager.TransferResult.OK:
+		AudioManager.play_ui(&"ui_error")
+		_note(_describe(result), ScreenKit.BAD)
+	else:
+		_note(
+			"Loaded. It is marked on the map — drive it to %s." % LogisticsManager.place_name(
+				order.destination_kind, order.destination_id
+			),
+			ScreenKit.GOOD
+		)
+	_rebuild()
 
 
 func _send(order: TransferOrder) -> void:

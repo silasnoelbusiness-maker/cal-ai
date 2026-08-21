@@ -35,6 +35,8 @@ func collect_markers() -> Array[MapMarker]:
 	markers.append_array(_vehicle_markers())
 	markers.append_array(_for_sale_markers())
 	markers.append_array(_owned_property_markers())
+	markers.append_array(_warehouse_markers())
+	markers.append_array(_delivery_markers())
 	return markers
 
 
@@ -124,6 +126,43 @@ func _owned_property_markers() -> Array[MapMarker]:
 		markers.append(MapMarker.make(
 			MapMarker.Category.MY_PROPERTY, record.address, door.global_position,
 			detail, record.property_id
+		))
+	return markers
+
+
+## §122 — the depots, with how full they are, since that is the one number a
+## player looks at the map to decide about.
+func _warehouse_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	for warehouse in LogisticsManager.warehouses():
+		var unit := PropertyManager.by_id(warehouse.property_id)
+		if unit == null:
+			continue
+		markers.append(MapMarker.make(
+			MapMarker.Category.WAREHOUSE, warehouse.display_name, unit.global_position,
+			"%d of %d units  ·  %d racks" % [
+				warehouse.used(), warehouse.capacity(), warehouse.racks
+			],
+			warehouse.warehouse_id
+		))
+	return markers
+
+
+## §123 — where a run the player took on themselves has to end up. Only ever
+## the player's own: a company van finding its own way is not the player's
+## problem and does not belong on their map.
+func _delivery_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	for order in LogisticsManager.player_runs():
+		var where := LogisticsManager.place_position(
+			order.destination_kind, order.destination_id
+		)
+		if where == Vector3.ZERO:
+			continue
+		markers.append(MapMarker.make(
+			MapMarker.Category.DELIVERY,
+			LogisticsManager.place_name(order.destination_kind, order.destination_id),
+			where, "DELIVERING  ·  %s" % order.cargo_text(), order.transfer_id
 		))
 	return markers
 

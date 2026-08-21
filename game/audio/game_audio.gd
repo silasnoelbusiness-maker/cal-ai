@@ -36,6 +36,15 @@ func _ready() -> void:
 
 	TimeManager.time_skipped.connect(_on_time_skipped)
 
+	# Logistics and money trouble. Same rule as sales: a van pulling up
+	# somewhere the player is standing is a sound, a van pulling up across the
+	# city is a line on a screen.
+	LogisticsManager.transfer_dispatched.connect(_on_transfer_dispatched)
+	LogisticsManager.transfer_delivered.connect(_on_transfer_delivered)
+	LogisticsManager.transfer_failed.connect(_on_transfer_failed)
+	FinanceManager.distress_changed.connect(_on_distress_changed)
+	FinanceManager.business_closed_by_distress.connect(_on_closed_by_distress)
+
 
 # --- Interface -------------------------------------------------------------
 
@@ -120,6 +129,55 @@ func _on_order_delivered(order: PurchaseOrder) -> void:
 	if unit.global_position.distance_to(player.global_position) > SALE_EARSHOT * 2.0:
 		return
 	AudioManager.play_at(&"delivery", unit.global_position, AudioBuses.SFX, -10.0)
+
+
+# --- Logistics and money ---------------------------------------------------
+
+## §119 — a van loading up. Heard at the depot it leaves, not everywhere.
+func _on_transfer_dispatched(order: TransferOrder) -> void:
+	_play_at_place(
+		&"shipment_out", order.source_kind, order.source_id, -11.0
+	)
+
+
+## §120 — a shipment landing, at the place it landed.
+func _on_transfer_delivered(order: TransferOrder) -> void:
+	_play_at_place(
+		&"shipment_in", order.destination_kind, order.destination_id, -9.0
+	)
+
+
+func _on_transfer_failed(order: TransferOrder) -> void:
+	_play_at_place(&"warning", order.destination_kind, order.destination_id, -12.0)
+
+
+## §121 — a business sliding into trouble. Only on the way down: recovering is
+## already announced, and a chime every time a shop crosses back over the line
+## would train the player to ignore it.
+func _on_distress_changed(_business: BusinessInstance, state: int) -> void:
+	if state == DistressState.State.DISTRESSED or state == DistressState.State.CRITICAL:
+		AudioManager.play(&"warning", AudioBuses.SFX, -7.0)
+
+
+## A shutter coming down. Loud enough to be the end of something.
+func _on_closed_by_distress(_business: BusinessInstance) -> void:
+	AudioManager.play(&"shutter", AudioBuses.SFX, -5.0)
+
+
+## Plays a sound at one end of a transfer, if the player is near enough to be
+## standing there. Distance is the same rule the till uses.
+func _play_at_place(
+	id: StringName, kind: TransferOrder.Place, place_id: StringName, volume_db: float
+) -> void:
+	var player := GameManager.player
+	if player == null:
+		return
+	var where := LogisticsManager.place_position(kind, place_id)
+	if where == Vector3.ZERO:
+		return
+	if where.distance_to(player.global_position) > SALE_EARSHOT * 2.0:
+		return
+	AudioManager.play_at(id, where, AudioBuses.SFX, volume_db)
 
 
 # --- Time ------------------------------------------------------------------

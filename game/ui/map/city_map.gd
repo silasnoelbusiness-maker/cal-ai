@@ -296,6 +296,25 @@ func _draw_glyph(at: Vector2, category: int, colour: Color) -> void:
 			# A key: the same block as an available unit, filled in and locked.
 			_canvas.draw_rect(Rect2(at + Vector2(-3.0, -3.0), Vector2(6.0, 6.0)), ink)
 			_canvas.draw_rect(Rect2(at + Vector2(-1.2, -1.2), Vector2(2.4, 2.4)), colour)
+		MapMarker.Category.WAREHOUSE:
+			# A shed: a low box under a shallow pitched roof.
+			_canvas.draw_rect(Rect2(at + Vector2(-3.2, -0.6), Vector2(6.4, 3.6)), ink)
+			_canvas.draw_colored_polygon(
+				PackedVector2Array([
+					at + Vector2(-3.6, -0.8), at + Vector2(0.0, -3.4),
+					at + Vector2(3.6, -0.8),
+				]), ink
+			)
+		MapMarker.Category.DELIVERY:
+			# An arrow into a box: this is where the load goes.
+			_canvas.draw_rect(Rect2(at + Vector2(-3.2, -3.2), Vector2(6.4, 6.4)), ink)
+			_canvas.draw_colored_polygon(
+				PackedVector2Array([
+					at + Vector2(0.0, 2.0), at + Vector2(-2.2, -0.6),
+					at + Vector2(2.2, -0.6),
+				]), colour
+			)
+			_canvas.draw_rect(Rect2(at + Vector2(-0.9, -2.4), Vector2(1.8, 2.0)), colour)
 		MapMarker.Category.LANDMARK:
 			_canvas.draw_circle(at, 2.6, ink)
 			_canvas.draw_circle(at, 1.2, colour)
@@ -311,11 +330,16 @@ func _label_priority(marker: MapMarker) -> int:
 	if marker == _selected:
 		return 0
 	match marker.category:
+		# A run in progress is the one thing the player opened the map to find.
+		MapMarker.Category.DELIVERY:
+			return 0
 		MapMarker.Category.HOME:
 			return 1
 		MapMarker.Category.OWNED_BUSINESS:
 			return 2
 		MapMarker.Category.MY_PROPERTY:
+			return 2
+		MapMarker.Category.WAREHOUSE:
 			return 2
 		MapMarker.Category.FOR_SALE:
 			return 3

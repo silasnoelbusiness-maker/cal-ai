@@ -118,6 +118,66 @@ func random_successor(index: int, rng: RandomNumberGenerator) -> int:
 	return options[rng.randi_range(0, options.size() - 1)]
 
 
+## The lane-legal route from one node to another, first node excluded and the
+## destination last. Empty if there is no way through — one-way sampling means
+## a pair of addresses can be unreachable, and a caller that gets nothing back
+## should fall back rather than teleport.
+##
+## A* over the same successor lists traffic already drives on, so a delivery
+## van obeys the road directions instead of cutting across the park. The
+## network is a few thousand nodes at most, which this searches in well under
+## a frame; it is called once when a van is dispatched, not per frame.
+func path_between(from_index: int, to_index: int) -> PackedInt32Array:
+	var route := PackedInt32Array()
+	if not _valid(from_index) or not _valid(to_index):
+		return route
+	if from_index == to_index:
+		return route
+
+	var goal := _positions[to_index]
+	var came_from := {}
+	var cost_so_far := {from_index: 0.0}
+	var frontier: Array[Vector2i] = []
+	var priorities := {from_index: 0.0}
+	frontier.append(Vector2i(from_index, 0))
+
+	while not frontier.is_empty():
+		# Small open set, linear scan. A heap would be faster and harder to
+		# read, and this is not on a hot path.
+		var best := 0
+		for i in range(1, frontier.size()):
+			if float(priorities.get(frontier[i].x, INF)) < float(priorities.get(frontier[best].x, INF)):
+				best = i
+		var current: int = frontier[best].x
+		frontier.remove_at(best)
+		if current == to_index:
+			break
+		for next in successors(current):
+			var step := _positions[current].distance_to(_positions[next])
+			var cost := float(cost_so_far[current]) + step
+			if cost_so_far.has(next) and cost >= float(cost_so_far[next]):
+				continue
+			cost_so_far[next] = cost
+			came_from[next] = current
+			priorities[next] = cost + _positions[next].distance_to(goal)
+			frontier.append(Vector2i(next, 0))
+
+	if not came_from.has(to_index):
+		return route
+	var walk := to_index
+	while walk != from_index:
+		route.append(walk)
+		walk = int(came_from[walk])
+	route.reverse()
+	return route
+
+
+## The node nearest a point that a van can actually stop at. Same as
+## nearest_node, named for the one thing deliveries use it for.
+func nearest_kerb(position: Vector3) -> int:
+	return nearest_node(position)
+
+
 # --- Building ------------------------------------------------------------
 
 func _sample_strand(waypoints: Array) -> void:

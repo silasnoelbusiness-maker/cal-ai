@@ -273,6 +273,13 @@ func _run() -> void:
 	_test_branch_transfer()
 	_test_transfer_cancel()
 	_test_transfer_limits()
+	_test_road_routing()
+	_test_visible_delivery()
+	_test_player_delivery()
+	_test_player_delivery_abandoned()
+	_test_logistics_map()
+	_test_logistics_audio()
+	_test_hq_terminals()
 	_test_auto_replenish()
 	_test_delivery_route()
 	_test_manager_backup()
@@ -10470,6 +10477,16 @@ func _test_transfer_limits() -> void:
 		)
 
 
+## Empties a branch's back room. The limits test deliberately fills it, and a
+## delivery test after that would otherwise be refused for want of room and
+## quietly do nothing.
+func _p_clear_storage(business: BusinessInstance) -> void:
+	if business == null:
+		return
+	for id: StringName in business.storage.keys():
+		business.take_storage(id, int(business.storage[id]))
+
+
 func _p_fill_storage(business: BusinessInstance) -> bool:
 	var room := business.storage_room_left()
 	if room <= 0:
@@ -11235,3 +11252,278 @@ func _test_logistics_screens_reachable() -> void:
 		finance.call("open", branch)
 		_check(finance.visible, "the branch finance screen opens on a branch")
 		hud.call("close_screens")
+
+
+## TEST §107 and §108 — the road network can be asked for a route, and the
+## route is a road route rather than a straight line.
+func _test_road_routing() -> void:
+	var network := get_tree().get_first_node_in_group(&"road_network") as RoadNetwork
+	if network == null or not network.is_ready():
+		return
+	var from_node := 0
+	var to_node := network.node_count() - 1
+	var route := network.path_between(from_node, to_node)
+	_check(
+		network.node_count() > 20,
+		"the city has a road network (%d nodes)" % network.node_count()
+	)
+	_check(
+		network.path_between(from_node, from_node).is_empty(),
+		"a route to where you already are is empty"
+	)
+	if route.is_empty():
+		# One-way sampling can leave a pair genuinely unreachable. Find one
+		# that is not, rather than asserting the whole network is strongly
+		# connected — which it is not, and does not have to be.
+		for candidate in mini(network.node_count(), 40):
+			route = network.path_between(from_node, candidate)
+			if route.size() > 2:
+				to_node = candidate
+				break
+	if route.is_empty():
+		return
+	_check(route[route.size() - 1] == to_node, "a route ends where it was asked to")
+	var joined := true
+	var walk := from_node
+	for step in route:
+		if not network.successors(walk).has(step):
+			joined = false
+		walk = step
+	_check(joined, "and every step of it is a road you can actually drive")
+
+	var straight := network.node_position(from_node).distance_to(
+		network.node_position(to_node)
+	)
+	var driven := 0.0
+	walk = from_node
+	for step in route:
+		driven += network.node_position(walk).distance_to(network.node_position(step))
+		walk = step
+	_check(
+		driven >= straight - 0.01,
+		"the drive is at least as long as the crow flies (%dm vs %dm)" % [
+			roundi(driven), roundi(straight)
+		]
+	)
+
+
+## TEST §107 — a delivery the player can see and one they cannot end the same
+## way, with the same goods.
+func _test_visible_delivery() -> void:
+	_p_setup()
+	var warehouse := _p_warehouse()
+	var branch := _own_business()
+	if warehouse == null or branch == null:
+		return
+	_p_clear_storage(branch)
+	var traffic := LogisticsManager.traffic
+	_check(traffic != null, "the visible delivery layer exists")
+	if traffic == null:
+		return
+
+	warehouse.add(&"bottled_water", 60)
+	var before := branch.storage_of(&"bottled_water")
+	var made := LogisticsManager.request_transfer(
+		TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+		TransferOrder.Place.BUSINESS, branch.business_id, {&"bottled_water": 10}
+	)
+	var order: TransferOrder = made["order"]
+	if order == null:
+		return
+	var cargo := order.unit_count()
+	LogisticsManager.dispatch_transfer(order)
+	_check(order.is_moving(), "a shipment is on the road")
+
+	# Whatever the near simulation would have done, the far one lands it.
+	TimeManager.advance_minutes(int(LogisticsManager.MAX_TRAVEL_MINUTES) + 10)
+	LogisticsManager.advance_deliveries()
+	_check(order.is_delivered(), "and it arrives")
+	_check(
+		branch.storage_of(&"bottled_water") == before + cargo,
+		"with exactly what it was carrying, once (%d)" % cargo
+	)
+	_check(
+		traffic.visible_count() == 0,
+		"and no van is left standing in the road afterwards"
+	)
+
+
+## TEST §110 and §111 — the player driving a shipment themselves.
+func _test_player_delivery() -> void:
+	_p_setup()
+	var warehouse := _p_warehouse()
+	var branch := _own_business()
+	if warehouse == null or branch == null:
+		return
+	_p_clear_storage(branch)
+	warehouse.add(&"bottled_water", 50)
+	var depot_before := warehouse.held(&"bottled_water")
+	var branch_before := branch.storage_of(&"bottled_water")
+	var costs_before := LogisticsManager.delivery_costs
+
+	var made := LogisticsManager.request_transfer(
+		TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+		TransferOrder.Place.BUSINESS, branch.business_id, {&"bottled_water": 8}
+	)
+	var order: TransferOrder = made["order"]
+	if order == null:
+		return
+	var cargo := order.unit_count()
+
+	_check(
+		LogisticsManager.take_run(order) == LogisticsManager.TransferResult.OK,
+		"the player can take a run out themselves"
+	)
+	_check(order.player_driven, "and it is marked as theirs")
+	_check(order.is_moving(), "the shipment is out")
+	_check(
+		warehouse.held(&"bottled_water") == depot_before - cargo,
+		"the goods left the depot, once"
+	)
+	_check(
+		branch.storage_of(&"bottled_water") == branch_before,
+		"and have not arrived yet"
+	)
+	_check(
+		LogisticsManager.delivery_costs == costs_before,
+		"driving it yourself costs the company nothing"
+	)
+	_check(CompanyFleet.free_van() != null, "and uses up no van")
+	_check(
+		not get_tree().get_nodes_in_group(&"dropoff_point").is_empty(),
+		"somewhere to unload appears at the far end"
+	)
+
+	# §123 — and it is on the map.
+	var marked := false
+	for marker in MapManager.collect_markers():
+		if marker.category == MapMarker.Category.DELIVERY:
+			marked = marker.target_id == order.transfer_id
+	_check(marked, "the run is marked on the map")
+
+	# Only one at a time: a player cannot be in two vans.
+	var second := LogisticsManager.request_transfer(
+		TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+		TransferOrder.Place.BUSINESS, branch.business_id, {&"bottled_water": 4}
+	)
+	var other: TransferOrder = second["order"]
+	if other != null:
+		_check(
+			LogisticsManager.take_run(other) != LogisticsManager.TransferResult.OK,
+			"but not two at once"
+		)
+		LogisticsManager.cancel_transfer(other)
+
+	# The clock does not deliver it for them.
+	TimeManager.advance_minutes(int(LogisticsManager.MAX_TRAVEL_MINUTES) * 3)
+	LogisticsManager.advance_deliveries()
+	_check(order.is_moving(), "time passing does not deliver it for them")
+	_check(
+		branch.storage_of(&"bottled_water") == branch_before,
+		"and nothing has appeared on the shelf"
+	)
+
+	_check(LogisticsManager.hand_over(order), "unloading it finishes the job")
+	_check(order.is_delivered(), "the shipment is delivered")
+	_check(
+		branch.storage_of(&"bottled_water") == branch_before + cargo,
+		"and the branch has exactly the cargo (%d)" % cargo
+	)
+	_check(
+		get_tree().get_nodes_in_group(&"dropoff_point").is_empty(),
+		"the unloading point goes away with it"
+	)
+	_check(LogisticsManager.player_runs().is_empty(), "and the player is free again")
+
+
+## TEST §111 — turning back loses nothing.
+func _test_player_delivery_abandoned() -> void:
+	var warehouse := _p_warehouse()
+	var branch := _own_business()
+	if warehouse == null or branch == null:
+		return
+	_p_clear_storage(branch)
+	warehouse.add(&"bottled_water", 30)
+	var depot_before := warehouse.held(&"bottled_water")
+	var branch_before := branch.storage_of(&"bottled_water")
+
+	var made := LogisticsManager.request_transfer(
+		TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+		TransferOrder.Place.BUSINESS, branch.business_id, {&"bottled_water": 9}
+	)
+	var order: TransferOrder = made["order"]
+	if order == null:
+		return
+	LogisticsManager.take_run(order)
+	_check(LogisticsManager.abandon_run(order), "a run can be given up on")
+	_check(
+		warehouse.held(&"bottled_water") + branch.storage_of(&"bottled_water")
+			== depot_before + branch_before,
+		"and not one unit of it is lost"
+	)
+	_check(
+		branch.storage_of(&"bottled_water") == branch_before,
+		"the branch got nothing, because nothing was delivered"
+	)
+	_check(LogisticsManager.player_runs().is_empty(), "the player is free again")
+	_check(
+		get_tree().get_nodes_in_group(&"dropoff_point").is_empty(),
+		"and the unloading point is gone"
+	)
+
+
+## TEST §122 — the depots are on the map, and are not confused with anything.
+func _test_logistics_map() -> void:
+	var warehouse := _p_warehouse()
+	if warehouse == null:
+		return
+	var found: MapMarker = null
+	for marker in MapManager.collect_markers():
+		if marker.category == MapMarker.Category.WAREHOUSE:
+			found = marker
+	_check(found != null, "the depot is on the map")
+	if found == null:
+		return
+	_check(found.target_id == warehouse.warehouse_id, "pointing at the right depot")
+	_check(not found.detail.is_empty(), "with how full it is (%s)" % found.detail)
+	_check(
+		MapMarker.category_colour(MapMarker.Category.WAREHOUSE)
+			!= MapMarker.category_colour(MapMarker.Category.OWNED_BUSINESS),
+		"and a depot does not look like a shop"
+	)
+	_check(
+		MapMarker.category_name(MapMarker.Category.DELIVERY) != "Shops",
+		"deliveries are their own category on the filters"
+	)
+
+
+## TEST §119 to §121 — the new sounds exist and are the game's own.
+func _test_logistics_audio() -> void:
+	for id: StringName in [&"shipment_in", &"shipment_out", &"shutter", &"warning"]:
+		var stream := ToneBank.get_stream(id)
+		_check(stream != null, "%s has a sound" % String(id))
+		if stream != null:
+			_check(stream.data.size() > 0, "and it is not silence")
+
+
+## TEST §113 — the office has a desk for the vans as well as the books.
+func _test_hq_terminals() -> void:
+	# Interiors are built when somebody walks in. Nobody walks in here, so ask
+	# the office to build itself the same way leasing it would.
+	for node in get_tree().get_nodes_in_group(&"retail_unit"):
+		var unit := node as RetailUnit
+		if unit != null and unit.interior_style == &"office":
+			unit.ensure_built()
+	var company := get_tree().get_nodes_in_group(&"company_terminal")
+	var dispatch := get_tree().get_nodes_in_group(&"warehouse_terminal")
+	_check(not company.is_empty(), "the company office has a terminal")
+	_check(not dispatch.is_empty(), "and somewhere to run the rounds from")
+	for node in company:
+		var terminal := node as CompanyTerminal
+		if terminal == null:
+			continue
+		_check(
+			not terminal.get_prompt_text().is_empty(),
+			"the company desk says what it is (%s)" % terminal.prompt_subtitle
+		)
+		break

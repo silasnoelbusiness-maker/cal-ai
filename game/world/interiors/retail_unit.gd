@@ -896,6 +896,31 @@ func _dress_office(parent: Node3D) -> void:
 		holder, terminal, Vector3(centre.x - 3.4, 0.9, centre.y - 1.0), 2.0
 	)
 
+	# §113 — the dispatch desk. The office runs the rounds as well as the
+	# books, and a company with depots has somewhere in it that is about the
+	# vans. It is a second desk rather than a second tab because the office is
+	# a room the player walks around, and two desks is how a room says there
+	# are two jobs here.
+	CityKit.add_box(
+		holder, "DispatchDesk", Vector3(centre.x - 3.4, 0.36, centre.y + 1.4),
+		Vector3(1.8, 0.72, 0.85), wood, true
+	)
+	CityKit.add_box(
+		holder, "DispatchBoard", Vector3(centre.x - 3.4, 0.95, centre.y + 1.25),
+		Vector3(0.56, 0.36, 0.05),
+		CityKit.make_emissive_material(Color(0.898, 0.639, 0.353), 0.7), false, false
+	)
+	CityKit.add_box(
+		holder, "DispatchStand", Vector3(centre.x - 3.4, 0.76, centre.y + 1.35),
+		Vector3(0.10, 0.14, 0.10), dark, false, false
+	)
+	var dispatch := WarehouseTerminal.new()
+	dispatch.name = "DispatchDeskTerminal"
+	dispatch.prompt_action = "Open Dispatch"
+	CityKit.attach_interactable(
+		holder, dispatch, Vector3(centre.x - 3.4, 0.9, centre.y + 1.4), 2.0
+	)
+
 
 ## The depot: racking down both sides, a marked aisle between them, a bay by
 ## the door where deliveries land and a dispatch square where they go out.

@@ -94,6 +94,17 @@ static func _build(id: StringName) -> AudioStreamWAV:
 			return _blip(523.0, 0.09, 0.26)
 		&"delivery":
 			return _chime([440.0, 587.0], 0.30, 0.22)
+		# Logistics. A shipment landing is a delivery an octave up, so the two
+		# read as the same family of event; a shipment leaving is the same
+		# interval the other way round.
+		&"shipment_in":
+			return _chime([587.0, 880.0], 0.32, 0.20)
+		&"shipment_out":
+			return _chime([880.0, 587.0], 0.28, 0.18)
+		&"shutter":
+			return _noise_hit(0.42, 0.30, 520.0, 0.85, 60.0)
+		&"warning":
+			return _chime([392.0, 330.0], 0.52, 0.22)
 
 		# World interaction.
 		&"door":

@@ -51,6 +51,10 @@ var save_id: StringName = &"logistics"
 ## warehouse standing in a city that never bought it.
 var reset_on_missing_save: bool = true
 
+## The visible half of a delivery: a van on the road when the player is near
+## enough to see one. Never the authority on where the goods are.
+var traffic: DeliveryTraffic = null
+
 var _warehouses: Array[WarehouseInstance] = []
 var _transfers: Array[TransferOrder] = []
 var _routes: Array[DeliveryRoute] = []
@@ -74,6 +78,18 @@ func _ready() -> void:
 	_rng.randomize()
 	TimeManager.hour_passed.connect(_on_hour_passed)
 	TimeManager.day_passed.connect(_on_day_passed)
+	traffic = DeliveryTraffic.new()
+	traffic.name = "DeliveryTraffic"
+	add_child(traffic)
+	SaveManager.game_loaded.connect(_on_game_loaded)
+
+
+## Vans on the road are a view of the transfers, and the transfers have just
+## been replaced wholesale. Drop them and let the review put back whatever the
+## loaded game actually has in flight.
+func _on_game_loaded(_slot: int) -> void:
+	if traffic != null:
+		traffic.clear()
 
 
 # --- Warehouses ----------------------------------------------------------
@@ -417,6 +433,108 @@ func dispatch_transfer(
 	return TransferResult.OK
 
 
+# --- The player's own runs -----------------------------------------------
+
+## How close the player has to get before they can unload.
+const DROPOFF_REACH := 6.0
+
+
+## Shipments the player is driving themselves.
+func player_runs() -> Array[TransferOrder]:
+	var found: Array[TransferOrder] = []
+	for order in _transfers:
+		if order.player_driven and order.is_moving():
+			found.append(order)
+	return found
+
+
+func active_player_run() -> TransferOrder:
+	var runs := player_runs()
+	return runs[0] if not runs.is_empty() else null
+
+
+## Takes a booked shipment out yourself. §110: no van and no driver are used
+## up, no delivery cost is charged, and no clock runs — it arrives when the
+## player gets there. What it costs instead is the player's own time.
+func take_run(order: TransferOrder) -> TransferResult:
+	if order == null or not order.is_reserved():
+		return TransferResult.NOT_ALLOWED
+	if not player_runs().is_empty():
+		order.note = "You are already out on a delivery."
+		return TransferResult.NOT_ALLOWED
+	var result := dispatch_transfer(order, null, null, true)
+	if result == TransferResult.OK:
+		_plant_dropoff(order)
+		GameManager.notify(
+			"SHIPMENT LOADED\n%s  ·  %s" % [
+				order.cargo_text(),
+				place_name(order.destination_kind, order.destination_id).to_upper(),
+			],
+			GameManager.Tone.GOOD
+		)
+	return result
+
+
+## Whether the player is standing close enough to unload. The drop-off point
+## enforces this itself through its own reach; this is for the screen, which
+## has to say why the button is greyed out.
+func can_hand_over(order: TransferOrder) -> bool:
+	if order == null or not order.player_driven or not order.is_moving():
+		return false
+	var player := GameManager.player
+	if player == null:
+		return false
+	var where := _place_position(order.destination_kind, order.destination_id)
+	return player.global_position.distance_to(where) <= DROPOFF_REACH * 2.0
+
+
+## Unloading. The same completion a van gets, because the goods arriving is
+## one event however it got there.
+func hand_over(order: TransferOrder) -> bool:
+	if order == null or not order.player_driven or not order.is_moving():
+		return false
+	complete_transfer(order)
+	_clear_dropoffs()
+	return true
+
+
+## Gives up partway. The cargo goes back where it came from rather than
+## evaporating: it is still the company's stock, it is just back on the shelf
+## it left.
+func abandon_run(order: TransferOrder) -> bool:
+	if order == null or not order.player_driven or not order.is_moving():
+		return false
+	# _fail already knows how to put cargo back without losing any of it,
+	# including when the shelf it came from has filled up in the meantime.
+	_fail(order, "You turned back.")
+	_clear_dropoffs()
+	return true
+
+
+func _plant_dropoff(order: TransferOrder) -> void:
+	_clear_dropoffs()
+	var where := _place_position(order.destination_kind, order.destination_id)
+	if where == Vector3.ZERO:
+		return
+	var point := DropoffPoint.new()
+	point.transfer_id = order.transfer_id
+	point.name = "Dropoff_%s" % String(order.transfer_id)
+	var world := get_tree().current_scene
+	if world == null:
+		return
+	world.add_child(point)
+	point.global_position = where
+
+
+func _clear_dropoffs() -> void:
+	for point in get_tree().get_nodes_in_group(&"dropoff_point"):
+		# Leave the group now rather than when the free actually happens:
+		# queue_free is deferred, and anything asking "is there still a
+		# drop-off?" this frame would otherwise be told yes.
+		point.remove_from_group(&"dropoff_point")
+		point.queue_free()
+
+
 ## How long the journey takes. Distance is the bulk of it; the driver shaves a
 ## little off. Both near and far simulation use this, so a van does not get
 ## faster because nobody is looking at it.
@@ -536,12 +654,26 @@ func _place_exists(kind: TransferOrder.Place, id: StringName) -> bool:
 	return BusinessManager.by_id(id) != null
 
 
+## The human name of a place. Public for the same reason place_position is:
+## the screens and the drop-off marker have to name the same end of the run
+## the manager is moving goods between.
+func place_name(kind: TransferOrder.Place, id: StringName) -> String:
+	return _place_name(kind, id)
+
+
 func _place_name(kind: TransferOrder.Place, id: StringName) -> String:
 	if kind == TransferOrder.Place.WAREHOUSE:
 		var warehouse := warehouse_by_id(id)
 		return warehouse.display_name if warehouse != null else "Warehouse"
 	var business := BusinessManager.by_id(id)
 	return business.business_name if business != null else "Branch"
+
+
+## Where a place stands in the world. Public because the visible delivery
+## layer needs the same two points the abstract journey is measured between —
+## the van must drive the run the clock is timing, not a different one.
+func place_position(kind: TransferOrder.Place, id: StringName) -> Vector3:
+	return _place_position(kind, id)
 
 
 func _place_position(kind: TransferOrder.Place, id: StringName) -> Vector3:
