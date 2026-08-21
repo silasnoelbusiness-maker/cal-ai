@@ -9400,7 +9400,10 @@ func _test_bottlenecks() -> void:
 		"the kitchen is named as the hold-up: %s" % ", ".join(headlines)
 	)
 
-	var company := CompanyManager.bottleneck_report()
+	# Asked about the same hour the branch was asked about: a company report
+	# taken at whatever o'clock the test happens to have reached would be
+	# answering a different question.
+	var company := CompanyManager.bottleneck_report(12, 12)
 	_check(not company.is_empty(), "and the company report has something in it")
 	var named := false
 	for issue in company:

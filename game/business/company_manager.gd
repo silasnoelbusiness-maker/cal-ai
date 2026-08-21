@@ -553,9 +553,13 @@ func staffing_gaps(business: BusinessInstance) -> Array[String]:
 ## operating model is asked what is wrong with it and the answers are pooled,
 ## so a new business type contributes its own problems without this knowing
 ## what a kitchen is.
-func bottleneck_report(limit: int = 8) -> Array[Dictionary]:
+## `hour` defaults to now, which is what a live screen wants. Anything asking
+## about a particular hour — a test, a report on the lunch rush — says so,
+## because a company-wide answer computed at a different hour from the branch
+## answer beside it is two questions pretending to be one.
+func bottleneck_report(limit: int = 8, at_hour: int = -1) -> Array[Dictionary]:
 	var found: Array[Dictionary] = []
-	var hour := TimeManager.hour
+	var hour := at_hour if at_hour >= 0 else TimeManager.hour
 	for business in BusinessManager.get_businesses():
 		for issue in business.model().bottlenecks(business, hour):
 			var row := issue.duplicate()
