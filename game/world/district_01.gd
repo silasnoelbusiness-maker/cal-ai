@@ -1308,6 +1308,10 @@ func _venue_table() -> Array:
 			"DockRoadUnit", Vector3(-38.0, 1.2, 14.4), Vector3.FORWARD, "View Property",
 			"property", "unit_dock_09",
 		],
+		[
+			"DocksideDepot", Vector3(-20.0, 1.2, 14.4), Vector3.FORWARD, "View Warehouse",
+			"property", "warehouse_dock_14",
+		],
 	]
 
 
@@ -1431,6 +1435,20 @@ func _make_commercial_property(
 			unit.customer_capacity = 5
 			unit.queue_capacity = 3
 			unit.location_demand_modifier = 0.8
+		&"warehouse_dock_14":
+			# The old goods shed at the end of Dock Road. Cheap per square
+			# metre, no frontage, and nobody wants it for a shop — which is
+			# exactly why it is the right building for a distribution depot.
+			unit.address = "14 Dock Road"
+			unit.property_type = "Warehouse"
+			unit.size_class = CommercialProperty.SizeClass.LARGE
+			unit.floor_area = 260
+			unit.rent_amount = 1450
+			unit.deposit = 1200
+			unit.customer_capacity = 2
+			unit.queue_capacity = 1
+			unit.location_demand_modifier = 0.4
+			unit.business_classes = [&"warehouse"]
 		&"unit_dock_09":
 			# The only room in Harbour Row big enough for a gym or a venue, and
 			# priced like it. An old chandlery: high ceiling, no frontage.

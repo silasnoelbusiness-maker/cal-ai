@@ -98,6 +98,13 @@ property_id = &"office_exchange_11"
 unit_name = "11 Exchange Court"
 interior_style = &"office"
 
+[node name="DocksideDepot" parent="Interiors" instance=ExtResource("9_retail_unit")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 3000)
+property_id = &"warehouse_dock_14"
+unit_name = "Dockside Depot"
+size_class = 2
+interior_style = &"warehouse"
+
 [node name="MeridianApartment" parent="Interiors" instance=ExtResource("6_apartment")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1000, 0, 2000)
 residence_id = &"meridian"

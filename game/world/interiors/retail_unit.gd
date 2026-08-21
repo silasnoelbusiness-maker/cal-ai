@@ -27,6 +27,17 @@ const STREET_STUB_END := 15.0
 ## How far behind the front wall the store-room partition sits, per size.
 const PARTITION_INSET := 3.6
 
+## The depot palette. Named constants rather than literals buried in the
+## builder, because six unexplained colours in the middle of a function is how
+## a room ends up recoloured by accident.
+const STEEL := Color(0.502, 0.525, 0.561)
+const CRATE := Color(0.671, 0.549, 0.376)
+const PAINT := Color(0.839, 0.729, 0.361)
+const RECEIVING := Color(0.337, 0.463, 0.541)
+const DISPATCH := Color(0.463, 0.541, 0.361)
+const DESK_WOOD := Color(0.478, 0.412, 0.337)
+const DESK_SCREEN := Color(0.365, 0.635, 0.741)
+
 @export var property_id: StringName = &"unit_a"
 @export var unit_name: String = "Retail Unit"
 @export var size_class: Size = Size.SMALL
@@ -508,6 +519,12 @@ func _build_palette() -> void:
 			floor_mat = CityKit.make_material(Color(0.310, 0.333, 0.365))
 			wall_mat = CityKit.make_material(Color(0.522, 0.553, 0.592))
 			trim_mat = Palette.of(&"metal_mid")
+		&"warehouse":
+			# Sealed concrete and painted block. A working building rather than
+			# a shop: nothing here is meant to look inviting.
+			floor_mat = Palette.of(&"concrete")
+			wall_mat = CityKit.make_material(Color(0.478, 0.494, 0.522))
+			trim_mat = Palette.of(&"metal_mid")
 		&"office":
 			floor_mat = Palette.of(&"wood_floor")
 			wall_mat = CityKit.make_material(Color(0.808, 0.796, 0.769))
@@ -662,6 +679,9 @@ func _build_shopfront(parent: Node3D) -> void:
 func _build_trade_dressing(parent: Node3D) -> void:
 	var style := _style_id()
 	match style:
+		&"warehouse":
+			_dress_warehouse(parent)
+			return
 		&"office":
 			_dress_office(parent)
 			return
@@ -874,6 +894,81 @@ func _dress_office(parent: Node3D) -> void:
 	terminal.name = "CompanyTerminal"
 	CityKit.attach_interactable(
 		holder, terminal, Vector3(centre.x - 3.4, 0.9, centre.y - 1.0), 2.0
+	)
+
+
+## The depot: racking down both sides, a marked aisle between them, a bay by
+## the door where deliveries land and a dispatch square where they go out.
+##
+## Everything here is built rather than bought. The racks the player pays for
+## add capacity to the warehouse record, not objects to this room — a hundred
+## individually placed pallets would be a placement puzzle nobody asked for,
+## and the stock the racks hold is a number on the logistics screen.
+func _dress_warehouse(parent: Node3D) -> void:
+	var holder := Node3D.new()
+	holder.name = "TradeDressing"
+	parent.add_child(holder)
+
+	var steel := CityKit.make_material(STEEL)
+	var crate := CityKit.make_material(CRATE)
+	var paint := CityKit.make_material(PAINT)
+
+	# Racking down both long walls, leaving a clear aisle between them.
+	var bays := clampi(int(retail_area.size.y / 3.0), 2, 6)
+	for side: float in [-1.0, 1.0]:
+		for i in bays:
+			var z := retail_area.position.y + 2.0 + float(i) * (retail_area.size.y - 4.0) \
+				/ float(maxi(bays - 1, 1))
+			var x := side * (room.size.x * 0.5 - 1.5)
+			CityKit.add_box(
+				holder, "Rack%d_%d" % [int(side), i], Vector3(x, 1.35, z),
+				Vector3(1.6, 2.7, 2.2), steel
+			)
+			# Two shelves of pallets, so the racking reads as full from above.
+			for level in 2:
+				CityKit.add_box(
+					holder, "Pallet%d_%d_%d" % [int(side), i, level],
+					Vector3(x, 0.75 + float(level) * 1.1, z),
+					Vector3(1.3, 0.5, 1.8), crate, false, false
+				)
+
+	# The aisle, painted on the floor.
+	CityKit.add_box(
+		holder, "Aisle", Vector3(0.0, 0.02, retail_area.get_center().y),
+		Vector3(2.6, 0.03, retail_area.size.y - 1.0), paint, false, false
+	)
+
+	# Receiving, by the shutter, and dispatch at the far end. Marked squares
+	# rather than machinery: the player needs to know which end is which.
+	CityKit.add_box(
+		holder, "ReceivingBay", Vector3(0.0, 0.03, retail_area.end.y - 2.2),
+		Vector3(5.0, 0.04, 3.2), CityKit.make_material(RECEIVING), false, false
+	)
+	CityKit.add_box(
+		holder, "DispatchBay", Vector3(0.0, 0.03, retail_area.position.y + 2.2),
+		Vector3(5.0, 0.04, 3.2), CityKit.make_material(DISPATCH), false, false
+	)
+	PropKit.menu_board(
+		holder, "DepotBoard",
+		Vector3(0.0, 2.05, partition_z + WALL_THICKNESS + 0.08),
+		["RECEIVING", "DISPATCH", "AISLE 1", "AISLE 2"]
+	)
+
+	# A desk in the corner for whoever is running the place.
+	CityKit.add_box(
+		holder, "Desk", Vector3(room.position.x + 2.2, 0.36, partition_z + 1.6),
+		Vector3(1.6, 0.72, 0.8), CityKit.make_material(DESK_WOOD), true
+	)
+	CityKit.add_box(
+		holder, "DeskScreen", Vector3(room.position.x + 2.2, 0.95, partition_z + 1.45),
+		Vector3(0.5, 0.34, 0.05),
+		CityKit.make_emissive_material(DESK_SCREEN, 0.6), false, false
+	)
+
+	var terminal := WarehouseTerminal.new()
+	terminal.name = "WarehouseTerminal"
+	CityKit.attach_interactable(
+		holder, terminal, Vector3(room.position.x + 2.2, 0.9, partition_z + 1.6), 2.2
 	)
 
 

@@ -12,12 +12,17 @@ extends RefCounted
 ## enough that paying early is worth doing and that early payments are mostly
 ## interest, simple enough that a player can see where their money went.
 
-enum Status { ACTIVE, OVERDUE, PAID, AT_RISK }
+enum Status { ACTIVE, OVERDUE, PAID, AT_RISK, FORECLOSING, FORECLOSED }
 
-## Missed payments before the mortgage is flagged as being in trouble. Nothing
-## is repossessed at any count — see RealEstate. This is a warning, and the
-## groundwork for a foreclosure system that does not exist yet.
+## Missed payments before the mortgage is flagged as being in trouble.
 const AT_RISK_MISSES := 3
+## Further misses past AT_RISK before the lender actually starts foreclosing.
+## Phase N stopped at the warning; Phase P carries it through, and the gap
+## between the two is deliberately wide enough to notice and act on.
+const FORECLOSURE_MISSES := 5
+## Days between the notice and losing the property. §88 asks for time to cure,
+## and a week and a half of in-game days is time to sell a car.
+const CURE_DAYS := 10
 
 var mortgage_id: StringName = &""
 var property_id: StringName = &""
@@ -37,6 +42,9 @@ var status: Status = Status.ACTIVE
 ## Running totals, so the income report can say where the money actually went.
 var interest_paid: int = 0
 var principal_paid: int = 0
+## Day the lender takes the property if the arrears are not cleared. -1 when no
+## notice is outstanding.
+var foreclosure_day: int = -1
 
 
 func is_settled() -> bool:
@@ -75,8 +83,27 @@ func status_label() -> String:
 			return "OVERDUE"
 		Status.AT_RISK:
 			return "AT RISK"
+		Status.FORECLOSING:
+			return "FORECLOSURE NOTICE"
+		Status.FORECLOSED:
+			return "FORECLOSED"
 		_:
 			return "ACTIVE"
+
+
+## What it takes to put the mortgage back in good standing. Not the whole debt:
+## §90 is explicit that curing a default means clearing the arrears, and
+## demanding the entire balance would make the notice a formality.
+func arrears_amount() -> int:
+	return payment_amount * maxi(missed_payments, 0)
+
+
+func is_foreclosing() -> bool:
+	return status == Status.FORECLOSING
+
+
+func days_to_cure(today: int) -> int:
+	return maxi(foreclosure_day - today, 0) if foreclosure_day >= 0 else 0
 
 
 ## The level payment that clears `principal` over `periods` at this rate. The
@@ -108,6 +135,7 @@ func to_dictionary() -> Dictionary:
 		"status": int(status),
 		"interest_paid": interest_paid,
 		"principal_paid": principal_paid,
+		"foreclosure_day": foreclosure_day,
 	}
 
 
@@ -128,4 +156,6 @@ static func from_dictionary(state: Dictionary) -> MortgageData:
 	loan.status = int(state.get("status", int(Status.ACTIVE))) as Status
 	loan.interest_paid = int(state.get("interest_paid", 0))
 	loan.principal_paid = int(state.get("principal_paid", 0))
+	# A Phase N save has no notice outstanding, which is the right default.
+	loan.foreclosure_day = int(state.get("foreclosure_day", -1))
 	return loan

@@ -104,6 +104,11 @@ static func describe(result: LeaseResult) -> String:
 ## Hands a unit back. The deposit is not returned — a business that failed did
 ## not leave the place as it found it — but the unit becomes vacant and can be
 ## let again, which is what stops a failed branch locking a good pitch forever.
+## Whether a unit is a depot rather than a shop.
+static func is_warehouse(property: CommercialProperty) -> bool:
+	return property != null and property.business_classes.has(&"warehouse")
+
+
 func end_lease(property: CommercialProperty) -> bool:
 	if property == null or not property.is_leased_by_player():
 		return false
@@ -181,6 +186,41 @@ func current_home() -> ResidenceProperty:
 
 ## Signs a residential lease out of the player's own pocket. Two entries again,
 ## for the same reason: a deposit comes back and rent does not.
+## Somewhere the player can still sleep after losing a home involuntarily.
+##
+## Prefers anywhere they already hold — another flat they own or rent — and
+## falls back to the starter address, which is always available. Never returns
+## null if any residence exists at all, because a player with no bed cannot
+## rest, cannot save at a bed, and cannot play out of the hole. §92.
+func fallback_home(excluding: StringName = &"") -> ResidenceProperty:
+	var starter: ResidenceProperty = null
+	for home in get_residences():
+		if home.residence_id == excluding:
+			continue
+		if home.is_available_to_player():
+			return home
+		if home.residence_id == &"larkspur":
+			starter = home
+	return starter
+
+
+## Moves the player into a residence, taking it on if they do not hold it.
+## Used by the foreclosure fallback, where refusing would strand them.
+func rehouse(home: ResidenceProperty) -> bool:
+	if home == null:
+		return false
+	if not home.is_available_to_player():
+		# The starter flat takes them back without a deposit. Being made
+		# homeless by the bank should not also require money they have not got.
+		home.leased_by_player = true
+		home.next_rent_due_day = TimeManager.day_index + home.rent_interval_days
+	home.set_as_home()
+	GameManager.notify(
+		"MOVED TO %s" % home.display_name.to_upper(), GameManager.Tone.INFO
+	)
+	return true
+
+
 func lease_residence(home: ResidenceProperty) -> bool:
 	if home == null or home.is_leased_by_player():
 		return false

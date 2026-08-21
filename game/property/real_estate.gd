@@ -25,6 +25,9 @@ signal tenant_signed(record: PropertyRecord, tenant: TenantData)
 signal tenant_left(record: PropertyRecord, tenant: TenantData)
 signal rent_received(record: PropertyRecord, amount: int)
 signal listing_discovered(listing: PropertyListing)
+signal foreclosure_started(loan: MortgageData)
+signal foreclosure_cured(loan: MortgageData)
+signal foreclosure_completed(loan: MortgageData, recovered: int)
 
 enum BuyResult {
 	OK, NO_LISTING, ALREADY_OWNED, CANNOT_AFFORD, NOT_DISCOVERED,
@@ -90,6 +93,9 @@ const MIN_NET_WORTH_FOR_CREDIT := 12000
 ## Selling costs this fraction of the price. Enough that buying and selling the
 ## same building back and forth loses money, which is the point of it.
 const SELLING_COST_FRACTION := 0.04
+## What a forced sale fetches against the open market. A lender in a hurry does
+## not get the best price, and the player wears the difference.
+const FORECLOSURE_SALE_FRACTION := 0.82
 
 ## What a renovation costs and buys. Each entry: label, condition floor it
 ## lifts to, cost per point of condition gained, days it takes.
@@ -627,20 +633,25 @@ func _charge_mortgage(loan: MortgageData) -> void:
 
 	if not EconomyManager.spend(due, "%s — mortgage" % _address_of(loan.property_id)):
 		loan.missed_payments += 1
-		loan.status = (
-			MortgageData.Status.AT_RISK if loan.missed_payments >= MortgageData.AT_RISK_MISSES
-			else MortgageData.Status.OVERDUE
-		)
-		# The debt does not go away because it was not paid; it is simply owed
-		# again next period. Nothing is ever repossessed — see the README.
+		# The debt does not go away because it was not paid; it is owed again
+		# next period, and past a point the lender starts taking the property.
+		# Phase N stopped at AT_RISK; the two steps past it are Phase P's.
+		if loan.missed_payments >= MortgageData.FORECLOSURE_MISSES:
+			_begin_foreclosure(loan)
+		elif loan.missed_payments >= MortgageData.AT_RISK_MISSES:
+			loan.status = MortgageData.Status.AT_RISK
+		else:
+			loan.status = MortgageData.Status.OVERDUE
 		loan.next_payment_day = TimeManager.day_index + loan.payment_interval_days
-		GameManager.notify(
-			"MORTGAGE %s\n%s" % [
-				"AT RISK" if loan.status == MortgageData.Status.AT_RISK else "PAYMENT MISSED",
-				_address_of(loan.property_id).to_upper(),
-			],
-			GameManager.Tone.BAD
-		)
+		if not loan.is_foreclosing():
+			GameManager.notify(
+				"MORTGAGE %s\n%s" % [
+					"AT RISK" if loan.status == MortgageData.Status.AT_RISK
+						else "PAYMENT MISSED",
+					_address_of(loan.property_id).to_upper(),
+				],
+				GameManager.Tone.BAD
+			)
 		mortgage_missed.emit(loan)
 		return
 
@@ -1037,6 +1048,165 @@ func _revalue(record: PropertyRecord) -> void:
 	record.base_maintenance = maintenance_for_value(record.market_value)
 
 
+# --- Foreclosure ----------------------------------------------------------
+
+## The lender gives notice. Nothing is taken today: the player is told what is
+## owed and how long they have, and the property is theirs until the deadline
+## passes uncured. §89.
+func _begin_foreclosure(loan: MortgageData) -> void:
+	if loan.is_foreclosing():
+		return
+	loan.status = MortgageData.Status.FORECLOSING
+	loan.foreclosure_day = TimeManager.day_index + MortgageData.CURE_DAYS
+	GameManager.notify(
+		"FORECLOSURE NOTICE\n%s  ·  $%s to cure, %d days" % [
+			_address_of(loan.property_id).to_upper(),
+			EconomyManager.with_thousands_separator(loan.arrears_amount()),
+			MortgageData.CURE_DAYS,
+		],
+		GameManager.Tone.BAD
+	)
+	AudioManager.play_ui(&"ui_error")
+	foreclosure_started.emit(loan)
+	SaveManager.autosave("foreclosure notice")
+
+
+## Every mortgage under notice, for the screens that have to shout about them.
+func foreclosing_mortgages() -> Array[MortgageData]:
+	var found: Array[MortgageData] = []
+	for loan in _mortgages:
+		if loan.is_foreclosing():
+			found.append(loan)
+	return found
+
+
+## What it costs to stop a foreclosure, and how long is left.
+func cure_quote(loan: MortgageData) -> Dictionary:
+	if loan == null:
+		return {}
+	return {
+		"amount": loan.arrears_amount(),
+		"days_left": loan.days_to_cure(TimeManager.day_index),
+		"address": _address_of(loan.property_id),
+		"affordable": EconomyManager.can_afford(loan.arrears_amount()),
+	}
+
+
+## Pays the arrears and puts the mortgage back in good standing. Not the whole
+## balance — §90 — so curing is something a player in trouble can actually do.
+func cure_foreclosure(loan: MortgageData) -> bool:
+	if loan == null or not loan.is_foreclosing():
+		return false
+	var owed := loan.arrears_amount()
+	if owed <= 0:
+		return false
+	if not EconomyManager.spend(owed, "%s — arrears" % _address_of(loan.property_id)):
+		GameManager.notify(
+			"YOU CANNOT COVER THE ARREARS", GameManager.Tone.BAD
+		)
+		return false
+	loan.missed_payments = 0
+	loan.status = MortgageData.Status.ACTIVE
+	loan.foreclosure_day = -1
+	GameManager.notify(
+		"FORECLOSURE CANCELLED\n%s" % _address_of(loan.property_id).to_upper(),
+		GameManager.Tone.GOOD
+	)
+	AudioManager.play(&"money", AudioBuses.SFX, -8.0)
+	foreclosure_cured.emit(loan)
+	portfolio_changed.emit()
+	SaveManager.autosave("cured a foreclosure")
+	return true
+
+
+## The deadline passed. The lender takes the property, clears the debt against
+## it, and hands back whatever equity was left after their costs.
+##
+## Deliberately not punitive to the point of absurdity: §91 asks for a fair
+## simplified formula rather than the value simply vanishing, so the player
+## gets the sale price less the balance and a foreclosure fee.
+func _complete_foreclosure(loan: MortgageData) -> void:
+	var record := record_for(loan.property_id)
+	var address := _address_of(loan.property_id)
+	var recovered := 0
+	if record != null:
+		var price := roundi(float(record.market_value) * FORECLOSURE_SALE_FRACTION)
+		recovered = maxi(price - loan.remaining_principal, 0)
+
+	loan.status = MortgageData.Status.FORECLOSED
+	loan.remaining_principal = 0
+	loan.foreclosure_day = -1
+	_mortgages.erase(loan)
+
+	if record != null:
+		_rehouse_after_foreclosure(record)
+		_release_ownership(record)
+		_records.erase(record)
+	if recovered > 0:
+		EconomyManager.deposit(recovered, "Foreclosure — %s" % address)
+	FinanceManager.properties_foreclosed += 1
+	GameManager.notify(
+		"PROPERTY FORECLOSED\n%s%s" % [
+			address.to_upper(),
+			"  ·  $%s returned" % EconomyManager.with_thousands_separator(recovered)
+				if recovered > 0 else "",
+		],
+		GameManager.Tone.BAD
+	)
+	AudioManager.play_ui(&"ui_error")
+	foreclosure_completed.emit(loan, recovered)
+	portfolio_changed.emit()
+	SaveManager.autosave("a property was foreclosed")
+
+
+## The two things a foreclosure can take out from under the player that a sale
+## never could: the roof over their head, and the shop they trade from.
+##
+## Selling is blocked in both cases, so Phase N never had to think about it.
+## Losing a property involuntarily has to, and the rule is that neither one is
+## allowed to leave the game in a state the player cannot play out of. §92, §93.
+func _rehouse_after_foreclosure(record: PropertyRecord) -> void:
+	if record.use == PropertyRecord.Use.OWNER_OCCUPIED:
+		var lost := PropertyManager.residence_by_id(record.property_id)
+		if lost != null:
+			lost.is_home = false
+			lost.refresh_state()
+		# Anywhere else the player can sleep, or the starter flat. Never
+		# nowhere: a player with no bed cannot rest, and that is a soft lock.
+		var fallback := PropertyManager.fallback_home(record.property_id)
+		if fallback != null:
+			PropertyManager.rehouse(fallback)
+
+	var business := BusinessManager.business_for_property(record.property_id)
+	if business != null:
+		# The shop does not evaporate with the freehold. It closes, keeps
+		# everything it owns, and the player decides what to do with it.
+		BusinessManager.close_business(business, "the premises were foreclosed")
+		GameManager.notify(
+			"BUSINESS LOST ITS PREMISES\n%s" % business.business_name.to_upper(),
+			GameManager.Tone.BAD
+		)
+
+
+## Checked once a day. A notice that has run out is acted on; one still inside
+## its window nags instead.
+func _advance_foreclosures() -> void:
+	var today := TimeManager.day_index
+	for loan in foreclosing_mortgages():
+		var left := loan.days_to_cure(today)
+		if left <= 0:
+			_complete_foreclosure(loan)
+			continue
+		GameManager.notify(
+			"FORECLOSURE IN %d DAY%s\n%s  ·  $%s to cure" % [
+				left, "" if left == 1 else "S",
+				_address_of(loan.property_id).to_upper(),
+				EconomyManager.with_thousands_separator(loan.arrears_amount()),
+			],
+			GameManager.Tone.BAD
+		)
+
+
 # --- Selling --------------------------------------------------------------
 
 ## What stops a sale, in words the screen can show. Empty means it can go.
@@ -1111,6 +1281,13 @@ func sell(record: PropertyRecord) -> SellResult:
 ## Puts the address back on the market and hands the door back to whoever it
 ## belonged to before.
 func _release_ownership(record: PropertyRecord) -> void:
+	# Whoever was renting it is no longer renting it from us. Selling already
+	# did this; foreclosure has to as well, or a property the bank took keeps
+	# paying rent into the player's account. §94.
+	for tenant in tenants_in(record.property_id):
+		_tenants.erase(tenant)
+	_candidates.erase(_candidate_key(record.property_id, -1))
+
 	match record.kind:
 		PropertyRecord.Kind.RESIDENTIAL:
 			var home := PropertyManager.residence_by_id(record.property_id)
@@ -1177,6 +1354,8 @@ func _on_day_passed(_day_index: int) -> void:
 		if loan.is_due(TimeManager.day_index):
 			_charge_mortgage(loan)
 	portfolio_changed.emit()
+	# Notices given, days counted, and anything past its deadline acted on.
+	_advance_foreclosures()
 
 
 ## A slow wander around 1.0 rather than a random walk that can run away: the

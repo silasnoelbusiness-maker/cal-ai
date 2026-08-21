@@ -105,6 +105,12 @@ func _build_create() -> void:
 	_title.text = "CREATE BUSINESS"
 	_subtitle.text = _property.address
 
+	# A depot is not a shop and does not get the founding form: taking it on
+	# is the whole transaction, and what happens next is logistics.
+	if PropertyManager.is_warehouse(_property):
+		_build_warehouse_page()
+		return
+
 	# What this unit is zoned for decides what may open in it. A nightclub does
 	# not go in a corner shop, and the player is told that here rather than
 	# refused after they have typed a name.
@@ -183,6 +189,51 @@ func _build_create() -> void:
 		return
 	_status.text = "Creating a business costs nothing. You fund it yourself afterwards."
 	_status.add_theme_color_override("font_color", BusinessUIKit.MUTED)
+
+
+## A warehouse, once the lease is signed. There is nothing to name and nothing
+## to choose: the depot exists, and the logistics screen is where the work is.
+func _build_warehouse_page() -> void:
+	var warehouse := LogisticsManager.warehouse_for_property(_property.property_id)
+	_rows.add_child(BusinessUIKit.heading("Distribution depot"))
+	_rows.add_child(BusinessUIKit.label(
+		"Somewhere to buy in bulk and hold stock for every branch at once. It "
+		+ "earns nothing by itself — what it saves has to beat the rent, which "
+		+ "it will not until you have shops enough to feed.",
+		13, BusinessUIKit.MUTED
+	))
+	_add_row("Floor area", "%d m²" % _property.floor_area)
+	_add_row("Rent", "$%s every %d days" % [
+		EconomyManager.with_thousands_separator(_property.rent_amount),
+		_property.rent_interval_days,
+	])
+
+	if warehouse == null:
+		var take := BusinessUIKit.button("TAKE IT ON", 180.0)
+		take.pressed.connect(func() -> void:
+			var depot := LogisticsManager.take_warehouse(_property)
+			if depot == null:
+				_status.text = "That could not be arranged."
+				_status.add_theme_color_override("font_color", BusinessUIKit.BAD)
+				return
+			GameManager.close_menus()
+			GameManager.request_screen(&"logistics", null, null)
+		)
+		_actions.add_child(take)
+	else:
+		_add_row("Capacity", "%d units" % warehouse.capacity(), true)
+		_add_row("Stored", "%d units" % warehouse.used())
+		_add_row("Racks", "%d" % warehouse.racks)
+		var manage := BusinessUIKit.button("OPEN LOGISTICS", 180.0)
+		manage.pressed.connect(func() -> void:
+			GameManager.close_menus()
+			GameManager.request_screen(&"logistics", null, null)
+		)
+		_actions.add_child(manage)
+
+	var cancel := BusinessUIKit.button("CLOSE", 120.0)
+	cancel.pressed.connect(func() -> void: GameManager.close_menus())
+	_actions.add_child(cancel)
 
 
 ## Whether an existing chain of this kind can take another branch, and which.

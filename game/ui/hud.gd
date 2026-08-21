@@ -50,6 +50,8 @@ var _profile_panel: ProfilePanel = null
 var _company_dashboard: CompanyDashboard = null
 var _staff_schedule_panel: StaffSchedulePanel = null
 var _manager_panel: ManagerPanel = null
+## Phase P: the company's distribution.
+var _logistics_panel: LogisticsPanel = null
 var _property_sale_panel: PropertySalePanel = null
 var _real_estate_panel: RealEstatePanel = null
 @onready var _store_panel: PanelContainer = %StorePanel
@@ -355,6 +357,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			_real_estate_panel.open()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("logistics"):
+		if _logistics_panel.is_open():
+			close_screens()
+		else:
+			close_screens()
+			_logistics_panel.open()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("company"):
 		if _company_dashboard.is_open():
 			close_screens()
@@ -473,6 +483,8 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 			_profile_panel.open()
 		&"company":
 			_company_dashboard.open()
+		&"logistics":
+			_logistics_panel.open()
 		&"company_staff":
 			_company_dashboard.open(CompanyDashboard.Page.EMPLOYEES)
 		&"manager":
@@ -715,6 +727,8 @@ func _build_phase_m_screens() -> void:
 	_staff_schedule_panel.name = "StaffSchedulePanel"
 	_manager_panel = ManagerPanel.new()
 	_manager_panel.name = "ManagerPanel"
+	_logistics_panel = LogisticsPanel.new()
+	_logistics_panel.name = "LogisticsPanel"
 	_property_sale_panel = PropertySalePanel.new()
 	_property_sale_panel.name = "PropertySalePanel"
 	_real_estate_panel = RealEstatePanel.new()
@@ -739,7 +753,7 @@ func _phase_m_screens() -> Array:
 		_dealership_panel, _vehicle_detail_panel, _repair_panel, _garage_panel,
 		_furniture_store_panel, _furnishing_panel, _home_storage_panel, _profile_panel,
 		_property_sale_panel, _real_estate_panel,
-		_company_dashboard, _staff_schedule_panel, _manager_panel,
+		_company_dashboard, _staff_schedule_panel, _manager_panel, _logistics_panel,
 	]
 
 
