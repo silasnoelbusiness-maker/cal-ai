@@ -25,6 +25,9 @@ const SAVE_VERSION := 1
 const SAVE_PATH := "user://meridian_save_%d.json"
 const SAVEABLE_GROUP := &"saveable"
 
+## Entity ids present in the save most recently loaded. See save_contained().
+var _loaded_entity_ids: PackedStringArray = PackedStringArray()
+
 
 func _ready() -> void:
 	# Must keep running while the tree is paused so saving from a menu works.
@@ -218,12 +221,30 @@ func _apply_payload(payload: Dictionary) -> void:
 	)
 
 	var entities: Dictionary = payload.get("entities", {})
+	_loaded_entity_ids.clear()
+	for key in entities:
+		_loaded_entity_ids.append(String(key))
 	for node in get_tree().get_nodes_in_group(SAVEABLE_GROUP):
 		var id := _save_id_of(node)
-		# A save written before this entity existed simply leaves it as it is.
-		if id == "" or not entities.has(id) or not node.has_method("load_state"):
+		if id == "" or not node.has_method("load_state"):
+			continue
+		if not entities.has(id):
+			# Most entities are simply left as they are: an older save saying
+			# nothing about them is not the same as saying they are empty.
+			# A few are the other way round — a depot or a shipment from the
+			# session before must not survive into a save that never had one —
+			# and those ask to be emptied instead.
+			if node.get("reset_on_missing_save") == true:
+				node.call("load_state", {})
 			continue
 		node.call("load_state", entities[id])
+
+
+## Whether the save just loaded actually carried a block for this entity.
+## The difference matters to anything that keeps its records somewhere else:
+## an absent block means "there were none", not "leave what you have".
+func save_contained(id: StringName) -> bool:
+	return _loaded_entity_ids.has(String(id))
 
 
 func _eject_driver() -> void:

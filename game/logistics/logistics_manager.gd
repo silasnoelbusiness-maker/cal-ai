@@ -46,6 +46,10 @@ const SUPPLIER_DELAY_CHANCE := 0.08
 const SUPPLIER_DELAY_MINUTES := Vector2(60.0, 240.0)
 
 var save_id: StringName = &"logistics"
+## A save written before the depots existed had no depots, no shipments and
+## no rounds. Loading one empties this rather than leaving the last game's
+## warehouse standing in a city that never bought it.
+var reset_on_missing_save: bool = true
 
 var _warehouses: Array[WarehouseInstance] = []
 var _transfers: Array[TransferOrder] = []

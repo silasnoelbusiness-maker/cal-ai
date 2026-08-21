@@ -24,6 +24,10 @@ const VAN_CAPACITY := 220
 const CAR_CAPACITY := 45
 
 var save_id: StringName = &"company_fleet"
+## Assignments are emptied by a save that predates the fleet. The vehicles
+## themselves live in VehicleRegistry, so those are cleared separately once
+## the whole load has settled — see _on_game_loaded().
+var reset_on_missing_save: bool = true
 
 ## vehicle instance id -> {"kind": Assignment, "target": StringName}
 var _assignments: Dictionary = {}
@@ -33,6 +37,29 @@ var _busy: Dictionary = {}
 
 func _ready() -> void:
 	add_to_group(&"saveable")
+	SaveManager.game_loaded.connect(_on_game_loaded)
+
+
+## A company vehicle only exists because a company bought it, and the record of
+## that purchase is this fleet. If the save had nothing to say about the fleet,
+## it was written before company vehicles existed, so any company-owned vehicle
+## still sitting in the registry is a leftover from the session before rather
+## than something the loaded game owns. The player's own cars are untouched.
+func _on_game_loaded(_slot: int) -> void:
+	if SaveManager.save_contained(save_id):
+		return
+	for record in company_vans_and_cars():
+		VehicleRegistry.remove(record)
+	clear()
+
+
+## Every vehicle the company owns, of any kind.
+func company_vans_and_cars() -> Array[OwnedVehicle]:
+	var found: Array[OwnedVehicle] = []
+	for record in VehicleRegistry.get_fleet():
+		if is_company_owned(record):
+			found.append(record)
+	return found
 
 
 ## Where a company vehicle stands when it is not out. The kerb outside the

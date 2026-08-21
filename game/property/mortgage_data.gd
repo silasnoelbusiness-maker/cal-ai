@@ -16,10 +16,11 @@ enum Status { ACTIVE, OVERDUE, PAID, AT_RISK, FORECLOSING, FORECLOSED }
 
 ## Missed payments before the mortgage is flagged as being in trouble.
 const AT_RISK_MISSES := 3
-## Further misses past AT_RISK before the lender actually starts foreclosing.
-## Phase N stopped at the warning; Phase P carries it through, and the gap
-## between the two is deliberately wide enough to notice and act on.
-const FORECLOSURE_MISSES := 5
+## Misses before the lender actually starts foreclosing. Phase N stopped at
+## the warning; Phase P carries it through, and the gap between the two is
+## deliberately wide enough to notice and act on — three whole periods of
+## being told, in writing, before anybody comes for the deeds.
+const FORECLOSURE_MISSES := 6
 ## Days between the notice and losing the property. §88 asks for time to cure,
 ## and a week and a half of in-game days is time to sell a car.
 const CURE_DAYS := 10

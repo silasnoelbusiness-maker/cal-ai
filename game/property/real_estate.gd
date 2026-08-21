@@ -393,7 +393,7 @@ func is_credit_eligible() -> bool:
 	if BusinessManager.net_worth() < MIN_NET_WORTH_FOR_CREDIT:
 		return false
 	for loan in _mortgages:
-		if loan.status == MortgageData.Status.AT_RISK:
+		if loan.status == MortgageData.Status.AT_RISK or loan.is_foreclosing():
 			return false
 	return true
 
@@ -404,6 +404,8 @@ func credit_refusal_reason() -> String:
 			EconomyManager.with_thousands_separator(MIN_NET_WORTH_FOR_CREDIT)
 		)
 	for loan in _mortgages:
+		if loan.is_foreclosing():
+			return "No lender will touch you while one of your properties is being taken."
 		if loan.status == MortgageData.Status.AT_RISK:
 			return "Settle the mortgage that is behind before taking another."
 	return ""

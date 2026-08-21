@@ -264,6 +264,34 @@ func _run() -> void:
 	await _test_company_and_crime()
 	_test_company_screens_reachable()
 
+	# Phase P: logistics, distribution and business failure.
+	_test_warehouse()
+	_test_bulk_purchase()
+	_test_company_vehicle()
+	_test_delivery_driver()
+	_test_warehouse_transfer()
+	_test_branch_transfer()
+	_test_transfer_cancel()
+	_test_transfer_limits()
+	_test_auto_replenish()
+	_test_delivery_route()
+	_test_manager_backup()
+	_test_no_backup()
+	_test_wage_arrears()
+	_test_unpaid_staff_stop_working()
+	_test_distress_states()
+	_test_capital_injection()
+	_test_financial_forecast()
+	_test_voluntary_closure()
+	_test_liquidation()
+	_test_foreclosure_notice()
+	_test_foreclosure_cure()
+	_test_foreclosure_completes()
+	await _test_logistics_save_load()
+	await _test_pre_logistics_save()
+	await _test_logistics_and_crime()
+	_test_logistics_screens_reachable()
+
 	_report()
 
 
@@ -10052,4 +10080,1158 @@ func _test_company_screens_reachable() -> void:
 	if rota != null and branch != null and not branch.employees.is_empty():
 		rota.call("open", branch.employees[0])
 		_check(rota.visible, "and the rota screen opens on a person")
+		hud.call("close_screens")
+
+# --- Phase P: logistics and failure ---------------------------------------
+
+const P_BRANCH_UNIT := &"unit_quay_40"
+
+
+func _p_warehouse() -> WarehouseInstance:
+	return LogisticsManager.primary_warehouse()
+
+
+func _p_branch() -> BusinessInstance:
+	return BusinessManager.business_for_property(P_BRANCH_UNIT)
+
+
+## Stands up the depot, a van and a driver on top of whatever the earlier
+## phases already built, so the logistics tests share one company.
+func _p_setup() -> void:
+	EconomyManager.restore(500000)
+	var payer := _own_business()
+	if payer == null:
+		return
+	BusinessManager.deposit_to_business(payer, 60000)
+	if LogisticsManager.primary_warehouse() == null:
+		CompanyDebug.stand_up_warehouse(payer)
+
+
+## TEST §148 — a warehouse is its own place with its own limits.
+func _test_warehouse() -> void:
+	_p_setup()
+	var warehouse := _p_warehouse()
+	_check(warehouse != null, "the depot is taken on")
+	if warehouse == null:
+		return
+	_check(LogisticsManager.has_warehouse(), "and the company knows it has one")
+	_check(warehouse.capacity() > 0, "it holds %d units" % warehouse.capacity())
+	_check(warehouse.used() == 0, "and starts empty")
+
+	var unit := PropertyManager.by_id(warehouse.property_id)
+	_check(unit != null, "it stands on a real property")
+	_check(PropertyManager.is_warehouse(unit), "zoned as a warehouse")
+	_check(
+		not unit.accepts_business(BusinessCatalogue.by_id(&"restaurant")),
+		"and not as somewhere to open a restaurant"
+	)
+
+	# Its inventory is nobody else's.
+	var payer := LogisticsManager.funding_business()
+	_check(payer != null, "a branch is nominated to pay for it")
+	warehouse.add(&"bottled_water", 50)
+	_check(warehouse.held(&"bottled_water") == 50, "stock goes into the depot")
+	_check(
+		payer == null or payer.storage_of(&"bottled_water") != 50,
+		"and not into the branch that pays for it"
+	)
+
+	# Capacity is a real limit.
+	var room := warehouse.room_left()
+	var refused := warehouse.add(&"soda_can", room + 500)
+	_check(refused == room, "only what fits goes in (%d of %d offered)" % [
+		refused, room + 500
+	])
+	_check(warehouse.is_full(), "and then it is full")
+	warehouse.take(&"soda_can", refused)
+	warehouse.take(&"bottled_water", 50)
+	_check(warehouse.used() == 0, "and it empties again")
+
+
+## TEST §149 — buying in bulk, once, at a discount.
+func _test_bulk_purchase() -> void:
+	var warehouse := _p_warehouse()
+	var payer := LogisticsManager.funding_business()
+	if warehouse == null or payer == null:
+		return
+	CompanyDebug.add_racks(warehouse, 4)
+	_check(warehouse.capacity() > 400, "racking raises capacity to %d" % warehouse.capacity())
+
+	var water := ItemCatalogue.by_id(&"bottled_water")
+	var small := LogisticsManager.bulk_quote(water, 20)
+	var large := LogisticsManager.bulk_quote(water, 400)
+	_check(float(small["discount"]) == 0.0, "a small order earns no discount")
+	_check(float(large["discount"]) > float(small["discount"]), "a large one does")
+	_check(
+		float(large["discount"]) <= 0.1,
+		"and the discount stays modest (%.0f%%)" % (float(large["discount"]) * 100.0)
+	)
+	_check(
+		int(large["cost"]) == int(large["gross"]) - int(large["saved"]),
+		"the price is the list less the saving"
+	)
+
+	var before := payer.cash_balance
+	var held_before := warehouse.held(&"bottled_water")
+	var result := LogisticsManager.order_to_warehouse(warehouse, &"bottled_water", 300)
+	_check(
+		result == BusinessManager.PurchaseResult.OK,
+		"the order is placed"
+	)
+	var quote := LogisticsManager.bulk_quote(water, 300)
+	_check(
+		before - payer.cash_balance == int(quote["cost"]),
+		"the money leaves the funding branch exactly once (-$%d)" % (
+			before - payer.cash_balance
+		)
+	)
+	_check(
+		warehouse.held(&"bottled_water") == held_before,
+		"and nothing arrives before the lorry does"
+	)
+	BusinessManager.deliver_now()
+	_check(
+		warehouse.held(&"bottled_water") == held_before + 300,
+		"then 300 land at the depot, once"
+	)
+
+
+## TEST §154 and §155 — a company van is the company's, not the player's.
+func _test_company_vehicle() -> void:
+	var payer := LogisticsManager.funding_business()
+	if payer == null:
+		return
+	var personal_before := EconomyManager.cash
+	var personal_fleet_before := VehicleRegistry.total_value()
+	var business_before := payer.cash_balance
+
+	var van := CompanyFleet.buy_for_company(&"van", payer)
+	_check(van != null, "a van is bought for the company")
+	if van == null:
+		return
+	_check(EconomyManager.cash == personal_before, "your own cash is untouched")
+	_check(payer.cash_balance < business_before, "the business paid for it")
+	_check(CompanyFleet.is_company_owned(van), "and owns it")
+	_check(van.owner_id == payer.business_id, "by name")
+	_check(
+		VehicleRegistry.total_value() == personal_fleet_before,
+		"it does not show up among your own cars"
+	)
+	_check(CompanyFleet.fleet_value() > 0, "it shows up in the company's fleet")
+	_check(
+		CompanyFleet.cargo_capacity(van) > CompanyFleet.CAR_CAPACITY,
+		"a van carries more than a car (%d units)" % CompanyFleet.cargo_capacity(van)
+	)
+	_check(CompanyFleet.free_van() != null, "and it is available for work")
+
+
+## TEST §156 — a driver is an ordinary employee.
+func _test_delivery_driver() -> void:
+	var payer := LogisticsManager.funding_business()
+	if payer == null:
+		return
+	var driver := CompanyDebug.hire(payer, EmployeeData.Role.DELIVERY_DRIVER, 0.8)
+	_check(driver != null, "a delivery driver is hired")
+	if driver == null:
+		return
+	_check(driver.role == EmployeeData.Role.DELIVERY_DRIVER, "in the driver's job")
+	_check(driver.skill_logistics > 0, "with a logistics skill of %d" % driver.skill_logistics)
+	_check(
+		driver.relevant_skill() == driver.skill_logistics,
+		"which is the skill their wage is set by"
+	)
+	_check(CompanyFleet.drivers().has(driver), "the fleet knows about them")
+	_check(
+		CompanyFleet.free_driver(TimeManager.hour) != null,
+		"and one is free to drive"
+	)
+	_check(
+		BusinessManager.employee_by_id(driver.employee_id) == driver,
+		"they are findable across the whole company by id"
+	)
+
+
+## TEST §150, §152 and §19 — stock moves once and is never in two places.
+func _test_warehouse_transfer() -> void:
+	var warehouse := _p_warehouse()
+	if warehouse == null:
+		return
+	# A branch with room to receive.
+	var branch := _own_business()
+	if branch == null:
+		return
+	for i in 4:
+		BusinessManager.call("_restock_shelves", branch, 40)
+
+	var held_before := warehouse.held(&"bottled_water")
+	var branch_before := branch.storage_of(&"bottled_water")
+	var made := LogisticsManager.request_transfer(
+		TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+		TransferOrder.Place.BUSINESS, branch.business_id, {&"bottled_water": 30}
+	)
+	var order: TransferOrder = made["order"]
+	_check(order != null, "a transfer is created: %s" % _p_transfer_result(made["result"]))
+	if order == null:
+		return
+	_check(order.status == TransferOrder.Status.QUEUED, "and starts reserved")
+
+	# Reserved, not moved. This is the window §18 is about.
+	_check(
+		warehouse.held(&"bottled_water") == held_before,
+		"the stock is still standing in the depot"
+	)
+	_check(
+		warehouse.reserved_of(&"bottled_water") >= 30,
+		"but it is spoken for"
+	)
+	_check(
+		warehouse.available(&"bottled_water") == held_before - 30,
+		"so only %d of it can be promised to anything else" % (held_before - 30)
+	)
+	# The same crate cannot be promised twice.
+	var second := LogisticsManager.request_transfer(
+		TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+		TransferOrder.Place.BUSINESS, branch.business_id,
+		{&"bottled_water": held_before}, TransferOrder.Priority.NORMAL, true
+	)
+	var greedy: TransferOrder = second["order"]
+	if greedy != null:
+		_check(
+			int(greedy.items.get(&"bottled_water", 0)) <= held_before - 30,
+			"a second transfer cannot take what the first reserved"
+		)
+		LogisticsManager.cancel_transfer(greedy)
+
+	_check(LogisticsManager.dispatch_transfer(order) == LogisticsManager.TransferResult.OK,
+		"the van goes")
+	_check(order.status == TransferOrder.Status.IN_TRANSIT, "the shipment is on the road")
+	_check(
+		warehouse.held(&"bottled_water") == held_before - 30,
+		"the stock has left the depot"
+	)
+	_check(
+		branch.storage_of(&"bottled_water") == branch_before,
+		"and has not arrived yet — it is on the van, and nowhere else"
+	)
+	_check(not order.can_cancel(), "a shipment already gone cannot be called back")
+
+	TimeManager.advance_minutes(180)
+	LogisticsManager.advance_deliveries()
+	_check(order.status == TransferOrder.Status.DELIVERED, "it arrives")
+	_check(
+		branch.storage_of(&"bottled_water") == branch_before + 30,
+		"the branch gains exactly what was sent (%d -> %d)" % [
+			branch_before, branch.storage_of(&"bottled_water")
+		]
+	)
+	_check(
+		warehouse.reserved_of(&"bottled_water") == 0,
+		"and the reservation is cleared"
+	)
+	# Nothing was created or destroyed anywhere along the way.
+	_check(
+		warehouse.held(&"bottled_water") + branch.storage_of(&"bottled_water")
+			== held_before + branch_before,
+		"the total across both places is unchanged"
+	)
+
+
+func _p_transfer_result(result: int) -> String:
+	return String(LogisticsManager.TransferResult.keys()[result])
+
+
+## TEST §151 — branch to branch, without a warehouse in the middle.
+func _test_branch_transfer() -> void:
+	var from_business := _own_business()
+	var to_business := _o_gym()
+	if from_business == null:
+		return
+	# Somewhere with room that buys the same things.
+	var target: BusinessInstance = null
+	for business in BusinessManager.get_businesses():
+		if business == from_business or business.is_closed():
+			continue
+		if business.type_id == from_business.type_id and business.storage_room_left() > 20:
+			target = business
+			break
+	if target == null:
+		return
+
+	var source_before := from_business.storage_of(&"bottled_water")
+	if source_before < 10:
+		from_business.add_storage(&"bottled_water", 30)
+		source_before = from_business.storage_of(&"bottled_water")
+	var target_before := target.storage_of(&"bottled_water")
+
+	var made := LogisticsManager.request_transfer(
+		TransferOrder.Place.BUSINESS, from_business.business_id,
+		TransferOrder.Place.BUSINESS, target.business_id, {&"bottled_water": 10}
+	)
+	var order: TransferOrder = made["order"]
+	_check(order != null, "one branch can send stock to another")
+	if order == null:
+		return
+	_check(
+		from_business.available_storage(&"bottled_water") == source_before - 10,
+		"the sending branch cannot use what it has promised"
+	)
+	_check(
+		from_business.storage_of(&"bottled_water") == source_before,
+		"though the goods are still on its shelves until the van comes"
+	)
+	LogisticsManager.dispatch_transfer(order)
+	TimeManager.advance_minutes(180)
+	LogisticsManager.advance_deliveries()
+	_check(
+		from_business.storage_of(&"bottled_water") == source_before - 10,
+		"the source is down ten"
+	)
+	_check(
+		target.storage_of(&"bottled_water") == target_before + 10,
+		"the destination is up ten"
+	)
+	_check(
+		from_business.storage_of(&"bottled_water") + target.storage_of(&"bottled_water")
+			== source_before + target_before,
+		"and nothing was invented in between"
+	)
+
+
+## TEST §153 — calling a transfer off before it goes costs nothing.
+func _test_transfer_cancel() -> void:
+	var warehouse := _p_warehouse()
+	var branch := _own_business()
+	if warehouse == null or branch == null:
+		return
+	var held := warehouse.held(&"bottled_water")
+	if held < 10:
+		warehouse.add(&"bottled_water", 40)
+		held = warehouse.held(&"bottled_water")
+
+	var made := LogisticsManager.request_transfer(
+		TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+		TransferOrder.Place.BUSINESS, branch.business_id, {&"bottled_water": 10}
+	)
+	var order: TransferOrder = made["order"]
+	if order == null:
+		return
+	_check(warehouse.reserved_of(&"bottled_water") >= 10, "the stock is reserved")
+	_check(order.can_cancel(), "and it can still be called off")
+	_check(LogisticsManager.cancel_transfer(order), "it is cancelled")
+	_check(
+		order.status == TransferOrder.Status.CANCELLED, "the order says so"
+	)
+	_check(
+		warehouse.reserved_of(&"bottled_water") == 0,
+		"the reservation is released"
+	)
+	_check(
+		warehouse.held(&"bottled_water") == held,
+		"and not a single unit was lost doing it"
+	)
+
+
+## TEST §160 — asking for more than there is, and for more than fits.
+func _test_transfer_limits() -> void:
+	var warehouse := _p_warehouse()
+	var branch := _own_business()
+	if warehouse == null or branch == null:
+		return
+	var available := warehouse.available(&"bottled_water")
+	var made := LogisticsManager.request_transfer(
+		TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+		TransferOrder.Place.BUSINESS, branch.business_id,
+		{&"bottled_water": available + 500}
+	)
+	var order: TransferOrder = made["order"]
+	if order != null:
+		_check(
+			int(order.items.get(&"bottled_water", 0)) <= available,
+			"a request beyond the stock ships what there is, not what was asked"
+		)
+		_check(
+			warehouse.available(&"bottled_water") >= 0,
+			"and the depot never goes negative"
+		)
+		LogisticsManager.cancel_transfer(order)
+	else:
+		_check(true, "or is refused outright: %s" % _p_transfer_result(made["result"]))
+
+	# A destination with no room says so, rather than blaming the stock.
+	var full := _p_fill_storage(branch)
+	if full:
+		var refused := LogisticsManager.request_transfer(
+			TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+			TransferOrder.Place.BUSINESS, branch.business_id, {&"bottled_water": 10}
+		)
+		_check(
+			refused["result"] == LogisticsManager.TransferResult.NO_ROOM,
+			"a branch with a full back room is refused for want of room"
+		)
+
+
+func _p_fill_storage(business: BusinessInstance) -> bool:
+	var room := business.storage_room_left()
+	if room <= 0:
+		return true
+	business.add_storage(&"snack_bar", room)
+	return business.storage_room_left() <= 0
+
+
+## TEST §159 — a branch below its minimum asks, and nothing is conjured.
+func _test_auto_replenish() -> void:
+	var warehouse := _p_warehouse()
+	var branch := _own_business()
+	if warehouse == null or branch == null:
+		return
+	branch.storage.clear()
+	branch.reserved_stock.clear()
+	var wanted := LogisticsManager.shortfall_for(branch)
+	_check(not wanted.is_empty(), "an empty branch is short of %d lines" % wanted.size())
+	var asked := 0
+	for id: StringName in wanted:
+		asked += int(wanted[id])
+	_check(asked > 0, "and wants %d units" % asked)
+
+	# The depot only has water in it, so only water can come.
+	var held := warehouse.held(&"bottled_water")
+	if held <= 0:
+		warehouse.add(&"bottled_water", 50)
+	var made := LogisticsManager.request_transfer(
+		TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+		TransferOrder.Place.BUSINESS, branch.business_id, wanted
+	)
+	var order: TransferOrder = made["order"]
+	_check(order != null, "a replenishment transfer is created")
+	if order == null:
+		return
+	for id: StringName in order.items:
+		_check(
+			int(order.items[id]) <= warehouse.held(id),
+			"it only promises stock the depot actually has (%s)" % id
+		)
+	LogisticsManager.cancel_transfer(order)
+
+
+## TEST §32 — a route that visits its stops on the days it runs.
+func _test_delivery_route() -> void:
+	var warehouse := _p_warehouse()
+	if warehouse == null:
+		return
+	var route := LogisticsManager.create_route(warehouse, "Morning Run")
+	_check(route != null, "a route is created")
+	if route == null:
+		return
+	_check(route.stop_count() == 0, "with no stops yet")
+	var branch := _own_business()
+	if branch != null:
+		_check(route.add_stop(branch.business_id), "a branch is added to it")
+		_check(not route.add_stop(branch.business_id), "and cannot be added twice")
+	route.departure_hour = 8
+	route.days_of_week = [0, 2, 4]
+	_check(route.runs_on(0), "it runs on Monday")
+	_check(not route.runs_on(1), "and not on Tuesday")
+	_check(
+		route.is_due(TimeManager.day_index, 0, 9),
+		"at nine on a Monday it is due to go"
+	)
+	route.last_run_day = TimeManager.day_index
+	_check(
+		not route.is_due(TimeManager.day_index, 0, 9),
+		"and having gone, it does not go again the same day"
+	)
+	route.enabled = false
+	route.last_run_day = -1
+	_check(not route.is_due(TimeManager.day_index, 0, 9), "a route switched off stays put")
+	LogisticsManager.delete_route(route)
+
+
+## TEST §161 and §163 — the manager rings round, and never rings somebody
+## who is already at work.
+func _test_manager_backup() -> void:
+	var short_handed := _own_business()
+	var other := _o_gym()
+	if short_handed == null or other == null:
+		return
+	short_handed.set_permission(&"call_backup", true)
+	if not short_handed.has_manager():
+		CompanyDebug.hire(short_handed, EmployeeData.Role.MANAGER, 0.8)
+
+	# Somebody at another branch, off shift, able to work a till.
+	var helper := CompanyDebug.hire(other, EmployeeData.Role.CASHIER, 0.8)
+	if helper == null:
+		return
+	helper.clear_shifts()
+	helper.shift_start_hour = 0
+	helper.shift_end_hour = 1
+	helper.available_for_backup = true
+	_check(
+		not helper.is_on_shift(12), "the helper is off shift at noon"
+	)
+	_check(
+		BackupPool.members().has(helper), "and is in the backup pool"
+	)
+	_check(
+		BackupPool.is_eligible(helper, short_handed, EmployeeData.Role.CASHIER, 12),
+		"and is eligible to cover a till"
+	)
+
+	# Somebody already working cannot be called.
+	var busy := CompanyDebug.hire(other, EmployeeData.Role.CASHIER, 0.8)
+	if busy != null:
+		busy.clear_shifts()
+		busy.shift_start_hour = 0
+		busy.shift_end_hour = 24
+		busy.available_for_backup = true
+		_check(
+			not BackupPool.is_eligible(busy, short_handed, EmployeeData.Role.CASHIER, 12),
+			"somebody already on shift elsewhere is not eligible"
+		)
+
+	var chosen := BackupPool.best_for(short_handed, EmployeeData.Role.CASHIER, 12)
+	_check(chosen != null, "the pool offers somebody")
+	_check(chosen != busy, "and it is not the one who is already working")
+
+	var assigned := BusinessManager.assign_backup(
+		short_handed, helper, EmployeeData.Role.CASHIER, 12
+	)
+	_check(assigned, "the manager assigns them")
+	_check(helper.has_backup_shift(), "they have a shift to cover")
+	_check(
+		helper.backup_business_id == short_handed.business_id,
+		"at the right branch"
+	)
+	# They are not there yet.
+	_check(
+		not helper.is_covering(short_handed.business_id, EmployeeData.Role.CASHIER, 12),
+		"but they have to get there first — nobody teleports"
+	)
+	TimeManager.advance_minutes(90)
+	_check(
+		helper.is_covering(short_handed.business_id, EmployeeData.Role.CASHIER, 12),
+		"once they arrive they are covering"
+	)
+	_check(
+		short_handed.rostered(EmployeeData.Role.CASHIER, 12) == helper,
+		"and the branch counts them on the roster"
+	)
+	helper.clear_backup()
+
+
+## TEST §162 — nobody available means nobody comes, not a phantom employee.
+func _test_no_backup() -> void:
+	var short_handed := _own_business()
+	if short_handed == null:
+		return
+	var restore: Array[EmployeeData] = []
+	for worker in BackupPool.members():
+		worker.available_for_backup = false
+		restore.append(worker)
+	_check(BackupPool.members().is_empty(), "nobody is in the pool")
+	_check(
+		BackupPool.best_for(short_handed, EmployeeData.Role.COOK, 12) == null,
+		"so nobody is offered"
+	)
+	var staff_before := short_handed.employees.size()
+	BusinessManager.call("_manager_call_backup", short_handed, 12)
+	_check(
+		short_handed.employees.size() == staff_before,
+		"and no employee is invented to fill the gap"
+	)
+	for worker in restore:
+		worker.available_for_backup = true
+
+
+## TEST §165 and §166 — wages that cannot be paid are owed, and paying later
+## pays the right person.
+func _test_wage_arrears() -> void:
+	var business := _o_gym()
+	if business == null:
+		return
+	var worker := CompanyDebug.hire(business, EmployeeData.Role.RECEPTIONIST, 0.6)
+	if worker == null:
+		return
+	worker.wage_arrears = 0
+	worker.missed_pay_runs = 0
+	CompanyDebug.set_cash(business, 0)
+
+	var owed := 240
+	var paid := FinanceManager.settle_wages(business, worker, owed)
+	_check(paid == 0, "an empty account pays nothing")
+	_check(worker.wage_arrears == owed, "and the whole wage is owed (%d)" % worker.wage_arrears)
+	_check(worker.missed_pay_runs == 1, "one payday missed")
+	_check(business.total_arrears() >= owed, "the business knows it owes it")
+
+	# Part payment takes what there is and owes the rest.
+	CompanyDebug.set_cash(business, 100)
+	worker.wage_arrears = 0
+	worker.missed_pay_runs = 0
+	paid = FinanceManager.settle_wages(business, worker, owed)
+	_check(paid == 100, "a short account pays what it has")
+	_check(worker.wage_arrears == owed - 100, "and owes the difference")
+
+	# Money in, arrears out, and the person is square again.
+	FinanceManager.inject_capital(business, 500)
+	var cleared := FinanceManager.pay_arrears(business)
+	_check(cleared > 0, "the arrears are paid off ($%d)" % cleared)
+	_check(worker.wage_arrears == 0, "the employee is owed nothing")
+	_check(worker.missed_pay_runs == 0, "and their record is clean")
+	_check(worker.will_work(), "so they turn up again")
+
+
+## TEST §70 — somebody owed for weeks stops coming in.
+func _test_unpaid_staff_stop_working() -> void:
+	var business := _o_gym()
+	if business == null:
+		return
+	var worker := CompanyDebug.hire(business, EmployeeData.Role.CLEANER, 0.6)
+	if worker == null:
+		return
+	worker.clear_shifts()
+	worker.shift_start_hour = 0
+	worker.shift_end_hour = 24
+	_check(worker.will_work(), "a paid employee works")
+	_check(business.rostered(EmployeeData.Role.CLEANER, 12) == worker, "and is on the roster")
+	worker.missed_pay_runs = 3
+	_check(not worker.will_work(), "somebody unpaid three times over does not")
+	_check(
+		business.rostered(EmployeeData.Role.CLEANER, 12) != worker,
+		"and stops appearing on the roster"
+	)
+	worker.missed_pay_runs = 0
+	worker.wage_arrears = 0
+
+
+## TEST §164 and §167 — the distress ladder, rung by rung.
+func _test_distress_states() -> void:
+	var business := _o_gym()
+	if business == null:
+		return
+	for worker in business.employees:
+		worker.wage_arrears = 0
+		worker.missed_pay_runs = 0
+	CompanyDebug.set_cash(business, 50000)
+	FinanceManager.review(business)
+	_check(
+		business.distress == DistressState.State.HEALTHY,
+		"a solvent business is healthy (%s)" % business.distress_label()
+	)
+
+	# Short of what is coming, but owing nothing yet.
+	CompanyDebug.set_cash(business, 0)
+	FinanceManager.review(business)
+	_check(
+		business.distress == DistressState.State.WARNING,
+		"one that cannot cover what is coming is warned (%s)" % business.distress_label()
+	)
+
+	# Really owing money.
+	if not business.employees.is_empty():
+		CompanyDebug.owe_wages(business, business.employees[0], 900)
+	FinanceManager.review(business)
+	_check(
+		business.distress == DistressState.State.DISTRESSED,
+		"one with real arrears is distressed (%s)" % business.distress_label()
+	)
+	_check(business.total_arrears() >= 900, "and the amount is tracked")
+
+	# Money in puts it back.
+	FinanceManager.inject_capital(business, 4000)
+	FinanceManager.pay_arrears(business)
+	FinanceManager.review(business)
+	_check(
+		business.distress != DistressState.State.DISTRESSED,
+		"paying it off climbs back out (%s)" % business.distress_label()
+	)
+	_check(business.total_arrears() == 0, "with nothing left owing")
+	CompanyDebug.set_cash(business, 20000)
+	FinanceManager.review(business)
+
+
+## TEST §179 — the player's money into a business, once.
+func _test_capital_injection() -> void:
+	var business := _own_business()
+	if business == null:
+		return
+	EconomyManager.restore(20000)
+	var personal := EconomyManager.cash
+	var till := business.cash_balance
+	_check(FinanceManager.inject_capital(business, 3000), "capital goes in")
+	_check(EconomyManager.cash == personal - 3000, "your cash falls by exactly that")
+	_check(business.cash_balance == till + 3000, "the business gains exactly that")
+	_check(
+		not FinanceManager.inject_capital(business, 999999),
+		"and you cannot put in money you do not have"
+	)
+	_check(EconomyManager.cash == personal - 3000, "a refused injection moves nothing")
+
+	var warning := FinanceManager.withdrawal_warning(business, business.cash_balance)
+	_check(
+		not warning.is_empty(),
+		"taking it all out warns about what is coming"
+	)
+
+
+## TEST §178 — the forecast matches what is actually owed.
+func _test_financial_forecast() -> void:
+	var ahead := FinanceManager.forecast()
+	_check(int(ahead["days"]) == FinanceManager.FORECAST_DAYS, "the forecast is a week")
+	var due := 0
+	var overdue := 0
+	for entry in FinanceManager.company_obligations():
+		due += entry.amount
+		overdue += entry.overdue
+	_check(int(ahead["due"]) == due, "what falls due is the sum of the obligations")
+	_check(int(ahead["overdue"]) == overdue, "and so is what is already late")
+	_check(
+		int(ahead["cash"]) == BusinessManager.total_business_cash(),
+		"cash is what the businesses actually hold"
+	)
+	_check(
+		int(ahead["projected"])
+			== int(ahead["cash"]) + int(ahead["expected_revenue"]) - due - overdue,
+		"and the projection is plain arithmetic over the two"
+	)
+	var kinds := {}
+	for entry in FinanceManager.company_obligations():
+		kinds[entry.kind] = true
+	_check(kinds.size() >= 2, "several kinds of obligation are counted (%d)" % kinds.size())
+
+
+## TEST §169 and §171 — closing the doors keeps everything.
+func _test_voluntary_closure() -> void:
+	var payer := _own_business()
+	if payer == null:
+		return
+	var doomed := CompanyDebug.stand_up(
+		P_BRANCH_UNIT, &"convenience_store", "Quayside Corner", get_tree(), 6000
+	)
+	if doomed == null:
+		return
+	var stock_before := doomed.storage_used()
+	var fittings_before := doomed.equipment.size()
+	var staff_before := doomed.employees.size()
+	var unit := doomed.property()
+
+	BusinessManager.close_business(doomed, "closed by you")
+	_check(doomed.is_closed(), "the branch is closed")
+	_check(
+		doomed.distress == DistressState.State.CLOSED, "and says so (%s)" % doomed.distress_label()
+	)
+	_check(not doomed.should_be_open(12), "it will not open at noon")
+	_check(doomed.storage_used() == stock_before, "it keeps its stock")
+	_check(doomed.equipment.size() == fittings_before, "it keeps its fittings")
+	_check(doomed.employees.size() == staff_before, "and nobody is dismissed")
+	_check(
+		unit != null and unit.is_leased_by_player(),
+		"the lease is still the player's, and so is the rent"
+	)
+	_check(
+		BusinessManager.by_id(doomed.business_id) != null,
+		"the branch is still on the books"
+	)
+
+	_check(BusinessManager.reopen_business(doomed), "it can be reopened")
+	_check(not doomed.is_closed(), "and trades again")
+	_check(
+		doomed.storage_used() == stock_before,
+		"with everything it had when it shut"
+	)
+
+
+## TEST §170, §172 and §128 — winding up sells, settles and removes, once.
+func _test_liquidation() -> void:
+	var doomed := _p_branch()
+	if doomed == null:
+		return
+	var brand := CompanyManager.brand_for_business(doomed)
+	var unit := doomed.property()
+	var quote := Liquidation.quote(doomed)
+	_check(int(quote["stock_recovered"]) > 0, "the stock is worth something")
+	_check(
+		int(quote["stock_recovered"]) < int(quote["stock_value"]),
+		"but less than it cost (%d of %d)" % [
+			int(quote["stock_recovered"]), int(quote["stock_value"])
+		]
+	)
+	_check(
+		float(quote["equipment_recovered"]) < float(quote["equipment_value"]) * 0.7,
+		"and second-hand fittings fetch much less than new ones"
+	)
+
+	var brands_before := CompanyManager.brand_count()
+	var count_before := BusinessManager.owned_count()
+	var personal_before := EconomyManager.cash
+	var report := BusinessManager.liquidate_business(doomed)
+
+	_check(not report.is_empty(), "the branch is wound up")
+	_check(
+		BusinessManager.owned_count() == count_before - 1,
+		"and comes off the books exactly once"
+	)
+	_check(
+		BusinessManager.by_id(doomed.business_id) == null,
+		"it cannot be found any more"
+	)
+	_check(
+		EconomyManager.cash >= personal_before,
+		"whatever was left over comes back to you"
+	)
+	_check(
+		unit == null or not unit.is_leased_by_player(),
+		"the lease is handed back"
+	)
+	_check(
+		unit == null or unit.is_vacant(),
+		"and the unit can be let to somebody else"
+	)
+	_check(int(report.get("released_staff", 0)) >= 0, "the staff are accounted for")
+
+	# The rest of the company is untouched. §86 and §172.
+	_check(
+		BusinessManager.owned_count() > 0,
+		"the other branches carry on"
+	)
+	_check(
+		CompanyManager.brand_count() == brands_before,
+		"and the brand survives losing a branch"
+	)
+	if brand != null:
+		_check(
+			not brand.has_branch(doomed.business_id),
+			"which no longer lists the one that closed"
+		)
+
+
+## The earlier mortgage tests deliberately end with the debt cleared, so the
+## foreclosure tests take one out for themselves rather than leaning on a
+## leftover. Nothing already owned is disturbed, and a unit with a shop in it
+## is left alone: losing the roof over a business is a different test.
+func _p_mortgage() -> Array[MortgageData]:
+	var loans := RealEstate.mortgages()
+	if not loans.is_empty():
+		return loans
+	EconomyManager.restore(400000)
+	for listing in RealEstate.listings():
+		if not listing.mortgage_available or RealEstate.owns(listing.property_id):
+			continue
+		if BusinessManager.business_for_property(listing.property_id) != null:
+			continue
+		RealEstate.discover(listing.property_id)
+		if RealEstate.buy_with_mortgage(listing.property_id) == RealEstate.BuyResult.OK:
+			break
+	return RealEstate.mortgages()
+
+
+## TEST §173 — a mortgage past its warnings gets a notice with a deadline.
+func _test_foreclosure_notice() -> void:
+	var loans := _p_mortgage()
+	if loans.is_empty():
+		return
+	var loan: MortgageData = loans[0]
+	loan.missed_payments = 0
+	loan.status = MortgageData.Status.ACTIVE
+	loan.foreclosure_day = -1
+
+	CompanyDebug.miss_mortgage_payments(loan, MortgageData.AT_RISK_MISSES)
+	_check(
+		loan.status == MortgageData.Status.AT_RISK,
+		"three misses puts a mortgage at risk (%s)" % loan.status_label()
+	)
+	_check(not loan.is_foreclosing(), "but nothing is being taken yet")
+
+	CompanyDebug.miss_mortgage_payments(
+		loan, MortgageData.FORECLOSURE_MISSES - MortgageData.AT_RISK_MISSES
+	)
+	_check(loan.is_foreclosing(), "further misses bring a foreclosure notice")
+	_check(
+		loan.foreclosure_day > TimeManager.day_index,
+		"with a deadline in the future"
+	)
+	var quote := RealEstate.cure_quote(loan)
+	_check(int(quote["amount"]) > 0, "an amount to cure is stated ($%d)" % int(quote["amount"]))
+	_check(
+		int(quote["amount"]) < loan.remaining_principal,
+		"and it is the arrears, not the whole debt"
+	)
+	_check(int(quote["days_left"]) > 0, "and days to find it (%d)" % int(quote["days_left"]))
+	_check(
+		RealEstate.foreclosing_mortgages().has(loan),
+		"the company screen can see the notice"
+	)
+
+
+## TEST §174 — paying the arrears calls it off.
+func _test_foreclosure_cure() -> void:
+	var notices := RealEstate.foreclosing_mortgages()
+	if notices.is_empty():
+		return
+	var loan: MortgageData = notices[0]
+	var owed := loan.arrears_amount()
+	EconomyManager.restore(owed + 20000)
+	var before := EconomyManager.cash
+	var owned_before := RealEstate.count()
+
+	_check(RealEstate.cure_foreclosure(loan), "the arrears are paid")
+	_check(EconomyManager.cash == before - owed, "the money leaves, once")
+	_check(not loan.is_foreclosing(), "the notice is withdrawn")
+	_check(loan.status == MortgageData.Status.ACTIVE, "the mortgage is in good standing")
+	_check(loan.missed_payments == 0, "with a clean record")
+	_check(RealEstate.count() == owned_before, "and the property is still the player's")
+	_check(
+		loan.remaining_principal > 0,
+		"the debt itself remains — curing is not paying it off"
+	)
+
+
+## TEST §175, §176 and §94 — losing the property, safely.
+func _test_foreclosure_completes() -> void:
+	var loans := _p_mortgage()
+	if loans.is_empty():
+		return
+	var loan: MortgageData = loans[0]
+	var record := RealEstate.record_for(loan.property_id)
+	if record == null:
+		return
+	var was_home := record.use == PropertyRecord.Use.OWNER_OCCUPIED
+	var owned_before := RealEstate.count()
+	var cash_before := EconomyManager.cash
+	var equity := RealEstate.equity_of(record)
+
+	CompanyDebug.miss_mortgage_payments(loan, MortgageData.FORECLOSURE_MISSES)
+	_check(loan.is_foreclosing(), "a notice is outstanding")
+	# Let the deadline pass without curing it.
+	loan.foreclosure_day = TimeManager.day_index
+	RealEstate.call("_advance_foreclosures")
+
+	_check(
+		loan.status == MortgageData.Status.FORECLOSED,
+		"the deadline passes and the lender takes it (%s)" % loan.status_label()
+	)
+	_check(RealEstate.count() == owned_before - 1, "the player owns one property fewer")
+	_check(
+		RealEstate.record_for(record.property_id) == null,
+		"and it is gone from the portfolio"
+	)
+	_check(loan.remaining_principal == 0, "the debt against it is cleared")
+	_check(
+		not RealEstate.mortgages().has(loan),
+		"and the mortgage is off the books"
+	)
+	if equity > 0:
+		_check(
+			EconomyManager.cash > cash_before,
+			"whatever equity was left comes back rather than vanishing"
+		)
+	# No ghost income from a property somebody else now owns.
+	_check(
+		RealEstate.tenants_in(record.property_id).is_empty(),
+		"any tenancy ends with the ownership"
+	)
+	if was_home:
+		_check(
+			PropertyManager.current_home() != null,
+			"and losing your home leaves you somewhere else to sleep"
+		)
+
+
+## TEST §181 and §182 — logistics and distress survive a save and a load.
+func _test_logistics_save_load() -> void:
+	var warehouse := _p_warehouse()
+	var branch := _own_business()
+	if warehouse == null or branch == null:
+		return
+	warehouse.add(&"bottled_water", 40)
+	var racks := warehouse.racks
+	var vans := CompanyFleet.company_vans().size()
+
+	# A shipment caught mid-journey is the hard case. §146.
+	var made := LogisticsManager.request_transfer(
+		TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+		TransferOrder.Place.BUSINESS, branch.business_id, {&"bottled_water": 12}
+	)
+	var order: TransferOrder = made["order"]
+	if order != null:
+		LogisticsManager.dispatch_transfer(order)
+	var moving := order != null and order.is_moving()
+	var cargo := int(order.items.get(&"bottled_water", 0)) if order != null else 0
+	var branch_before := branch.storage_of(&"bottled_water")
+	# Read the shelf after the van has loaded: the crates on the road are the
+	# van's now, and counting them in both places is the bug this guards.
+	var held := warehouse.held(&"bottled_water")
+
+	# And a business in trouble.
+	var sick := _o_gym()
+	if sick != null and not sick.employees.is_empty():
+		CompanyDebug.set_cash(sick, 0)
+		CompanyDebug.owe_wages(sick, sick.employees[0], 750)
+		FinanceManager.review(sick)
+	var sick_state := sick.distress if sick != null else DistressState.State.HEALTHY
+	var sick_arrears := sick.total_arrears() if sick != null else 0
+
+	_check(SaveManager.save_to_slot(6), "the company saves")
+	_check(SaveManager.load_from_slot(6), "and loads back")
+	await _settle(6)
+
+	var after := _p_warehouse()
+	_check(after != null, "the depot comes back")
+	if after != null:
+		_check(after.held(&"bottled_water") == held, "with the stock it had")
+		_check(after.racks == racks, "and the racking that was paid for")
+	_check(
+		CompanyFleet.company_vans().size() == vans,
+		"the vans come back, once each"
+	)
+
+	if moving:
+		var resumed: TransferOrder = null
+		for entry in LogisticsManager.transfers():
+			if entry.is_moving():
+				resumed = entry
+				break
+		_check(resumed != null, "the shipment is still on the road")
+		if resumed != null:
+			_check(
+				int(resumed.items.get(&"bottled_water", 0)) == cargo,
+				"carrying what it was carrying"
+			)
+			var branch_after := BusinessManager.by_id(branch.business_id)
+			_check(
+				branch_after != null
+					and branch_after.storage_of(&"bottled_water") == branch_before,
+				"and it has not been delivered twice on the way through the save"
+			)
+
+	var sick_after := _o_gym()
+	if sick_after != null:
+		_check(
+			sick_after.distress == sick_state,
+			"a business in trouble is in the same trouble (%s)" % sick_after.distress_label()
+		)
+		_check(
+			sick_after.total_arrears() == sick_arrears,
+			"owing the same amount ($%d)" % sick_after.total_arrears()
+		)
+	SaveManager.delete_slot(6)
+
+
+## TEST §183 — a Phase O save has no logistics in it and loads anyway.
+func _test_pre_logistics_save() -> void:
+	var path := SaveManager.get_slot_path(7)
+	var payload := {
+		"version": 1,
+		"time": {"total_minutes": 10.0 * 60.0},
+		"economy": {"cash": 7400},
+		"entities": {
+			"business_manager": {
+				"businesses": [
+					{
+						"id": "business_1", "name": "Older Shop",
+						"type": "convenience_store", "property": "unit_main_18",
+						"cash": 2600, "reputation": 58.0,
+						"employees": [
+							{
+								"id": "employee_1", "name": "Robin Vance", "wage": 19,
+								"skill_checkout": 66, "role": 0,
+								"shift_start": 9, "shift_end": 17,
+								"business": "business_1",
+							},
+						],
+						"lifetime_revenue": 9100,
+					},
+				],
+				"order": ["business_1"],
+				"next_business": 2,
+				"company_name": "Older Holdings",
+			},
+		},
+	}
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	_check(file != null, "a Phase O save is written with no logistics block")
+	if file == null:
+		return
+	file.store_string(JSON.stringify(payload))
+	file.close()
+
+	_check(SaveManager.load_from_slot(7), "and it loads")
+	await _settle(6)
+	var shop := BusinessManager.by_id(&"business_1")
+	_check(shop != null, "the business survives")
+	if shop == null:
+		SaveManager.delete_slot(7)
+		return
+	_check(shop.lifetime_revenue == 9100, "with its history intact")
+	_check(shop.employees.size() == 1, "and its employee")
+	var worker := shop.employees[0]
+	_check(worker.skill_logistics == 50, "who gets a safe default for the new skill")
+	_check(worker.wage_arrears == 0, "is owed nothing")
+	_check(not worker.available_for_backup, "and is not volunteered for backup")
+
+	# Nothing is invented. §147.
+	_check(not LogisticsManager.has_warehouse(), "no warehouse appears from nowhere")
+	_check(LogisticsManager.transfers().is_empty(), "no shipments are invented")
+	_check(CompanyFleet.company_vans().is_empty(), "no vans are invented")
+	_check(
+		shop.distress == DistressState.State.HEALTHY,
+		"and a business that was fine is still fine (%s)" % shop.distress_label()
+	)
+	_check(shop.total_arrears() == 0, "owing nothing it did not owe before")
+	_check(not shop.may(&"call_backup"), "with the backup permission left off")
+	SaveManager.delete_slot(7)
+
+
+## TEST §185 — crime still happens while the vans are running.
+func _test_logistics_and_crime() -> void:
+	# The migration test just loaded a save with no depot in it, which is the
+	# right answer there and leaves nothing here to run vans out of.
+	_p_setup()
+	var warehouse := _p_warehouse()
+	if warehouse == null:
+		return
+	warehouse.add(&"bottled_water", 30)
+	var held := warehouse.held(&"bottled_water")
+	WantedManager.set_level(2)
+	_check(WantedManager.level >= 1, "the player is wanted")
+	TimeManager.advance_minutes(120)
+	LogisticsManager.advance_deliveries()
+	_check(
+		warehouse.held(&"bottled_water") <= held,
+		"the depot carries on regardless"
+	)
+	_check(
+		not LogisticsManager.summary().is_empty(),
+		"and the logistics screen still answers"
+	)
+	WantedManager.clear_wanted()
+	await _settle(4)
+	_check(WantedManager.level == 0, "the heat comes off afterwards")
+
+
+## TEST — the logistics screens are in the game and draw.
+func _test_logistics_screens_reachable() -> void:
+	var hud := _main.get_node_or_null("HUD")
+	if hud == null:
+		return
+	for screen_name in ["LogisticsPanel", "BranchFinancePanel"]:
+		var screen := hud.get_node_or_null("Root/%s" % screen_name) as Control
+		_check(screen != null, "%s is in the tree" % screen_name)
+		_check(screen != null and not screen.visible, "%s starts closed" % screen_name)
+
+	var logistics := hud.get_node_or_null("Root/LogisticsPanel") as Control
+	if logistics != null:
+		logistics.call("open")
+		_check(logistics.visible, "the logistics screen opens")
+		for page in LogisticsPanel.Page.values():
+			logistics.call("show_tab", page)
+			_check(
+				logistics.visible,
+				"the %s tab draws" % String(LogisticsPanel.PAGE_NAMES[page])
+			)
+		hud.call("close_screens")
+
+	var finance := hud.get_node_or_null("Root/BranchFinancePanel") as Control
+	var branch := _own_business()
+	if finance != null and branch != null:
+		finance.call("open", branch)
+		_check(finance.visible, "the branch finance screen opens on a branch")
 		hud.call("close_screens")
