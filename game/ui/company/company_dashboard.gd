@@ -15,6 +15,7 @@ signal opened()
 signal closed()
 signal schedule_requested(worker: EmployeeData)
 signal manager_requested(business: BusinessInstance)
+signal finance_requested(business: BusinessInstance)
 
 enum Page { OVERVIEW, BRANDS, LOCATIONS, EMPLOYEES, OPERATIONS, FINANCE, MILESTONES }
 
@@ -290,9 +291,11 @@ func _location_row(row: Dictionary) -> PanelContainer:
 	column.add_theme_constant_override("separation", 2)
 	card.add_child(column)
 
+	var business_row: BusinessInstance = row["business"]
 	var profit := int(row["profit_today"])
 	column.add_child(BusinessUIKit.row([
-		BusinessUIKit.stretch_label(String(row["name"]), 15, ScreenKit.TEXT),
+		BusinessUIKit.stretch_label(String(row["name"]), 15,
+			business_row.distress_colour() if business_row != null else ScreenKit.TEXT),
 		BusinessUIKit.value_label(ScreenKit.money(int(row["revenue_today"])), 14, ScreenKit.TEXT),
 		BusinessUIKit.value_label(
 			ScreenKit.money(profit), 14, ScreenKit.GOOD if profit >= 0 else ScreenKit.BAD
@@ -307,10 +310,24 @@ func _location_row(row: Dictionary) -> PanelContainer:
 	))
 
 	var business: BusinessInstance = row["business"]
+	if business != null and business.distress != DistressState.State.HEALTHY:
+		var owed := business.total_arrears()
+		column.add_child(BusinessUIKit.label(
+			"%s%s" % [
+				business.distress_label(),
+				"  ·  %s overdue" % ScreenKit.money(owed) if owed > 0 else "",
+			], 13, business.distress_colour()
+		))
+		var stage := FinanceManager.lease_default_stage(business)
+		if not stage.is_empty():
+			column.add_child(BusinessUIKit.label(stage, 12, ScreenKit.BAD))
+
 	var manage := BusinessUIKit.button("MANAGER", 110.0)
 	manage.pressed.connect(func() -> void: manager_requested.emit(business))
+	var money := BusinessUIKit.button("FUND", 90.0)
+	money.pressed.connect(func() -> void: finance_requested.emit(business))
 	column.add_child(BusinessUIKit.row([
-		BusinessUIKit.stretch_label("", 12, ScreenKit.MUTED), manage,
+		BusinessUIKit.stretch_label("", 12, ScreenKit.MUTED), money, manage,
 	]))
 	return card
 
@@ -483,6 +500,83 @@ func _build_operations() -> void:
 # --- Finance -------------------------------------------------------------
 
 func _build_finance(summary: Dictionary) -> void:
+	# What is coming, before what has been. A player in trouble needs the
+	# forecast at the top of the page, not underneath a week of history.
+	var ahead := FinanceManager.forecast()
+	_body.add_child(ScreenKit.heading("THE NEXT %d DAYS" % int(ahead["days"])))
+	_body.add_child(ScreenKit.row(
+		"Cash in the businesses", ScreenKit.money(int(ahead["cash"]))
+	))
+	_body.add_child(ScreenKit.row(
+		"Your own cash", ScreenKit.money(int(ahead["personal_cash"]))
+	))
+	_body.add_child(ScreenKit.row("Falling due", ScreenKit.money(int(ahead["due"]))))
+	var overdue := int(ahead["overdue"])
+	if overdue > 0:
+		_body.add_child(BusinessUIKit.row([
+			BusinessUIKit.stretch_label("Already overdue", 14, ScreenKit.MUTED),
+			BusinessUIKit.value_label(ScreenKit.money(overdue), 15, ScreenKit.BAD),
+		]))
+	_body.add_child(ScreenKit.row(
+		"Expected takings", ScreenKit.money(int(ahead["expected_revenue"]))
+	))
+	var projected := int(ahead["projected"])
+	_body.add_child(BusinessUIKit.row([
+		BusinessUIKit.stretch_label("Projected cash", 14, ScreenKit.MUTED),
+		BusinessUIKit.value_label(
+			ScreenKit.money(projected), 15,
+			ScreenKit.GOOD if projected >= 0 else ScreenKit.BAD
+		),
+	]))
+	var runway := float(ahead["runway_days"])
+	if runway >= 0.0:
+		_body.add_child(BusinessUIKit.row([
+			BusinessUIKit.stretch_label("Cash runway", 14, ScreenKit.MUTED),
+			BusinessUIKit.value_label(
+				"%.1f days" % runway, 15,
+				ScreenKit.BAD if runway < 5.0 else ScreenKit.TEXT
+			),
+		]))
+
+	var at_risk: Array = ahead["at_risk"]
+	if not at_risk.is_empty():
+		_body.add_child(ScreenKit.spacer(8))
+		_body.add_child(ScreenKit.heading("AT RISK"))
+		for business in at_risk:
+			var branch := business as BusinessInstance
+			_body.add_child(BusinessUIKit.row([
+				BusinessUIKit.stretch_label(branch.business_name, 14, ScreenKit.TEXT),
+				BusinessUIKit.value_label(
+					branch.distress_label(), 13, branch.distress_colour()
+				),
+				BusinessUIKit.value_label(
+					ScreenKit.money(branch.total_arrears()), 13, ScreenKit.BAD
+				),
+			]))
+
+	var notices := RealEstate.foreclosing_mortgages()
+	if not notices.is_empty():
+		_body.add_child(ScreenKit.spacer(8))
+		_body.add_child(ScreenKit.heading("FORECLOSURE NOTICES"))
+		for loan in notices:
+			var quote := RealEstate.cure_quote(loan)
+			_body.add_child(BusinessUIKit.label(
+				"%s  ·  %s to cure  ·  %d days left" % [
+					String(quote["address"]).to_upper(),
+					ScreenKit.money(int(quote["amount"])), int(quote["days_left"]),
+				], 13, ScreenKit.BAD
+			))
+			var cure := BusinessUIKit.button("PAY ARREARS", 150.0)
+			cure.disabled = not bool(quote["affordable"])
+			cure.pressed.connect(func() -> void:
+				RealEstate.cure_foreclosure(loan)
+				_rebuild()
+			)
+			_body.add_child(BusinessUIKit.row([
+				BusinessUIKit.stretch_label("", 12, ScreenKit.MUTED), cure,
+			]))
+
+	_body.add_child(ScreenKit.spacer(10))
 	_body.add_child(ScreenKit.heading("THE COMPANY TODAY"))
 	_body.add_child(ScreenKit.row("Revenue", ScreenKit.money(int(summary["revenue_today"]))))
 	var profit := int(summary["profit_today"])

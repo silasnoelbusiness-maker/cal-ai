@@ -52,6 +52,7 @@ var _staff_schedule_panel: StaffSchedulePanel = null
 var _manager_panel: ManagerPanel = null
 ## Phase P: the company's distribution.
 var _logistics_panel: LogisticsPanel = null
+var _branch_finance_panel: BranchFinancePanel = null
 var _property_sale_panel: PropertySalePanel = null
 var _real_estate_panel: RealEstatePanel = null
 @onready var _store_panel: PanelContainer = %StorePanel
@@ -729,6 +730,8 @@ func _build_phase_m_screens() -> void:
 	_manager_panel.name = "ManagerPanel"
 	_logistics_panel = LogisticsPanel.new()
 	_logistics_panel.name = "LogisticsPanel"
+	_branch_finance_panel = BranchFinancePanel.new()
+	_branch_finance_panel.name = "BranchFinancePanel"
 	_property_sale_panel = PropertySalePanel.new()
 	_property_sale_panel.name = "PropertySalePanel"
 	_real_estate_panel = RealEstatePanel.new()
@@ -746,6 +749,7 @@ func _build_phase_m_screens() -> void:
 	# person's week, and a branch's manager. Same pattern, same reason.
 	_company_dashboard.schedule_requested.connect(_on_schedule_requested)
 	_company_dashboard.manager_requested.connect(_on_manager_requested)
+	_company_dashboard.finance_requested.connect(_on_finance_requested)
 
 
 func _phase_m_screens() -> Array:
@@ -754,6 +758,7 @@ func _phase_m_screens() -> Array:
 		_furniture_store_panel, _furnishing_panel, _home_storage_panel, _profile_panel,
 		_property_sale_panel, _real_estate_panel,
 		_company_dashboard, _staff_schedule_panel, _manager_panel, _logistics_panel,
+		_branch_finance_panel,
 	]
 
 
@@ -772,6 +777,11 @@ func _property_id_of(context: Node) -> StringName:
 func _on_schedule_requested(worker: EmployeeData) -> void:
 	_company_dashboard.close()
 	_staff_schedule_panel.open(worker)
+
+
+func _on_finance_requested(business: BusinessInstance) -> void:
+	_company_dashboard.close()
+	_branch_finance_panel.open(business)
 
 
 func _on_manager_requested(business: BusinessInstance) -> void:
