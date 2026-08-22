@@ -10,7 +10,7 @@ extends RefCounted
 ## Appended to rather than reordered: the filter states are saved by index.
 enum Category {
 	HOME, OWNED_BUSINESS, AVAILABLE_PROPERTY, JOB, POLICE, SHOP, LANDMARK, MY_VEHICLE,
-	FOR_SALE, MY_PROPERTY, WAREHOUSE, DELIVERY,
+	FOR_SALE, MY_PROPERTY, WAREHOUSE, DELIVERY, CONTACT, OBJECTIVE,
 }
 
 var category: Category = Category.SHOP
@@ -58,6 +58,10 @@ static func category_name(category: Category) -> String:
 			return "Depots"
 		Category.DELIVERY:
 			return "Deliveries"
+		Category.CONTACT:
+			return "Contacts"
+		Category.OBJECTIVE:
+			return "Jobs"
 		_:
 			return "Shops"
 
@@ -82,6 +86,10 @@ static func category_colour(category: Category) -> Color:
 			return Color(0.667, 0.729, 0.812)
 		Category.DELIVERY:
 			return Color(0.980, 0.667, 0.310)
+		Category.CONTACT:
+			return Color(0.706, 0.522, 0.808)
+		Category.OBJECTIVE:
+			return Color(0.902, 0.361, 0.404)
 		Category.POLICE:
 			return Color(0.412, 0.667, 0.882)
 		Category.LANDMARK:

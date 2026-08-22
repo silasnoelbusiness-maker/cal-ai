@@ -161,6 +161,7 @@ func _ready() -> void:
 	_build_street_lights()
 	_build_streetscape()
 	_build_warehouse_yard()
+	_build_underworld()
 	_build_venue_doors()
 	_build_notice_board()
 	_build_nav_graph()
@@ -1202,6 +1203,116 @@ func _add_street_light(parent: Node3D, index: int, base: Vector3, toward: Vector
 	light.visible = false
 	light.add_to_group("street_light")
 	holder.add_child(light)
+
+
+## The two places on Harbour Row that do not advertise.
+##
+## §127 and §128: no new geography, a few addresses tucked into what is already
+## here, dressed in the same kit as everything else. A lock-up behind the
+## warehouse yard where somebody buys what you should not have, and a unit
+## further along the dock where nobody asks about the car.
+##
+## Neither has a sign, because that is the point. What marks them is a shutter
+## that is always half up and a light left on — enough that a player walking
+## past twice notices, which is exactly how §126 wants them found.
+func _build_underworld() -> void:
+	var holder := _make_container("Underworld")
+	_build_fence_lockup(holder)
+	_build_chop_shop(holder)
+
+
+## The fence: a lock-up at the back of the yard, roller door part way up, a
+## bare bulb inside and a stack of things that arrived at night.
+func _build_fence_lockup(parent: Node3D) -> void:
+	# South of Pierpoint, clear of the warehouse footprint and well west of
+	# the park. Somewhere nobody walks past on their way anywhere.
+	var at := Vector3(-66.0, 0.0, 54.0)
+	var brick := CityKit.make_material(Color(0.318, 0.271, 0.247))
+	var shutter := CityKit.make_material(Color(0.443, 0.451, 0.427))
+	var crate := CityKit.make_material(Color(0.478, 0.404, 0.290))
+
+	CityKit.add_box(
+		parent, "FenceLockup", at + Vector3(0.0, 1.85, 0.0),
+		Vector3(9.0, 3.7, 7.0), brick, true
+	)
+	# The door, stopped a metre off the ground. Somebody is in there.
+	CityKit.add_box(
+		parent, "FenceShutter", at + Vector3(0.0, 2.45, 3.56),
+		Vector3(3.6, 2.5, 0.18), shutter, false
+	)
+	CityKit.add_box(
+		parent, "FenceGap", at + Vector3(0.0, 0.55, 3.6),
+		Vector3(3.6, 1.1, 0.1),
+		CityKit.make_emissive_material(Color(0.949, 0.816, 0.541), 0.9), false, false
+	)
+	for i in 3:
+		CityKit.add_box(
+			parent, "FenceCrate%d" % i,
+			at + Vector3(-3.2 + float(i) * 0.9, 0.4 + float(i % 2) * 0.8, 4.6),
+			Vector3(0.9, 0.8, 0.9), crate, false
+		)
+	var light := OmniLight3D.new()
+	light.name = "FenceBulb"
+	light.position = at + Vector3(0.0, 2.6, 4.2)
+	light.light_color = Color(0.988, 0.878, 0.702)
+	light.light_energy = 2.2
+	light.omni_range = 9.0
+	light.shadow_enabled = false
+	parent.add_child(light)
+
+	var door := CriminalContactPoint.new()
+	door.name = "FenceDoor"
+	door.contact_id = &"quayside_fence"
+	CityKit.attach_interactable(parent, door, at + Vector3(0.0, 1.1, 4.2), 2.6)
+
+
+## The vehicle buyer: a workshop with the roller door open and room to drive
+## something inside. §129 — it reads as a garage that asks no questions, and
+## there is no dismantling procedure anywhere in it.
+func _build_chop_shop(parent: Node3D) -> void:
+	# Further along the same back road, with the apron facing the street and
+	# clear of the carriageway itself — a workshop that blocks the road is a
+	# workshop nobody can drive a car to.
+	var at := Vector3(-48.0, 0.0, 57.0)
+	var block := CityKit.make_material(Color(0.278, 0.290, 0.310))
+	var trim := CityKit.make_material(Color(0.400, 0.412, 0.443))
+	var bay := CityKit.make_emissive_material(Color(0.396, 0.518, 0.612), 0.55)
+
+	CityKit.add_box(
+		parent, "ChopShop", at + Vector3(0.0, 2.35, 0.0),
+		Vector3(14.0, 4.7, 9.0), block, true
+	)
+	# Two bays, both open, both lit. Somewhere to drive a car in and leave it.
+	for side: float in [-1.0, 1.0]:
+		CityKit.add_box(
+			parent, "ChopBay%d" % int(side),
+			at + Vector3(side * 3.4, 1.55, 4.56),
+			Vector3(4.4, 3.1, 0.12), bay, false, false
+		)
+		CityKit.add_box(
+			parent, "ChopFrame%d" % int(side),
+			at + Vector3(side * 3.4, 3.2, 4.6),
+			Vector3(4.8, 0.32, 0.24), trim, false, false
+		)
+	# The apron out front, so a car can be left square rather than in the road.
+	CityKit.add_slab(
+		parent, "ChopApron",
+		CityKit.rect_from_bounds(at.x - 8.0, at.z + 4.6, at.x + 8.0, at.z + 12.0),
+		0.0, 0.06, _mat("plinth")
+	)
+	var light := OmniLight3D.new()
+	light.name = "ChopLight"
+	light.position = at + Vector3(0.0, 3.4, 6.0)
+	light.light_color = Color(0.878, 0.925, 0.988)
+	light.light_energy = 3.0
+	light.omni_range = 16.0
+	light.shadow_enabled = false
+	parent.add_child(light)
+
+	var door := CriminalContactPoint.new()
+	door.name = "ChopShopDoor"
+	door.contact_id = &"dock_road_garage"
+	CityKit.attach_interactable(parent, door, at + Vector3(0.0, 1.1, 6.0), 3.4)
 
 
 ## Dressing for the job location, so it reads as somewhere you go to work

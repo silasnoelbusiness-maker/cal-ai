@@ -243,9 +243,9 @@ func _process(_delta: float) -> void:
 	if _prompt_panel.visible and _interaction != null:
 		_on_focus_changed(_interaction.get_focused())
 	if _escape_label.visible:
-		_escape_label.text = "ESCAPING...  %.0f" % ceilf(
-			WantedManager.get_escape_seconds_left()
-		)
+		_escape_label.text = "%s  %.0f" % [
+			_escape_headline(), ceilf(WantedManager.get_escape_seconds_left()),
+		]
 
 
 func _refresh_speed() -> void:
@@ -272,6 +272,16 @@ func _on_wanted_level_changed(level: int) -> void:
 	else:
 		_escape_label.visible = false
 	_update_process_need()
+
+
+## §24 and §35 — three words for three different situations, and no more than
+## that. Breaking away, being looked for, and being somewhere they cannot see.
+func _escape_headline() -> String:
+	if Hiding.is_hidden(get_tree()):
+		return "HIDDEN"
+	if PoliceResponseManager.state == PoliceResponseManager.State.SEARCHING:
+		return "POLICE SEARCHING"
+	return "ESCAPING..."
 
 
 func _on_escaping_started(_seconds: float) -> void:

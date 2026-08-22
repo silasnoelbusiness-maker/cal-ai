@@ -23,6 +23,9 @@ func _ready() -> void:
 	GameManager.screen_requested.connect(_on_screen_requested)
 
 	WantedManager.level_changed.connect(_on_wanted_level_changed)
+	PoliceResponseManager.state_changed.connect(_on_pursuit_state_changed)
+	Underworld.job_accepted.connect(_on_job_accepted)
+	Underworld.job_completed.connect(_on_job_completed)
 	WantedManager.escaping_started.connect(_on_escaping_started)
 	WantedManager.wanted_cleared.connect(_on_wanted_cleared)
 	WantedManager.bust_finished.connect(_on_bust_finished)
@@ -72,6 +75,11 @@ func _on_wanted_level_changed(level: int) -> void:
 	# not congratulated with the same sound that warned about earning it.
 	if level > _last_wanted_level:
 		AudioManager.play(&"alert", AudioBuses.SFX, -6.0)
+		# §130 — and a rising figure over it, so a star going on sounds
+		# different from a star coming off without either being a fanfare.
+		AudioManager.play(&"wanted_up", AudioBuses.SFX, -9.0)
+	elif level > 0 and level < _last_wanted_level:
+		AudioManager.play(&"wanted_down", AudioBuses.SFX, -11.0)
 	_last_wanted_level = level
 
 
@@ -129,6 +137,29 @@ func _on_order_delivered(order: PurchaseOrder) -> void:
 	if unit.global_position.distance_to(player.global_position) > SALE_EARSHOT * 2.0:
 		return
 	AudioManager.play_at(&"delivery", unit.global_position, AudioBuses.SFX, -10.0)
+
+
+## §130 and §132 — the search is quieter than the chase, not louder. Losing
+## the police is a sweep downwards and then nothing; being found again is one
+## sharp note. There is no alarm loop, because a constant siren over a search
+## would tell the player exactly what the search is meant to leave uncertain.
+func _on_pursuit_state_changed(state: int) -> void:
+	match state:
+		PoliceResponseManager.State.SEARCHING:
+			AudioManager.play(&"search_start", AudioBuses.SFX, -9.0)
+		PoliceResponseManager.State.PURSUIT:
+			if WantedManager.is_wanted():
+				AudioManager.play(&"reacquired", AudioBuses.SFX, -10.0)
+		PoliceResponseManager.State.CLEARED:
+			AudioManager.play(&"wanted_clear", AudioBuses.SFX, -7.0)
+
+
+func _on_job_accepted(_job: IllegalJobData) -> void:
+	AudioManager.play_ui(&"ui_confirm", -4.0)
+
+
+func _on_job_completed(_job: IllegalJobData) -> void:
+	AudioManager.play(&"money", AudioBuses.SFX, -6.0)
 
 
 # --- Logistics and money ---------------------------------------------------

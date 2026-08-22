@@ -104,8 +104,29 @@ func _draw_map() -> void:
 	_draw_districts()
 	_draw_streets()
 	_draw_route()
+	_draw_search_zone()
 	_draw_markers()
 	_draw_player()
+
+
+## §135 — roughly where the police are looking, and nothing more. The circle
+## is the search area itself, which the player is entitled to understand; it
+## does not show a single officer, because §135 is explicit that police
+## positions are not revealed unless the player can already see them.
+func _draw_search_zone() -> void:
+	if not SearchManager.active:
+		return
+	var centre := _to_map(SearchManager.centre)
+	var radius := SearchManager.radius * _scale
+	if radius <= 1.0:
+		return
+	_canvas.draw_circle(centre, radius, Color(0.878, 0.278, 0.278, 0.10))
+	_canvas.draw_arc(centre, radius, 0.0, TAU, 48, Color(0.918, 0.427, 0.427, 0.75), 2.0)
+	_canvas.draw_string(
+		ThemeDB.fallback_font, centre + Vector2(-28.0, -radius - 8.0),
+		"SEARCH AREA", HORIZONTAL_ALIGNMENT_LEFT, -1, 12,
+		Color(0.949, 0.588, 0.588)
+	)
 
 
 ## A faint hundred-metre grid under everything. It gives the map a sense of
@@ -315,6 +336,14 @@ func _draw_glyph(at: Vector2, category: int, colour: Color) -> void:
 				]), colour
 			)
 			_canvas.draw_rect(Rect2(at + Vector2(-0.9, -2.4), Vector2(1.8, 2.0)), colour)
+		MapMarker.Category.CONTACT:
+			# A door, ajar.
+			_canvas.draw_rect(Rect2(at + Vector2(-2.6, -3.2), Vector2(5.2, 6.4)), ink)
+			_canvas.draw_rect(Rect2(at + Vector2(0.4, -2.4), Vector2(1.8, 4.8)), colour)
+		MapMarker.Category.OBJECTIVE:
+			# A ring with a dot in it: go here.
+			_canvas.draw_arc(at, 3.2, 0.0, TAU, 18, ink, 1.6)
+			_canvas.draw_circle(at, 1.3, ink)
 		MapMarker.Category.LANDMARK:
 			_canvas.draw_circle(at, 2.6, ink)
 			_canvas.draw_circle(at, 1.2, colour)
@@ -333,6 +362,10 @@ func _label_priority(marker: MapMarker) -> int:
 		# A run in progress is the one thing the player opened the map to find.
 		MapMarker.Category.DELIVERY:
 			return 0
+		MapMarker.Category.OBJECTIVE:
+			return 0
+		MapMarker.Category.CONTACT:
+			return 2
 		MapMarker.Category.HOME:
 			return 1
 		MapMarker.Category.OWNED_BUSINESS:

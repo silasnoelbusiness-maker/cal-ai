@@ -68,6 +68,11 @@ func _ready() -> void:
 	add_to_group(&"saveable")
 	TimeManager.hour_passed.connect(_on_hour_passed)
 	WantedManager.bust_finished.connect(_on_busted)
+	# §95 and §98 — the crimes the game already has feed this rather than
+	# needing their own reward paths. Robbing a till is what completes a
+	# robbery contract; stealing a car is what earns the standing to be
+	# offered better ones.
+	CrimeManager.crime_reported.connect(_on_crime)
 
 
 # --- Reputation ----------------------------------------------------------
@@ -441,6 +446,22 @@ func _on_hour_passed(_hour: int) -> void:
 	if chop_ready() and _recent_chops > 0:
 		_recent_chops = maxi(_recent_chops - 1, 0)
 	_forget_settled()
+
+
+## Doing a crime is worth something on the street, whether anybody asked for
+## it or not. Deliberately small — §80 warns against rewarding random harm, and
+## the reward table in CrimeData gives violence nothing.
+func _on_crime(record: Dictionary) -> void:
+	var data := CrimeData.for_type(int(record.get("type", 0)))
+	if data.criminal_reputation_reward > 0:
+		add_reputation(1)
+	match int(record.get("type", 0)):
+		CrimeManager.CrimeType.STORE_ROBBERY, CrimeManager.CrimeType.ROBBERY:
+			var target: Variant = record.get("target")
+			var id: StringName = (
+				StringName(target.get_path()) if target is Node else &""
+			)
+			note_objective(IllegalJobData.Objective.ROBBERY_CONTRACT, id)
 
 
 func _on_busted(_fine: int) -> void:

@@ -105,6 +105,7 @@ func _ready() -> void:
 	_build_plaza()
 	_build_street_furniture()
 	_build_street_props()
+	_build_broker_alley()
 	_build_venue_doors()
 	_extend_navigation()
 	_build_traffic_signals()
@@ -146,6 +147,68 @@ func _make_container(container_name: String) -> Node3D:
 
 func _mat(key: String) -> StandardMaterial3D:
 	return _palette[key]
+
+
+## The one address in Central that is not on the street.
+##
+## A service alley between two blocks with a door at the end of it. §127 asks
+## for a few locations rather than new geography, and this is the smallest kind
+## there is: a gap, a bin, a light, a door. The broker works out of it because
+## Central is where the money is, and because a player who has done a couple of
+## jobs on the docks has a reason to come north.
+func _build_broker_alley() -> void:
+	var holder := _make_container("BrokerAlley")
+	var at := Vector3(58.0, 0.0, -246.0)
+	var wall := _mat("brick")
+	var slate := _mat("slate")
+
+	# Two walls making the alley, and a dead end at the far side of it.
+	for side: float in [-1.0, 1.0]:
+		CityKit.add_box(
+			holder, "AlleyWall%d" % int(side),
+			at + Vector3(side * 4.0, 3.6, 0.0),
+			Vector3(0.9, 7.2, 16.0), wall, true
+		)
+	CityKit.add_box(
+		holder, "AlleyEnd", at + Vector3(0.0, 3.6, -8.4),
+		Vector3(8.0, 7.2, 0.9), slate, true
+	)
+	CityKit.add_slab(
+		holder, "AlleyFloor",
+		CityKit.rect_from_bounds(at.x - 3.6, at.z - 8.0, at.x + 3.6, at.z + 8.0),
+		0.0, 0.05, _mat("paving")
+	)
+
+	# The door itself, and the light over it that is the only reason anybody
+	# would look down here twice.
+	CityKit.add_box(
+		holder, "BrokerDoor", at + Vector3(0.0, 1.25, -7.9),
+		Vector3(1.3, 2.5, 0.18), _mat("door"), false
+	)
+	CityKit.add_box(
+		holder, "BrokerLamp", at + Vector3(0.0, 2.9, -7.7),
+		Vector3(0.5, 0.16, 0.34),
+		CityKit.make_emissive_material(Color(0.937, 0.816, 0.596), 1.5), false, false
+	)
+	for i in 2:
+		CityKit.add_box(
+			holder, "AlleyBin%d" % i,
+			at + Vector3(-2.6 + float(i) * 5.2, 0.6, -4.0 + float(i) * 2.0),
+			Vector3(1.0, 1.2, 0.9), _mat("metal"), false
+		)
+	var light := OmniLight3D.new()
+	light.name = "AlleyLight"
+	light.position = at + Vector3(0.0, 2.8, -6.6)
+	light.light_color = Color(0.988, 0.878, 0.706)
+	light.light_energy = 2.6
+	light.omni_range = 11.0
+	light.shadow_enabled = false
+	holder.add_child(light)
+
+	var door := CriminalContactPoint.new()
+	door.name = "BrokerContact"
+	door.contact_id = &"the_broker"
+	CityKit.attach_interactable(holder, door, at + Vector3(0.0, 1.1, -6.6), 2.8)
 
 
 func _build_palette() -> void:

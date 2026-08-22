@@ -106,6 +106,23 @@ static func _build(id: StringName) -> AudioStreamWAV:
 		&"warning":
 			return _chime([392.0, 330.0], 0.52, 0.22)
 
+		# Crime and police. §130 asks for restraint, so these are short and
+		# none of them loops: a rising pair when the heat goes up, the same
+		# falling when it comes off, a low sweep when the police lose you and
+		# start looking, a sharp one when they find you again.
+		&"wanted_up":
+			return _chime([440.0, 587.0, 740.0], 0.40, 0.24)
+		&"wanted_down":
+			return _chime([740.0, 587.0, 440.0], 0.44, 0.18)
+		&"search_start":
+			return _sweep(520.0, 240.0, 0.7, 0.16)
+		&"reacquired":
+			return _blip(880.0, 0.10, 0.28)
+		&"wanted_clear":
+			return _chime([523.0, 659.0, 880.0], 0.55, 0.20)
+		&"reputation":
+			return _chime([494.0, 622.0, 784.0], 0.60, 0.20)
+
 		# World interaction.
 		&"door":
 			return _noise_hit(0.22, 0.26, 1100.0, 0.70, 90.0)

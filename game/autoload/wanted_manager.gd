@@ -109,11 +109,18 @@ var _time_since_seen: float = 0.0
 var _busting: bool = false
 
 
+var save_id: StringName = &"wanted"
+var reset_on_missing_save: bool = true
+
+
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	# Wanted state is not saved; a loaded game starts clean, which the brief
-	# explicitly allows and which avoids restoring a chase with no pursuers.
-	SaveManager.game_loaded.connect(_on_game_loaded)
+	# §120 — Phase Q saves the heat. Before this a load started clean, which
+	# was allowed then and is not now: a player who saves mid-search and comes
+	# back to nothing has been let off. What is *not* saved is the police
+	# themselves; §121 asks for the response to be reconstructed from the
+	# state, which is what PoliceResponseManager.load_state does.
+	add_to_group(&"saveable")
 
 
 ## Development-only. F6 / F7 set a wanted level outright and F9 clears it, so a
@@ -575,6 +582,29 @@ func _lookup(table: Array, index: int, fallback: float) -> float:
 	return float(table[index])
 
 
-func _on_game_loaded(_slot: int) -> void:
-	points = 0
-	clear_wanted("")
+func save_state() -> Dictionary:
+	return {
+		"level": level,
+		"points": points,
+		"worst_severity": int(worst_severity),
+		"unpaid_penalty": unpaid_penalty,
+	}
+
+
+func load_state(state: Dictionary) -> void:
+	# Never restore mid-arrest: an interrupted bust has no honest resumption.
+	_busting = false
+	_responders.clear()
+	_cancel_escaping()
+	points = int(state.get("points", 0))
+	worst_severity = int(state.get("worst_severity", 0)) as CrimeData.Severity
+	unpaid_penalty = int(state.get("unpaid_penalty", 0))
+	var restored := clampi(int(state.get("level", 0)), 0, MAX_LEVEL)
+	if restored != level:
+		_set_level(restored)
+	else:
+		level_changed.emit(level)
+	if restored <= 0:
+		PoliceResponseManager.clear()
+		PursuitCoordinator.clear()
+		RoadblockManager.clear()

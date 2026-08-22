@@ -37,6 +37,7 @@ func collect_markers() -> Array[MapMarker]:
 	markers.append_array(_owned_property_markers())
 	markers.append_array(_warehouse_markers())
 	markers.append_array(_delivery_markers())
+	markers.append_array(_underworld_markers())
 	return markers
 
 
@@ -164,6 +165,42 @@ func _delivery_markers() -> Array[MapMarker]:
 			LogisticsManager.place_name(order.destination_kind, order.destination_id),
 			where, "DELIVERING  ·  %s" % order.cargo_text(), order.transfer_id
 		))
+	return markers
+
+
+## §134 — contacts the player has actually met, and the objective of whatever
+## job is running. Nothing here reveals a place before it has been found: an
+## unmet contact has no marker, which is the whole of §126's discovery.
+func _underworld_markers() -> Array[MapMarker]:
+	var markers: Array[MapMarker] = []
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null:
+		return markers
+	for node in tree.get_nodes_in_group(&"criminal_contact"):
+		var door := node as CriminalContactPoint
+		if door == null or not Underworld.is_unlocked(door.contact_id):
+			continue
+		var contact := door.contact()
+		if contact == null:
+			continue
+		markers.append(MapMarker.make(
+			MapMarker.Category.CONTACT, contact.display_name,
+			door.global_position,
+			contact.kind_label() if Underworld.will_deal(contact)
+				else "%s  ·  closed to you" % contact.kind_label(),
+			contact.contact_id
+		))
+
+	# The job itself, if one is running and it has somewhere to be.
+	var job := Underworld.active_job()
+	if job != null and job.objective == IllegalJobData.Objective.ROBBERY_CONTRACT:
+		var target := tree.root.get_node_or_null(NodePath(String(job.target_id)))
+		if target is Node3D:
+			markers.append(MapMarker.make(
+				MapMarker.Category.OBJECTIVE, job.target_name,
+				(target as Node3D).global_position,
+				job.objective_label().to_upper(), job.job_id
+			))
 	return markers
 
 
