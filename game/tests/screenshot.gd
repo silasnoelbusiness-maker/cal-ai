@@ -2839,7 +2839,14 @@ func _wanted_scenario(main: Node, scenario: String) -> void:
 			break
 		UnderworldDebug.force_report(crimes[i], player.global_position)
 		await _wait(6)
-	if WantedManager.level < level:
+	# The heat is earned above; this is what pins it to the band the frame is
+	# labelled with. Reports are worth a little more than their base when
+	# anybody confirms them, and the level is decaying the whole time the
+	# player is out of sight, so left alone the ladder lands near the target
+	# rather than on it — three stars rendered as four. `set_level` is the same
+	# public call the debug menu uses, and the response on the street is the
+	# real response for whatever level it ends on.
+	if WantedManager.level != level:
 		WantedManager.set_level(level)
 
 	# The police answer the call themselves — the same dispatch the game uses,
@@ -2902,7 +2909,7 @@ func _clear_pedestrians() -> void:
 
 
 ## How near an officer may get before the tool steps the player away.
-const EVADE_RANGE := 9.0
+const EVADE_RANGE := 12.0
 ## How far that step goes, and how far from where the scene started the player
 ## is allowed to drift while taking it.
 ##
@@ -2951,21 +2958,35 @@ func _keep_ahead(frames: int, start: Vector3) -> void:
 		# can clamp it back past the officer it was running from. Eight
 		# directions are tried instead and the one that ends up furthest from
 		# them — after the leash has had its say — wins.
+		#
+		# Two passes. The first wants a step with nothing in the way; the
+		# second will settle for anywhere standable. Main Street is lined with
+		# parked cars, and a parked car blocks the "is there a wall between
+		# here and there" ray exactly as a wall does — so the strict pass alone
+		# kept rejecting all eight directions, the player stood still, and the
+		# three-star frame came back with BUSTED across it.
 		var best := player.global_position
 		var best_gap := nearest
+		var fallback := player.global_position
+		var fallback_gap := nearest
 		for i in 8:
 			var angle := TAU * float(i) / 8.0
 			var step := Vector3(cos(angle), 0.0, sin(angle)) * EVADE_STEP
 			var candidate: Vector3 = player.global_position + step
 			candidate = start + (candidate - start).limit_length(EVADE_LEASH)
 			candidate.y = start.y
-			if not _can_step_to(player.global_position, candidate):
+			if not _standable(candidate):
 				continue
 			var gap := candidate.distance_to(closest.global_position)
+			if gap > fallback_gap:
+				fallback_gap = gap
+				fallback = candidate
+			if not _clear_between(player.global_position, candidate):
+				continue
 			if gap > best_gap:
 				best_gap = gap
 				best = candidate
-		player.global_position = best
+		player.global_position = best if best_gap > nearest else fallback
 
 
 ## Whether a step is somewhere the player could actually have walked to.
@@ -2977,7 +2998,7 @@ func _keep_ahead(frames: int, start: Vector3) -> void:
 ##
 ## Two questions, both asked of the physics the game already has. Is there a
 ## wall between here and there, and is there any ground once you arrive.
-func _can_step_to(from: Vector3, to: Vector3) -> bool:
+func _clear_between(from: Vector3, to: Vector3) -> bool:
 	var player: Node3D = GameManager.player
 	if player == null:
 		return false
@@ -2985,9 +3006,7 @@ func _can_step_to(from: Vector3, to: Vector3) -> bool:
 	var eye := Vector3(0.0, 1.0, 0.0)
 	var across := PhysicsRayQueryParameters3D.create(from + eye, to + eye)
 	across.exclude = [player.get_rid()]
-	if not space.intersect_ray(across).is_empty():
-		return false
-	return _standable(to)
+	return space.intersect_ray(across).is_empty()
 
 
 ## Whether a point is open street the player could be stood on.
