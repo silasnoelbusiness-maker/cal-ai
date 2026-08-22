@@ -54,6 +54,7 @@ var _manager_panel: ManagerPanel = null
 var _logistics_panel: LogisticsPanel = null
 var _branch_finance_panel: BranchFinancePanel = null
 var _underworld_panel: UnderworldPanel = null
+var _legal_panel: LegalPanel = null
 var _contact_panel: ContactPanel = null
 var _property_sale_panel: PropertySalePanel = null
 var _real_estate_panel: RealEstatePanel = null
@@ -386,6 +387,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			_underworld_panel.open()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("legal"):
+		if _legal_panel.is_open():
+			close_screens()
+		else:
+			close_screens()
+			_legal_panel.open()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("company"):
 		if _company_dashboard.is_open():
 			close_screens()
@@ -508,6 +517,16 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 			_logistics_panel.open()
 		&"underworld":
 			_underworld_panel.open()
+		&"legal":
+			_legal_panel.open()
+		&"court":
+			# The courthouse door. It opens the screen on the hearing that is
+			# actually due, if one is; otherwise it is a legal office like any
+			# other and shows the overview.
+			_legal_panel.open(
+				LegalPanel.Page.CASES if LegalManager.case_ready_now() != null
+				else LegalPanel.Page.OVERVIEW
+			)
 		&"underworld_contact":
 			var door := context as CriminalContactPoint
 			if door != null:
@@ -760,6 +779,8 @@ func _build_phase_m_screens() -> void:
 	_branch_finance_panel.name = "BranchFinancePanel"
 	_underworld_panel = UnderworldPanel.new()
 	_underworld_panel.name = "UnderworldPanel"
+	_legal_panel = LegalPanel.new()
+	_legal_panel.name = "LegalPanel"
 	_contact_panel = ContactPanel.new()
 	_contact_panel.name = "ContactPanel"
 	_property_sale_panel = PropertySalePanel.new()
@@ -788,7 +809,7 @@ func _phase_m_screens() -> Array:
 		_furniture_store_panel, _furnishing_panel, _home_storage_panel, _profile_panel,
 		_property_sale_panel, _real_estate_panel,
 		_company_dashboard, _staff_schedule_panel, _manager_panel, _logistics_panel,
-		_branch_finance_panel, _underworld_panel, _contact_panel,
+		_branch_finance_panel, _underworld_panel, _contact_panel, _legal_panel,
 	]
 
 

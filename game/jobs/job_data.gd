@@ -19,6 +19,11 @@ extends Resource
 @export var shifts_per_day: int = 2
 
 @export_group("Requirements")
+## §36 and §112 — only *some* work checks. Basic warehouse and courier shifts
+## take anybody, because a player who cannot earn at all is a player with
+## nowhere to go. A trusted role can turn somebody down, and above this record
+## level it does. Zero means the job never asks.
+@export var max_record_tier: int = 0
 ## The player must have at least this much energy to clock on.
 @export var min_energy: float = 20.0
 ## Energy the shift costs on top of the normal drain over those hours.

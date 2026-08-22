@@ -527,6 +527,10 @@ func is_eligible(business: BusinessInstance, offer: LoanOffer) -> bool:
 		return false
 	if business.reputation < offer.minimum_reputation:
 		return false
+	# §43 — the same rule as a mortgage, asked in the same place. Loans already
+	# drawn are untouched; only new borrowing is harder.
+	if not bool(LegalManager.lender_view()["accepted"]):
+		return false
 	return TimeManager.day_index - business.founded_on_day >= offer.minimum_days_trading
 
 
@@ -668,7 +672,13 @@ func get_candidates() -> Array[EmployeeData]:
 func refresh_candidates() -> void:
 	_candidates.clear()
 	var bands := [0.05, 0.45, 0.85]
-	for i in candidate_pool_size:
+	# §48 and §49 — a notorious owner puts some people off, modestly, and never
+	# all of them. Existing staff are not touched by any of this: nobody
+	# resigns over the owner's record.
+	var pool := candidate_pool_size
+	if LegalManager.hiring_penalty() >= 0.3 and pool > 1:
+		pool -= 1
+	for i in pool:
 		var band: float = bands[i % bands.size()]
 		_candidates.append(
 			EmployeeData.generate(

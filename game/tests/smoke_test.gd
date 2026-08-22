@@ -3077,13 +3077,27 @@ func _test_three_star_escalation() -> void:
 		"which is the three-star fine times the severity surcharge ($%d)" % expected
 	)
 	_check(expected > 500, "and so costs more than three stars for petty theft would")
-	EconomyManager.restore(expected + 400)
+
+	# Phase R adds the second half of the bill. The roadside fine is unchanged
+	# — that is the point of checking it separately — and a severe incident now
+	# also has to be bought out of. The old number is still in here; it is just
+	# no longer the whole of what an arrest costs.
+	var release := LegalManager.release_cost_for(CrimeData.Severity.SEVERE, 3)
+	_check(release > 0, "a severe arrest has a release cost as well ($%d)" % release)
+	EconomyManager.restore(expected + release + 4000)
 	var cash_before := EconomyManager.cash
 	WantedManager.request_bust()
 	await _settle(int(WantedManager.bust_hold_seconds * 60.0) + 40)
+	var spent := cash_before - EconomyManager.cash
 	_check(
-		EconomyManager.cash == cash_before - expected,
-		"a three-star arrest after a robbery costs $%d" % expected
+		spent == expected + release,
+		"a three-star arrest after a robbery costs the $%d fine plus $%d release"
+		% [expected, release]
+	)
+	var last := LegalManager.record.arrests[LegalManager.record.arrests.size() - 1]
+	_check(
+		last.fine_paid == expected,
+		"and the record says the fine was $%d" % last.fine_paid
 	)
 	_check(WantedManager.level == 0, "and clears the wanted level")
 	_check(EconomyManager.cash >= 0, "money never goes negative")

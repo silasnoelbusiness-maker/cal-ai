@@ -395,10 +395,15 @@ func is_credit_eligible() -> bool:
 	for loan in _mortgages:
 		if loan.status == MortgageData.Status.AT_RISK or loan.is_foreclosing():
 			return false
-	return true
+	# §41 and §144 — a fresh application asks; the mortgages already running do
+	# not, and nothing here can foreclose on one because of a record.
+	return bool(LegalManager.lender_view()["accepted"])
 
 
 func credit_refusal_reason() -> String:
+	var view := LegalManager.lender_view()
+	if not bool(view["accepted"]):
+		return String(view["reason"])
 	if BusinessManager.net_worth() < MIN_NET_WORTH_FOR_CREDIT:
 		return "A lender wants to see $%s behind you first." % (
 			EconomyManager.with_thousands_separator(MIN_NET_WORTH_FOR_CREDIT)
@@ -458,7 +463,12 @@ func buy_with_mortgage(property_id: StringName) -> BuyResult:
 		return BuyResult.NO_MORTGAGE_OFFERED
 	if not is_credit_eligible():
 		return BuyResult.NOT_ELIGIBLE
-	var deposit := listing.required_down_payment()
+	# §42 — a serious record does not close the door, it raises the bar: the
+	# lender wants a larger share up front.
+	var deposit := roundi(
+		float(listing.required_down_payment())
+		* float(LegalManager.lender_view()["deposit_multiplier"])
+	)
 	if not EconomyManager.can_afford(deposit):
 		return BuyResult.CANNOT_AFFORD
 	if not EconomyManager.spend(deposit, "%s — deposit" % listing.address):

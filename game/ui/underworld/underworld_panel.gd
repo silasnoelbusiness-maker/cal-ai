@@ -10,12 +10,17 @@ extends Control
 signal opened()
 signal closed()
 
-enum Page { STANDING, CONTACTS, JOBS, EARNINGS }
+## Phase R adds REQUESTS and CAREER (§87). Six tabs is the limit of what this
+## frame reads comfortably, which is why the career tab holds the paths rather
+## than each getting one of its own.
+enum Page { STANDING, CONTACTS, JOBS, REQUESTS, CAREER, EARNINGS }
 
 const PAGE_NAMES := {
 	Page.STANDING: "STANDING",
 	Page.CONTACTS: "CONTACTS",
 	Page.JOBS: "JOBS",
+	Page.REQUESTS: "REQUESTS",
+	Page.CAREER: "CAREER",
 	Page.EARNINGS: "EARNINGS",
 }
 
@@ -93,7 +98,7 @@ func _rebuild() -> void:
 	_parts["status"].text = ""
 
 	for page: Page in PAGE_NAMES:
-		var button := BusinessUIKit.button(String(PAGE_NAMES[page]), 116.0)
+		var button := BusinessUIKit.button(String(PAGE_NAMES[page]), 96.0)
 		button.disabled = page == _page
 		button.pressed.connect(func() -> void: show_tab(page))
 		_tabs.add_child(button)
@@ -103,6 +108,10 @@ func _rebuild() -> void:
 			_build_contacts()
 		Page.JOBS:
 			_build_jobs()
+		Page.REQUESTS:
+			_build_requests()
+		Page.CAREER:
+			_build_career()
 		Page.EARNINGS:
 			_build_earnings()
 		_:
@@ -195,11 +204,137 @@ func _contact_card(contact: CriminalContactData) -> PanelContainer:
 			ScreenKit.GOOD if dealing else ScreenKit.MUTED
 		),
 	]))
-	column.add_child(BusinessUIKit.label(
-		contact.closed_line if not dealing
-			else "Needs %d reputation  ·  you have %d" % [
+	if not dealing:
+		column.add_child(BusinessUIKit.label(contact.closed_line, 12, ScreenKit.MUTED))
+		column.add_child(BusinessUIKit.label(
+			"Needs %d reputation  ·  you have %d" % [
 				contact.reputation_required, Underworld.reputation
-			],
+			], 12, ScreenKit.MUTED
+		))
+		return card
+
+	# §89 — what this particular person makes of you, which is not the same as
+	# what the street does.
+	var link := Underworld.relationship(contact.contact_id)
+	column.add_child(ScreenKit.stat_bar("Trust", link.trust))
+	column.add_child(ScreenKit.row(
+		"Standing with them",
+		"%d / %d  ·  %s" % [
+			link.trust, ContactRelationship.MAX_TRUST, link.tier_name().to_upper()
+		]
+	))
+	var chain := Underworld.chain_for(contact.contact_id)
+	column.add_child(ScreenKit.row(
+		"Work offered", chain.display_name if chain != null else "Nothing yet"
+	))
+	var offers := Underworld.jobs_from(contact.contact_id).size()
+	column.add_child(ScreenKit.row("On the table", "%d" % offers))
+	var request := Underworld.request_from(contact.contact_id)
+	if request != null:
+		column.add_child(ScreenKit.row("Asking for", request.headline()))
+	var next_rung := Underworld.next_chain_for(contact.contact_id)
+	if next_rung != null:
+		column.add_child(BusinessUIKit.label(
+			"Next: %s — needs %d reputation and %d trust." % [
+				next_rung.display_name, next_rung.reputation_required,
+				next_rung.trust_required
+			], 12, ScreenKit.MUTED
+		))
+	if link.jobs_done > 0 or link.jobs_failed > 0:
+		column.add_child(BusinessUIKit.label(
+			"%d done, %d gone wrong, %s paid out." % [
+				link.jobs_done, link.jobs_failed, ScreenKit.money(link.total_paid)
+			], 12, ScreenKit.MUTED
+		))
+	return card
+
+
+# --- Requests ------------------------------------------------------------
+
+func _build_requests() -> void:
+	var asks := Underworld.requests()
+	if asks.is_empty():
+		_body.add_child(BusinessUIKit.label(
+			"Nobody has asked you for anything. Go and see them — work does not "
+			+ "come to you.", 14, ScreenKit.MUTED
+		))
+		return
+	_body.add_child(ScreenKit.heading("WANTED"))
+	for request in asks:
+		_body.add_child(_request_card(request))
+
+
+func _request_card(request: ContactRequest) -> PanelContainer:
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", BusinessUIKit.row_style())
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 2)
+	card.add_child(column)
+	var contact := Underworld.contact_by_id(request.contact_id)
+	column.add_child(BusinessUIKit.row([
+		BusinessUIKit.stretch_label(request.headline(), 15, ScreenKit.TEXT),
+		BusinessUIKit.value_label(
+			contact.display_name if contact != null else "", 13, ScreenKit.ACCENT
+		),
+	]))
+	column.add_child(ScreenKit.row("Pays", "+%d%% over the usual" % roundi(request.bonus * 100.0)))
+	if request.minimum_condition > 0.0:
+		column.add_child(ScreenKit.row("Condition", request.condition_label()))
+	column.add_child(ScreenKit.row(
+		"Stands for", "%d day%s" % [
+			request.days_left(TimeManager.day_index),
+			"" if request.days_left(TimeManager.day_index) == 1 else "s"
+		]
+	))
+	column.add_child(ScreenKit.row("Trust", "+%d" % request.trust_reward))
+	return card
+
+
+# --- Career --------------------------------------------------------------
+
+func _build_career() -> void:
+	var career := Underworld.career
+	_body.add_child(ScreenKit.heading("WHAT YOU ARE KNOWN FOR"))
+	var speciality := career.speciality()
+	_body.add_child(ScreenKit.row(
+		"Speciality", CriminalCareer.path_name(speciality)
+	))
+	_body.add_child(BusinessUIKit.label(
+		"Nothing is chosen here. It is whatever you have actually done most of.",
+		12, ScreenKit.MUTED
+	))
+
+	_body.add_child(ScreenKit.heading("PATHS"))
+	for path in [
+		CriminalCareer.Path.GOODS, CriminalCareer.Path.VEHICLE,
+		CriminalCareer.Path.CONTRACT,
+	]:
+		_body.add_child(_path_card(career, path))
+
+	_body.add_child(ScreenKit.heading("RECORD OF WORK"))
+	_body.add_child(ScreenKit.row("Jobs finished", "%d" % career.total_jobs()))
+	_body.add_child(ScreenKit.row("Orders filled", "%d" % career.requests_filled))
+	_body.add_child(ScreenKit.row("Gone wrong", "%d" % career.jobs_failed))
+	_body.add_child(ScreenKit.row("Walked away from", "%d" % career.jobs_abandoned))
+	_body.add_child(ScreenKit.row("Best single payout", ScreenKit.money(career.best_single_payout)))
+
+
+func _path_card(career: CriminalCareer, path: CriminalCareer.Path) -> PanelContainer:
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", BusinessUIKit.row_style())
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 2)
+	card.add_child(column)
+	column.add_child(BusinessUIKit.row([
+		BusinessUIKit.stretch_label(
+			CriminalCareer.path_name(path), 15, ScreenKit.TEXT
+		),
+		BusinessUIKit.value_label(career.rank_name(path), 13, ScreenKit.ACCENT),
+	]))
+	column.add_child(ScreenKit.row("Jobs", "%d" % career.count_of(path)))
+	var togo := career.to_next_rank(path)
+	column.add_child(BusinessUIKit.label(
+		"As high as it goes." if togo < 0 else "%d more for the next step." % togo,
 		12, ScreenKit.MUTED
 	))
 	return card

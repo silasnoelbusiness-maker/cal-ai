@@ -10,7 +10,7 @@ signal shift_started()
 signal shift_completed(pay: int)
 signal shift_refused(reason: Refusal)
 
-enum Refusal { NONE, CLOSED, TOO_TIRED, NO_SHIFTS_LEFT, NO_WORKER }
+enum Refusal { NONE, CLOSED, TOO_TIRED, NO_SHIFTS_LEFT, NO_WORKER, RECORD }
 
 @export var job: JobData
 
@@ -45,6 +45,11 @@ func get_refusal(worker: Node3D) -> Refusal:
 		return Refusal.NO_WORKER
 	if stats.energy < job.min_energy:
 		return Refusal.TOO_TIRED
+	# §36 — a trusted role may look you up. Most work does not: `max_record_tier`
+	# is zero on ordinary shifts, and §141 requires that basic work stay open
+	# whatever the player has done.
+	if job.max_record_tier > 0 and int(LegalManager.tier()) > job.max_record_tier:
+		return Refusal.RECORD
 	return Refusal.NONE
 
 
@@ -89,6 +94,9 @@ static func describe_refusal(refusal: Refusal, job_data: JobData) -> String:
 			return "TOO TIRED TO WORK\nSleep or drink something first"
 		Refusal.NO_SHIFTS_LEFT:
 			return "NO SHIFTS LEFT TODAY\nCome back tomorrow"
+		Refusal.RECORD:
+			# §37 — say why, in words rather than in a shrug.
+			return "APPLICATION DECLINED\nThey checked. Recent serious record."
 		_:
 			return "CANNOT WORK HERE"
 

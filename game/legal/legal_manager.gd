@@ -432,6 +432,76 @@ func record_modifier() -> float:
 	return clampf(value, 0.0, 1.0)
 
 
+# --- What a landlord, a lender and an employer make of it ----------------
+
+## Rent above which a landlord is the sort to look somebody up. §39 — cheap
+## addresses do not care, which is what makes §143 true: a player can always
+## put a roof over their head, whatever they have done.
+const PREMIUM_RENT := 420
+## Above this rent the standards are higher again.
+const LUXURY_RENT := 900
+
+## What a landlord makes of the player, for a place at this rent.
+##
+## Returns `accepted`, any `extra_deposit` they want on top of the usual, and a
+## `reason` to show when they say no. §38 — not every landlord asks; §40 — this
+## has no bearing on property the player already owns.
+func landlord_view(rent_amount: int) -> Dictionary:
+	var clean := {"accepted": true, "extra_deposit": 0, "reason": ""}
+	if rent_amount < PREMIUM_RENT:
+		return clean
+	var level := int(tier())
+	var bar := 3 if rent_amount >= LUXURY_RENT else 4
+	if level >= bar:
+		return {
+			"accepted": false,
+			"extra_deposit": 0,
+			"reason": "The landlord ran a check. %s." % tier_name(),
+		}
+	if level >= bar - 1 or has_outstanding_matter():
+		# Not a refusal — a bigger deposit. §39.
+		return {
+			"accepted": true,
+			"extra_deposit": roundi(float(rent_amount) * 1.5),
+			"reason": "They want more down, given the check.",
+		}
+	return clean
+
+
+## Whether a lender will look at new borrowing, and what it costs extra.
+##
+## §41 and §43 — existing mortgages and loans are never touched by this. Only a
+## fresh application asks, and only a serious record or an unsettled matter
+## changes the answer.
+func lender_view() -> Dictionary:
+	var level := int(tier())
+	if has_outstanding_matter() and level >= int(CriminalRecord.Tier.SERIOUS):
+		return {
+			"accepted": false,
+			"deposit_multiplier": 1.0,
+			"reason": "A lender will not look at this with a court matter open.",
+		}
+	if level >= int(CriminalRecord.Tier.REPEAT):
+		return {
+			"accepted": false,
+			"deposit_multiplier": 1.0,
+			"reason": "A lender will not look at this. %s." % tier_name(),
+		}
+	if level >= int(CriminalRecord.Tier.SERIOUS):
+		return {
+			"accepted": true,
+			"deposit_multiplier": 1.35,
+			"reason": "They will lend, but they want more down.",
+		}
+	return {"accepted": true, "deposit_multiplier": 1.0, "reason": ""}
+
+
+## How much of the candidate pool will not take a job from this owner. §49 —
+## modest, and it never empties the pool.
+func hiring_penalty() -> float:
+	return clampf(record_modifier() * 0.4, 0.0, 0.4)
+
+
 func _review_tier() -> void:
 	var now := tier()
 	if now == _last_tier:

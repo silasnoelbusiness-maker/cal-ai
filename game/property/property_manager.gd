@@ -14,7 +14,7 @@ signal property_leased(property: CommercialProperty)
 signal rent_paid(property: CommercialProperty, amount: int)
 signal rent_missed(property: CommercialProperty, arrears: int)
 
-enum LeaseResult { OK, ALREADY_LEASED, CANNOT_AFFORD, NO_PROPERTY }
+enum LeaseResult { OK, ALREADY_LEASED, CANNOT_AFFORD, NO_PROPERTY, RECORD_REFUSED }
 
 const PROPERTY_GROUP := &"commercial_property"
 
@@ -68,16 +68,37 @@ func lease(property: CommercialProperty, tenant: StringName = &"player") -> Leas
 		return LeaseResult.NO_PROPERTY
 	if not property.is_vacant():
 		return LeaseResult.ALREADY_LEASED
-	if not can_afford(property):
-		GameManager.notify("NOT ENOUGH CASH\nNeed $%d" % property.move_in_cost(), GameManager.Tone.BAD)
+	# Commercial landlords ask the same question residential ones do, and get
+	# the same answer from the same place. §111 — the tolerance is the rent,
+	# so a back-street unit lets to anybody and a plaza pitch does not.
+	var view := LegalManager.landlord_view(property.rent_amount)
+	if not bool(view["accepted"]):
+		GameManager.notify(
+			"APPLICATION DECLINED\n%s" % String(view["reason"]), GameManager.Tone.BAD
+		)
+		return LeaseResult.RECORD_REFUSED
+	var extra := int(view["extra_deposit"])
+	if not EconomyManager.can_afford(property.move_in_cost() + extra):
+		GameManager.notify(
+			"NOT ENOUGH CASH\nNeed $%d" % (property.move_in_cost() + extra),
+			GameManager.Tone.BAD
+		)
 		return LeaseResult.CANNOT_AFFORD
 
 	EconomyManager.spend(property.deposit, "%s — commercial property deposit" % property.address)
+	if extra > 0:
+		EconomyManager.spend(extra, "%s — additional deposit" % property.address)
+		GameManager.notify(
+			"LARGER DEPOSIT REQUIRED\n%s  ·  +$%d" % [property.address.to_upper(), extra],
+			GameManager.Tone.BAD
+		)
 	EconomyManager.spend(property.rent_amount, "%s — commercial rent" % property.address)
 	property.begin_lease(tenant)
 
 	GameManager.notify(
-		"LEASE SIGNED\n%s  -$%d" % [property.address.to_upper(), property.move_in_cost()],
+		"LEASE SIGNED\n%s  -$%d" % [
+			property.address.to_upper(), property.move_in_cost() + extra
+		],
 		GameManager.Tone.GOOD
 	)
 	property_leased.emit(property)
@@ -94,6 +115,8 @@ static func describe(result: LeaseResult) -> String:
 			return "NOT ENOUGH CASH"
 		LeaseResult.NO_PROPERTY:
 			return "NO SUCH PROPERTY"
+		LeaseResult.RECORD_REFUSED:
+			return "THE LANDLORD RAN A CHECK"
 		_:
 			return ""
 
@@ -224,16 +247,31 @@ func rehouse(home: ResidenceProperty) -> bool:
 func lease_residence(home: ResidenceProperty) -> bool:
 	if home == null or home.is_leased_by_player():
 		return false
-	if not EconomyManager.can_afford(home.move_in_cost()):
+	# §38 and §39 — a premium landlord runs a check, a cheap one does not, and
+	# the answer is usually a bigger deposit rather than a closed door. §143
+	# depends on the cheap end never asking: the player can always get a roof.
+	var view := LegalManager.landlord_view(home.rent_amount)
+	if not bool(view["accepted"]):
 		GameManager.notify(
-			"NOT ENOUGH CASH\nNeed $%d" % home.move_in_cost(), GameManager.Tone.BAD
+			"APPLICATION DECLINED\n%s" % String(view["reason"]), GameManager.Tone.BAD
 		)
 		return false
+	var extra := int(view["extra_deposit"])
+	var due := home.move_in_cost() + extra
+	if not EconomyManager.can_afford(due):
+		GameManager.notify("NOT ENOUGH CASH\nNeed $%d" % due, GameManager.Tone.BAD)
+		return false
 	EconomyManager.spend(home.deposit, "%s — deposit" % home.address)
+	if extra > 0:
+		EconomyManager.spend(extra, "%s — additional deposit" % home.address)
+		GameManager.notify(
+			"LARGER DEPOSIT REQUIRED\n%s  ·  +$%d" % [home.address.to_upper(), extra],
+			GameManager.Tone.BAD
+		)
 	EconomyManager.spend(home.rent_amount, "%s — rent" % home.address)
 	home.begin_lease()
 	GameManager.notify(
-		"APARTMENT RENTED\n%s  -$%d" % [home.address.to_upper(), home.move_in_cost()],
+		"APARTMENT RENTED\n%s  -$%d" % [home.address.to_upper(), due],
 		GameManager.Tone.GOOD
 	)
 	return true
