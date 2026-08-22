@@ -36,11 +36,18 @@ static func force_report(
 
 
 ## Puts eyes on the player right now.
+##
+## Goes through WantedManager, which is the door every police unit in the game
+## uses — it is what cancels the escape countdown, tells the player they have
+## been SPOTTED and marks the car they are sitting in. Calling the response
+## manager directly reached the state machine but left the countdown running,
+## which is the second time in this phase a debug helper has taken a shortcut
+## and produced a state the game itself never reaches.
 static func force_pursuit() -> void:
 	var player := GameManager.player
 	if player == null:
 		return
-	PoliceResponseManager.note_seen(player.global_position)
+	WantedManager.notify_player_seen(player.global_position)
 
 
 ## Nobody can see the player any more. The honest way to test escaping without
