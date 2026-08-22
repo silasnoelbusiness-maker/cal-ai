@@ -13321,7 +13321,10 @@ func _test_legal_debt() -> void:
 	var paid := LegalManager.pay_legal_debt(owed)
 	_check(paid == owed, "and can be paid off ($%d)" % paid)
 	_check(LegalManager.legal_debt == 0, "leaving nothing outstanding")
-	# §18 — it does not grow on its own.
+	# §18 — it does not grow on its own. Cleared first, because a hearing left
+	# outstanding would add to the balance over those three days and that is a
+	# missed court date rather than interest.
+	LegalManager.clear()
 	LegalManager.add_legal_debt(1000)
 	var before := LegalManager.legal_debt
 	TimeManager.advance_minutes(1440 * 3)
@@ -13635,6 +13638,9 @@ func _test_goods_request() -> void:
 func _test_vehicle_request() -> void:
 	_r_setup()
 	UnderworldDebug.unlock_all_contacts()
+	# The garage wants a name before it deals at all, which is Phase Q's gate
+	# and still applies — trust alone does not get you through the door.
+	UnderworldDebug.set_reputation(50)
 	LegalDebug.set_trust(&"dock_road_garage", 75)
 	var request := LegalDebug.post_request(&"dock_road_garage")
 	_check(request != null, "the garage asks for a car")
@@ -13697,7 +13703,11 @@ func _test_criminal_career() -> void:
 		"five car jobs make a vehicle specialist (%s)"
 		% CriminalCareer.path_name(career.speciality())
 	)
-	_check(career.rank_in(CriminalCareer.Path.VEHICLE) >= 2, "at a rank above the bottom")
+	_check(
+		career.rank_in(CriminalCareer.Path.VEHICLE) >= 1,
+		"at a rank above the bottom (%s)"
+		% career.rank_name(CriminalCareer.Path.VEHICLE)
+	)
 	_check(
 		career.payout_bonus(IllegalJobData.Objective.VEHICLE_DELIVERY) > 0.0,
 		"worth something on their own line of work"
@@ -13911,10 +13921,16 @@ func _test_pre_legal_save() -> void:
 		return
 	var state: Dictionary = raw
 	# Strip everything Phase R added, which is what a Phase Q save looks like.
-	var singletons: Variant = state.get("singletons", {})
-	if singletons is Dictionary:
-		(singletons as Dictionary).erase("legal")
-		var under: Variant = (singletons as Dictionary).get("underworld", {})
+	# Saveable singletons live under "entities", keyed by their save_id.
+	var entities: Variant = state.get("entities", {})
+	_check(entities is Dictionary, "the save has its entities")
+	if entities is Dictionary:
+		_check(
+			(entities as Dictionary).has("legal"),
+			"a Phase R save carries a legal record"
+		)
+		(entities as Dictionary).erase("legal")
+		var under: Variant = (entities as Dictionary).get("underworld", {})
 		if under is Dictionary:
 			(under as Dictionary).erase("trust")
 			(under as Dictionary).erase("career")

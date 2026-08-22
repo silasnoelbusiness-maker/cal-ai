@@ -251,6 +251,12 @@ func _decay_scandal() -> void:
 	scandal_penalty = maxf(scandal_penalty - step, 0.0)
 	for brand in _brands:
 		brand.brand_reputation = clampf(brand.brand_reputation + step * 0.5, 0.0, 100.0)
+	if scandal_penalty <= 0.0:
+		# Worked off early. Nothing left to serve, so nothing left to say.
+		scandal_until_day = -1
+		scandal_reason = ""
+		scandal_cleared.emit()
+		company_changed.emit()
 
 
 func brands() -> Array[BrandData]:
