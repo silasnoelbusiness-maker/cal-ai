@@ -16,6 +16,10 @@ signal level_changed(level: int)
 signal escaping_started(seconds: float)
 signal escaping_cancelled()
 signal wanted_cleared()
+## The arrest, once the record has been written and the clock moved. Carries
+## what the incident came to and how many hours it cost, which is what the
+## arrest summary screen reads.
+signal arrest_processed(arrest: ArrestRecord, hours_lost: int)
 ## Emitted the moment the arrest lands, before the fine is charged.
 signal bust_started()
 signal bust_finished(fine_paid: int)
@@ -511,24 +515,35 @@ func _bust() -> void:
 	bust_started.emit()
 
 	var player := GameManager.player
-	_release_stolen_vehicle(player)
+	var arrested_in_stolen_car := _release_stolen_vehicle(player)
 
 	# Runs while the tree is paused.
 	await get_tree().create_timer(bust_hold_seconds, true, false, false).timeout
 
-	# Never overdraw: a player with $40 pays $40, not a negative balance. What is
-	# left unpaid is tracked rather than forgiven, so a debt system later has
-	# something to read; nothing charges it yet.
+	# Never overdraw: a player with $40 pays $40, not a negative balance.
 	var due := get_bust_fine()
 	var fine: int = mini(due, EconomyManager.cash)
 	if fine > 0:
 		EconomyManager.spend(fine, "Police fine", EconomyManager.Source.LEGAL)
-	unpaid_penalty += due - fine
+	# What could not be covered is a balance owed, not a forgiven debt and not
+	# an overdraft. Phase Q parked the figure here; Phase R's LegalManager is
+	# what finally collects it.
+	var short := due - fine
+	unpaid_penalty += short
+	LegalManager.add_legal_debt(short)
 	CrimeManager.add_statistic(&"times_busted")
 	CrimeManager.add_statistic(&"fines_paid", fine)
 
+	var seized := 0
 	if confiscate_stolen_goods:
-		_seize_stolen_goods(player)
+		seized = _seize_stolen_goods(player)
+
+	# The record. Everything the pursuit filed becomes one incident, a release
+	# cost is taken, and a serious enough night books a court date. Phase R.
+	var band := worst_severity
+	var arrest := LegalManager.note_arrest(
+		level, band, due, fine, seized, arrested_in_stolen_car
+	)
 
 	_move_to_release_point(player)
 	points = 0
@@ -541,41 +556,46 @@ func _bust() -> void:
 	# §60 and §164 — the hours in a cell pass for the city too. Everything
 	# TimeManager drives runs: a shop opens and closes, a delivery lands, a
 	# manager reorders, rent comes due. Being arrested costs a day's trading,
-	# which is a consequence a business owner feels.
-	var hours := get_bust_hours()
+	# which is a consequence a business owner feels. Phase R adds the hours the
+	# seriousness of the incident is worth on top of the wanted level's own.
+	var hours := get_bust_hours() + LegalManager.extra_custody_hours(band)
 	if hours > 0:
 		TimeManager.advance_minutes(hours * 60)
 
 	_busting = false
 	GameManager.cutscene_active = false
+	arrest_processed.emit(arrest, hours)
 	bust_finished.emit(fine)
 
 
 ## Stolen goods are seized; anything bought legitimately is left alone. The
 ## distinction is per-stack metadata on the inventory, so this is one call and
 ## cannot touch a legally-owned item by accident.
-func _seize_stolen_goods(player: Node) -> void:
+func _seize_stolen_goods(player: Node) -> int:
 	if player == null or not player.has_method("get_inventory"):
-		return
+		return 0
 	var inventory = player.call("get_inventory")
 	if inventory == null or not inventory.has_method("remove_stolen"):
-		return
+		return 0
 	var seized: int = inventory.call("remove_stolen")
 	if seized > 0:
 		GameManager.notify("STOLEN GOODS SEIZED\n%d item%s" % [seized, "" if seized == 1 else "s"], GameManager.Tone.BAD)
+	return seized
 
 
 ## A stolen car goes back where it was parked. The player's own car is left
 ## exactly where they left it — being arrested must not cost them ownership.
-func _release_stolen_vehicle(player: Node) -> void:
+func _release_stolen_vehicle(player: Node) -> bool:
 	if player == null or not player.has_method("get_vehicle"):
-		return
+		return false
 	var vehicle = player.call("get_vehicle")
 	if vehicle == null:
-		return
+		return false
 	vehicle.call("exit_driver", true)
-	if not vehicle.call("is_player_owned"):
-		vehicle.call("return_to_spawn")
+	if vehicle.call("is_player_owned"):
+		return false
+	vehicle.call("return_to_spawn")
+	return true
 
 
 func _move_to_release_point(player: Node) -> void:

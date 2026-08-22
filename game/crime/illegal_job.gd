@@ -13,7 +13,13 @@ extends RefCounted
 ## stealing a car, carrying something across town, robbing a till. Phase Q's
 ## contribution is a reason to do it and somebody to do it for.
 
-enum Objective { VEHICLE_DELIVERY, STOLEN_GOODS_RUN, ROBBERY_CONTRACT, HIGH_RISK_THEFT }
+## Phase R adds the last two (§79, §80). Both are deliberately abstract: a
+## marked package to move, and a marked item to fetch back. Neither names a
+## commodity, and neither describes a method.
+enum Objective {
+	VEHICLE_DELIVERY, STOLEN_GOODS_RUN, ROBBERY_CONTRACT, HIGH_RISK_THEFT,
+	MULTI_STOP_RUN, RETRIEVE_STASH,
+}
 enum Status { OFFERED, ACTIVE, COMPLETE, FAILED, EXPIRED }
 enum Risk { LOW, MEDIUM, HIGH, EXTREME }
 
@@ -22,6 +28,8 @@ const OBJECTIVE_NAMES := {
 	Objective.STOLEN_GOODS_RUN: "Stolen goods run",
 	Objective.ROBBERY_CONTRACT: "Robbery contract",
 	Objective.HIGH_RISK_THEFT: "High-risk theft",
+	Objective.MULTI_STOP_RUN: "Multi-stop run",
+	Objective.RETRIEVE_STASH: "Retrieve a package",
 }
 
 const RISK_NAMES := {
