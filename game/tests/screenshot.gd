@@ -2882,8 +2882,12 @@ func _wanted_scenario(main: Node, scenario: String) -> void:
 				# somewhere behind the camera. Point the rig down the line from
 				# the player to the block.
 				_look_towards(main, spot, at)
+				# Standing still beside a roadblock at four stars gets you
+				# arrested, and the four-star frame came back as the release
+				# point with a fine on it. Hold position, sidestepping anybody
+				# who gets close enough to reach.
+				await _keep_ahead(90, spot, 5.0)
 				break
-			await _wait(60)
 
 
 ## Takes the passers-by off the street, leaving the police on it.
