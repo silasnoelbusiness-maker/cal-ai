@@ -2917,8 +2917,13 @@ const EVADE_RANGE := 12.0
 ## after street until the frame was the front door of the police precinct
 ## rather than the response it was composed for, so the evasion stays inside
 ## the block the camera is pointed at.
-const EVADE_STEP := 14.0
-const EVADE_LEASH := 16.0
+## Both are short, and the leash is shorter than the range on purpose: the
+## player keeps sidestepping whoever is nearest without ever leaving the block
+## the shot was composed for. A longer leash let them drift to the retaining
+## wall at the south end of Main Street, and half the frame came back as blank
+## pavement.
+const EVADE_STEP := 9.0
+const EVADE_LEASH := 11.0
 
 
 ## Waiting out a police response without being arrested at the end of it.
