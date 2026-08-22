@@ -101,6 +101,7 @@ end never stands between a test and the game.
 | `K` | Open the company: brands, locations, staff, operations, finance |
 | `P` | Open your profile: net worth, vehicles, home, lifestyle |
 | `H` | Open the property portfolio: holdings, mortgages, income |
+| `L` | Open logistics: the depot, its stock, shipments, rounds and vans |
 | Left mouse | Attack with whatever is in your hand · place equipment · place furniture |
 | `R` | Rotate the equipment or furniture being placed |
 
@@ -1243,8 +1244,24 @@ promise about a third district that has not been kept yet.
 The empire phase left its own threads: a third business type
 (the architecture takes one as a `BusinessTypeData`, a stock list and — if it
 cooks — a set of recipes), competitor businesses to compete for the same local
-demand, and property that can be bought rather than rented. Eviction is still
-unbuilt though the arrears are counted.
+demand, and property that can be bought rather than rented.
+
+Eviction is the oldest of those threads and is still not built. Phase P got
+closer than any phase before it — rent arrears are counted, the stages are
+named (RENT OVERDUE, DEFAULT NOTICE, LEASE AT RISK), and the card on the
+company screen says so — but no landlord ever actually takes a unit back. The
+foreclosure machinery is the shape it should copy: a notice, a deadline, a
+stated amount to cure, and a completion that rehouses whatever was inside.
+
+The logistics phase left threads of its own. There is one depot in the city
+and the code takes a list, so a second is a table entry and a building rather
+than new systems — but nothing balances two, and the bulk bands were tuned
+against one. Routes run their stops in the order they were added, with no
+notion of which order is shorter. A shipment carries whatever fits in one van
+and a bigger one is refused rather than split across two. And the player can
+drive only one run at a time, which is the honest limit of one player and one
+van but means a chain of six branches is always going to be somebody else's
+job.
 
 The earlier phases left three more threads: a second
 business type (the architecture takes one as a `BusinessTypeData` plus a stock
