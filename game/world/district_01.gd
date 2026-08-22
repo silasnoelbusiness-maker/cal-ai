@@ -1255,8 +1255,11 @@ func _build_fence_lockup(parent: Node3D) -> void:
 	light.name = "FenceBulb"
 	light.position = at + Vector3(0.0, 2.6, 4.2)
 	light.light_color = Color(0.988, 0.878, 0.702)
-	light.light_energy = 2.2
-	light.omni_range = 9.0
+	# One bulb over one door, which is all this place should have — but it has
+	# to reach the apron. At nine metres the lockup was a black shape on a
+	# black dock after sunset, findable only by walking into it.
+	light.light_energy = 3.0
+	light.omni_range = 18.0
 	light.shadow_enabled = false
 	parent.add_child(light)
 

@@ -2865,11 +2865,17 @@ func _wanted_scenario(main: Node, scenario: String) -> void:
 			# and stand on the first side that is open street.
 			for i in 12:
 				var angle := TAU * float(i) / 12.0
-				var spot := at + Vector3(cos(angle), 0.0, sin(angle)) * 24.0
+				var spot := at + Vector3(cos(angle), 0.0, sin(angle)) * 20.0
 				spot.y = 0.6
-				if _standable(spot):
-					player.global_position = spot
-					break
+				if not _standable(spot):
+					continue
+				player.global_position = spot
+				# Standing near the block is not the same as looking at it —
+				# the first night frame was a car park with the roadblock
+				# somewhere behind the camera. Point the rig down the line from
+				# the player to the block.
+				_look_towards(main, spot, at)
+				break
 			await _wait(60)
 
 
@@ -3007,6 +3013,26 @@ func _standable(at: Vector3) -> bool:
 	return space.intersect_ray(overhead).is_empty()
 
 
+## Turns the camera to face something specific.
+##
+## Only takes effect when the command line did not pass a yaw of its own: the
+## overrides in `_ready` are applied after the scenario runs, deliberately, so
+## that a caller always wins.
+func _look_towards(main: Node, from: Vector3, to: Vector3) -> void:
+	var rig := main.get_node_or_null("CameraRig") as TopDownCamera
+	if rig == null:
+		return
+	var heading := to - from
+	heading.y = 0.0
+	if heading.length() < 0.5:
+		return
+	heading = heading.normalized()
+	# The rig carries the camera at +Z and looks back at the target, so the
+	# view runs along -(sin yaw, cos yaw).
+	rig.yaw_degrees = rad_to_deg(atan2(-heading.x, -heading.z))
+	rig.rotation_degrees.y = rig.yaw_degrees
+
+
 ## The last beat before the shutter on a pursuit frame.
 ##
 ## Stepping away breaks line of sight, and a broken line of sight is the state
@@ -3131,9 +3157,19 @@ func _underworld_location(main: Node, scenario: String) -> void:
 			if record != null:
 				UnderworldDebug.mark_vehicle_stolen(record)
 				VehicleRegistry.call("_spawn", record)
-			await _wait(30)
+				await _wait(60)
+				# Arrive in it. The buyer's own words are "turn up in
+				# something", and that is what the screen looks for first; a
+				# car left standing nearby is only reached by a fallback, and
+				# the first render came back on the empty state.
+				var car := record.node as Node3D
+				if car != null and car.has_node("Door"):
+					car.get_node("Door").interact(player)
+			await _wait(40)
 
-	if scenario == "fence_exterior" or scenario == "chop_shop":
+	# The three exteriors. "criminal_contact" is the broker's own doorway —
+	# opening the panel there made it a second copy of the job-offer frame.
+	if scenario in ["fence_exterior", "chop_shop", "criminal_contact"]:
 		return
 
 	var screen: Node = _hud_screen(hud, "ContactPanel")

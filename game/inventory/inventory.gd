@@ -56,11 +56,22 @@ func has_stolen_goods() -> bool:
 ## Every stack of unpaid goods, as {"item", "quantity"}. What a fence needs to
 ## price a sale before making it — the arrest takes them without asking, but
 ## somebody buying them has to say what they are worth first.
+## Gathered by item rather than by slot. Seven energy drinks across two slots
+## are seven energy drinks to somebody buying them, and listing them as two
+## rows reading "Energy Drink" made the fence screen look like it was double
+## counting.
 func stolen_stacks() -> Array[Dictionary]:
 	var found: Array[Dictionary] = []
+	var row_for := {}
 	for slot in get_slots():
 		if slot.stolen <= 0 or slot.item == null:
 			continue
+		var id: StringName = slot.item.id
+		if row_for.has(id):
+			var row: Dictionary = found[int(row_for[id])]
+			row["quantity"] = int(row["quantity"]) + slot.stolen
+			continue
+		row_for[id] = found.size()
 		found.append({"item": slot.item, "quantity": slot.stolen})
 	return found
 
