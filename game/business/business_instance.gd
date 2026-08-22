@@ -763,6 +763,33 @@ func rostered_all(role: int, hour: int) -> Array[EmployeeData]:
 	return found
 
 
+## Roles this branch cannot cover right now, whether or not the business type
+## calls them required.
+##
+## unstaffed_roles() answers "what does this kind of business have to have",
+## which is the right question for opening the doors and the wrong one for
+## calling somebody in: a corner shop requires nobody, because the player can
+## stand behind the till themselves. But a shop whose only cashier has stopped
+## turning up because they have not been paid is short-handed by any useful
+## definition, and that is exactly the case the manager should be ringing
+## round about.
+##
+## The second clause cannot fire spuriously: it needs somebody actually
+## rostered on for this hour who is refusing to work. An empty rota at three
+## in the morning is not short-handed, it is closed.
+func short_handed_roles(hour: int) -> Array[int]:
+	var missing := unstaffed_roles(hour)
+	for worker in employees:
+		var role := int(worker.role)
+		if missing.has(role):
+			continue
+		if rostered(role, hour) != null:
+			continue
+		if worker.is_on_shift(hour) and not worker.will_work():
+			missing.append(role)
+	return missing
+
+
 ## Staff roles the type says it needs, that nobody is covering right now.
 func unstaffed_roles(hour: int) -> Array[int]:
 	var definition := type_data()

@@ -283,6 +283,7 @@ func _run() -> void:
 	_test_auto_replenish()
 	_test_delivery_route()
 	_test_manager_backup()
+	_test_short_handed_shop()
 	_test_no_backup()
 	_test_wage_arrears()
 	_test_unpaid_staff_stop_working()
@@ -11581,3 +11582,54 @@ func _test_loan_default() -> void:
 	_check(loan.missed_payments == 0, "with a clean record")
 	BusinessManager.repay_loan(branch, loan.loan_id, loan.remaining_balance)
 	FinanceManager.review(branch)
+
+
+## TEST §97 — a shop that requires nobody is still short-handed when the one
+## person on the rota has stopped turning up.
+func _test_short_handed_shop() -> void:
+	var shop := _own_business()
+	if shop == null:
+		return
+	var definition := shop.type_data()
+	if definition == null or not definition.required_staff_roles.is_empty():
+		return
+	_check(
+		shop.unstaffed_roles(12).is_empty(),
+		"a corner shop requires nobody, so nothing reads as unstaffed"
+	)
+
+	var till: EmployeeData = null
+	for worker in shop.employees:
+		if worker.role == EmployeeData.Role.CASHIER and worker.is_on_shift(12):
+			till = worker
+			break
+	if till == null:
+		till = CompanyDebug.hire(shop, EmployeeData.Role.CASHIER, 0.7)
+	if till == null:
+		return
+	var missed_before := till.missed_pay_runs
+	_check(
+		not shop.short_handed_roles(12).has(EmployeeData.Role.CASHIER),
+		"and with somebody on the till it is not short-handed either"
+	)
+
+	till.missed_pay_runs = 4
+	_check(not till.will_work(), "somebody owed weeks of wages stops turning up")
+	_check(
+		shop.rostered(EmployeeData.Role.CASHIER, 12) == null,
+		"which leaves the till uncovered"
+	)
+	_check(
+		shop.short_handed_roles(12).has(EmployeeData.Role.CASHIER),
+		"and that is what the manager rings round about"
+	)
+	_check(
+		shop.unstaffed_roles(12).is_empty(),
+		"without changing what the business type says it requires"
+	)
+
+	till.missed_pay_runs = missed_before
+	_check(
+		not shop.short_handed_roles(12).has(EmployeeData.Role.CASHIER),
+		"paying them puts it right"
+	)

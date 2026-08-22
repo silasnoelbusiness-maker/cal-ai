@@ -890,7 +890,7 @@ func _run_manager(business: BusinessInstance, hour: int) -> void:
 ## is off shift and can do the job, and if there is nobody the shift stays
 ## uncovered and the business takes the consequences. §60.
 func _manager_call_backup(business: BusinessInstance, hour: int) -> void:
-	for role in business.unstaffed_roles(hour):
+	for role in business.short_handed_roles(hour):
 		# Somebody already on the way here counts as covered.
 		if backup_covering(business.business_id, role, hour) != null:
 			continue

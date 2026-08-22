@@ -2487,10 +2487,13 @@ func _backup_scenario(main: Node, scenario: String) -> void:
 	branch.set_permission(&"call_backup", true)
 
 	if scenario == "manager_backup":
-		# Nobody on the till at the branch, at an hour it should be open.
-		for worker in branch.employees.duplicate():
+		# The branch's own cashier has not been paid in weeks and has stopped
+		# turning up. That is the real trigger — the manager finds the till
+		# uncovered on a day it should not be and rings round the company.
+		for worker in branch.employees:
 			if worker.role == EmployeeData.Role.CASHIER:
-				branch.fire(worker.employee_id)
+				CompanyDebug.owe_wages(branch, worker, 900)
+				worker.missed_pay_runs = 4
 		BusinessManager.call("_run_manager", branch, 14)
 
 	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
