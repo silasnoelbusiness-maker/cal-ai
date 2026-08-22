@@ -344,6 +344,11 @@ func _draw_glyph(at: Vector2, category: int, colour: Color) -> void:
 			# A ring with a dot in it: go here.
 			_canvas.draw_arc(at, 3.2, 0.0, TAU, 18, ink, 1.6)
 			_canvas.draw_circle(at, 1.3, ink)
+		MapMarker.Category.COURT:
+			# A plain civic front: steps under a lintel.
+			_canvas.draw_rect(Rect2(at + Vector2(-3.4, -0.6), Vector2(6.8, 1.2)), ink)
+			_canvas.draw_rect(Rect2(at + Vector2(-2.6, -3.2), Vector2(5.2, 1.0)), ink)
+			_canvas.draw_rect(Rect2(at + Vector2(-0.6, -2.4), Vector2(1.2, 2.0)), ink)
 		MapMarker.Category.LANDMARK:
 			_canvas.draw_circle(at, 2.6, ink)
 			_canvas.draw_circle(at, 1.2, colour)
@@ -364,6 +369,9 @@ func _label_priority(marker: MapMarker) -> int:
 			return 0
 		MapMarker.Category.OBJECTIVE:
 			return 0
+		# §128 — only there when it matters, and near the top when it is.
+		MapMarker.Category.COURT:
+			return 1
 		MapMarker.Category.CONTACT:
 			return 2
 		MapMarker.Category.HOME:

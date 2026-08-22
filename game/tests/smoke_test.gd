@@ -4968,7 +4968,20 @@ func _test_empire_and_crime() -> void:
 	WantedManager.request_bust()
 	await _settle(int(WantedManager.bust_hold_seconds * 60.0) + 40)
 	_check(WantedManager.level == 0, "the arrest resolves")
-	_check(market.is_open() and coffee.is_open(), "and neither shop noticed")
+	# Phase R makes a serious arrest cost more hours than Phase Q did, so the
+	# clock can now step past closing while the player is in custody. That is
+	# §99 working rather than a fault: what has to survive the arrest is the
+	# business, not the door happening to be open at whatever hour it now is.
+	# So this asks the stronger question — do they still trade afterwards.
+	_check(BusinessManager.owned_count() == 2, "both businesses survive the arrest")
+	var market_after := market.revenue_today
+	var coffee_after := coffee.revenue_today
+	BusinessManager.simulate_hour_now(market, 12)
+	BusinessManager.simulate_hour_now(coffee, 12)
+	_check(
+		market.revenue_today > market_after and coffee.revenue_today > coffee_after,
+		"and neither shop noticed"
+	)
 	var after_bust := market.revenue_today
 	BusinessManager.simulate_hour_now(market, 12)
 	_check(market.revenue_today > after_bust, "trade continues afterwards")

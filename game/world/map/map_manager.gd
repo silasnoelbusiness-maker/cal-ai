@@ -191,6 +191,24 @@ func _underworld_markers() -> Array[MapMarker]:
 			contact.contact_id
 		))
 
+	# §128 and §131 — the courthouse appears on the map when there is a reason
+	# to go there, and not otherwise. A player who has never been arrested is
+	# not shown a court, and one with a hearing listed cannot miss it.
+	var next_case := LegalManager.next_case()
+	if next_case != null:
+		for node in tree.get_nodes_in_group(&"civic_court"):
+			var door := node as Node3D
+			if door == null:
+				continue
+			var days := next_case.days_until(TimeManager.day_index)
+			markers.append(MapMarker.make(
+				MapMarker.Category.COURT, "Civic Court", door.global_position,
+				"TODAY %s" % next_case.court_time_label() if days <= 0
+					else "IN %d DAY%s" % [days, "" if days == 1 else "S"],
+				&"civic_court"
+			))
+			break
+
 	# The job itself, if one is running and it has somewhere to be.
 	var job := Underworld.active_job()
 	if job != null and job.objective == IllegalJobData.Objective.ROBBERY_CONTRACT:

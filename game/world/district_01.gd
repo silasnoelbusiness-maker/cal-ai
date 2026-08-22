@@ -162,6 +162,7 @@ func _ready() -> void:
 	_build_streetscape()
 	_build_warehouse_yard()
 	_build_underworld()
+	_build_civic_court()
 	_build_venue_doors()
 	_build_notice_board()
 	_build_nav_graph()
@@ -1215,6 +1216,70 @@ func _add_street_light(parent: Node3D, index: int, base: Vector3, toward: Vector
 ## Neither has a sign, because that is the point. What marks them is a shutter
 ## that is always half up and a light left on — enough that a player walking
 ## past twice notices, which is exactly how §126 wants them found.
+## The Civic Court.
+##
+## §21 and §126: a real place the player has to travel to, built from the city
+## kit onto a building that already exists. The Civic Hall in the north strip
+## had no door and is exactly where a court belongs, so this is an entrance and
+## a portico rather than a new block — the city does not grow.
+##
+## It is deliberately not next to the precinct. §22 wants attending to be worth
+## something, and a hearing you can walk to from where you were released is not
+## a decision about your morning.
+func _build_civic_court() -> void:
+	var holder := _make_container("CivicCourt")
+	# The south face of CivicHall, which spans x -40..-10 and z -80..-63.
+	var at := Vector3(-25.0, 0.0, -63.0)
+	var stone := _mat("pale")
+	var trim := _mat("concrete")
+
+	# Three steps up to a portico on four columns. Civic, plain, and legible
+	# from the road without anything written on it.
+	for step in 3:
+		var depth := 2.4 - float(step) * 0.6
+		CityKit.add_slab(
+			holder, "CourtStep%d" % step,
+			CityKit.rect_from_bounds(
+				at.x - 5.0 + float(step) * 0.5, at.z + 0.4,
+				at.x + 5.0 - float(step) * 0.5, at.z + 0.4 + depth
+			),
+			float(step) * 0.16, 0.16, trim
+		)
+	for i in 4:
+		CityKit.add_box(
+			holder, "CourtColumn%d" % i,
+			at + Vector3(-3.6 + float(i) * 2.4, 2.4, 1.4),
+			Vector3(0.5, 4.8, 0.5), stone, true
+		)
+	CityKit.add_box(
+		holder, "CourtLintel", at + Vector3(0.0, 5.0, 1.4),
+		Vector3(9.0, 0.8, 1.2), stone, true
+	)
+	CityKit.add_box(
+		holder, "CourtDoorLeaf", at + Vector3(0.0, 1.6, 0.55),
+		Vector3(2.6, 3.2, 0.2), _mat("door"), false
+	)
+	# One lit sign, because a player who has never been arrested still has to
+	# be able to find it when they suddenly need to.
+	CityKit.add_box(
+		holder, "CourtSign", at + Vector3(0.0, 5.9, 1.2),
+		Vector3(5.0, 0.7, 0.2),
+		CityKit.make_emissive_material(Color(0.847, 0.882, 0.937), 0.9), false, false
+	)
+	var lamp := OmniLight3D.new()
+	lamp.name = "CourtLamp"
+	lamp.position = at + Vector3(0.0, 4.2, 2.6)
+	lamp.light_color = Color(0.925, 0.949, 0.988)
+	lamp.light_energy = 2.8
+	lamp.omni_range = 16.0
+	lamp.shadow_enabled = false
+	holder.add_child(lamp)
+
+	var door := CourtDoor.new()
+	door.name = "CivicCourtDoor"
+	CityKit.attach_interactable(holder, door, at + Vector3(0.0, 1.1, 2.4), 3.0)
+
+
 func _build_underworld() -> void:
 	var holder := _make_container("Underworld")
 	_build_fence_lockup(holder)

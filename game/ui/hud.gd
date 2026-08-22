@@ -55,6 +55,7 @@ var _logistics_panel: LogisticsPanel = null
 var _branch_finance_panel: BranchFinancePanel = null
 var _underworld_panel: UnderworldPanel = null
 var _legal_panel: LegalPanel = null
+var _arrest_summary: ArrestSummary = null
 var _contact_panel: ContactPanel = null
 var _property_sale_panel: PropertySalePanel = null
 var _real_estate_panel: RealEstatePanel = null
@@ -67,6 +68,9 @@ var _real_estate_panel: RealEstatePanel = null
 @onready var _vehicle_health_bar: ProgressBar = %VehicleHealthBar
 @onready var _wanted_label: Label = %WantedLabel
 @onready var _escape_label: Label = %EscapeLabel
+## Standing line for a hearing that is close. §129 — the toast is a moment, and
+## this is what is still there when the player looks back at the screen.
+@onready var _court_label: Label = %CourtLabel
 @onready var _busted_overlay: Control = %BustedOverlay
 @onready var _busted_text: Label = %BustedText
 @onready var _equipped_label: Label = %EquippedLabel
@@ -108,6 +112,10 @@ func _ready() -> void:
 	WantedManager.wanted_cleared.connect(_on_wanted_cleared)
 	WantedManager.bust_started.connect(_on_bust_started)
 	WantedManager.bust_finished.connect(_on_bust_finished)
+	# §14 — the beat between the arrest and the world resuming, where the game
+	# says what it just wrote down about you.
+	WantedManager.arrest_processed.connect(_on_arrest_processed)
+	LegalManager.court_reminder.connect(_on_court_reminder)
 
 	_inventory_panel.opened.connect(_on_screen_visibility_changed)
 	_inventory_panel.closed.connect(_on_screen_visibility_changed)
@@ -141,6 +149,7 @@ func _ready() -> void:
 	_speed_panel.visible = false
 	_wanted_label.visible = false
 	_escape_label.visible = false
+	_refresh_court_line()
 	_busted_overlay.visible = false
 	_store_panel.visible = false
 	_destination_label.visible = false
@@ -299,6 +308,36 @@ func _on_wanted_cleared() -> void:
 	_wanted_label.visible = false
 	_escape_label.visible = false
 	_update_process_need()
+
+
+func _on_arrest_processed(arrest: ArrestRecord, hours_lost: int) -> void:
+	if _arrest_summary != null:
+		close_screens()
+		_arrest_summary.show_arrest(arrest, hours_lost)
+
+
+## §129 — the reminder is a notification, which LegalManager has already shown.
+## The HUD's part is the standing line, so a player who was not looking at the
+## toast still sees that something is listed.
+func _on_court_reminder(_case: LegalCase) -> void:
+	_refresh_court_line()
+
+
+func _refresh_court_line() -> void:
+	if _court_label == null:
+		return
+	var case := LegalManager.next_case()
+	if case == null:
+		_court_label.visible = false
+		return
+	var days := case.days_until(TimeManager.day_index)
+	if days > 1:
+		_court_label.visible = false
+		return
+	_court_label.visible = true
+	_court_label.text = "COURT %s  %s" % [
+		"TODAY" if days <= 0 else "TOMORROW", case.court_time_label()
+	]
 
 
 func _on_bust_started() -> void:
@@ -781,6 +820,8 @@ func _build_phase_m_screens() -> void:
 	_underworld_panel.name = "UnderworldPanel"
 	_legal_panel = LegalPanel.new()
 	_legal_panel.name = "LegalPanel"
+	_arrest_summary = ArrestSummary.new()
+	_arrest_summary.name = "ArrestSummary"
 	_contact_panel = ContactPanel.new()
 	_contact_panel.name = "ContactPanel"
 	_property_sale_panel = PropertySalePanel.new()
@@ -810,6 +851,7 @@ func _phase_m_screens() -> Array:
 		_property_sale_panel, _real_estate_panel,
 		_company_dashboard, _staff_schedule_panel, _manager_panel, _logistics_panel,
 		_branch_finance_panel, _underworld_panel, _contact_panel, _legal_panel,
+		_arrest_summary,
 	]
 
 

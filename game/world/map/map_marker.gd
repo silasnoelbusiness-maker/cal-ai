@@ -11,6 +11,7 @@ extends RefCounted
 enum Category {
 	HOME, OWNED_BUSINESS, AVAILABLE_PROPERTY, JOB, POLICE, SHOP, LANDMARK, MY_VEHICLE,
 	FOR_SALE, MY_PROPERTY, WAREHOUSE, DELIVERY, CONTACT, OBJECTIVE,
+	COURT,
 }
 
 var category: Category = Category.SHOP
@@ -60,6 +61,8 @@ static func category_name(category: Category) -> String:
 			return "Deliveries"
 		Category.CONTACT:
 			return "Contacts"
+		Category.COURT:
+			return "Court"
 		Category.OBJECTIVE:
 			# Not "Jobs": Category.JOB already is, and the map came back with
 			# two filter buttons reading the same word. These are the places an
