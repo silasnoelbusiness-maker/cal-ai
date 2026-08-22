@@ -14,6 +14,11 @@ extends RefCounted
 ## because their cars become unrealistically fast. So a profile changes how many
 ## units, how far they will come, how long they persist and whether they may set
 ## up roadblocks — never how quickly they drive.
+##
+## To be exact about it: Phase J's `WantedManager.pursuit_pressure_by_level`
+## does still nudge officer run speed and police car top speed with the level,
+## and an existing test pins it. That is deliberately mild and it is not ours.
+## Nothing in this file adds to it.
 
 var profile_id: StringName = &"routine"
 var display_name: String = "Routine"

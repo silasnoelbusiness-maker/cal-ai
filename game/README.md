@@ -812,9 +812,14 @@ description or a car they are looking for.
 Stars are presentation. Underneath is one meter, and every crime adds to it, so
 a theft then a robbery is worse than either alone. Each star changes what
 happens: more units, further out, searching longer, and above three, units that
-try to cut the player off rather than queue behind them. What it never changes
-is how fast police drive. A harder level is more police behaving better, not
-the same police cheating.
+try to cut the player off rather than queue behind them.
+
+Phase Q's own response profiles carry no speed multiplier at all — everything
+they change is how many units answer and what those units do. Police do still
+drive and run a little faster at higher levels, but that is Phase J's
+`pursuit_pressure_by_level` and it is deliberately mild, capped by a test at
+well under half again. The escalation the player feels above three stars is
+police behaving better, not police moving faster.
 
 ### The pursuit state machine
 

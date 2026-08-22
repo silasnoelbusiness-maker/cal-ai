@@ -12921,3 +12921,15 @@ func _test_underworld_screens_reachable() -> void:
 		if door != null:
 			found[door.contact_id] = true
 	_check(found.size() >= 3, "one for each contact (%d)" % found.size())
+
+	# Every map filter is a button with a word on it, so two categories sharing
+	# a word makes two buttons the player cannot tell apart. Phase Q shipped
+	# exactly that for one render: Category.OBJECTIVE was also called "Jobs".
+	var names := {}
+	for category in MapMarker.Category.values():
+		var label := MapMarker.category_name(category)
+		_check(
+			not names.has(label),
+			"the map filter \"%s\" belongs to only one kind of marker" % label
+		)
+		names[label] = category

@@ -61,7 +61,10 @@ static func category_name(category: Category) -> String:
 		Category.CONTACT:
 			return "Contacts"
 		Category.OBJECTIVE:
-			return "Jobs"
+			# Not "Jobs": Category.JOB already is, and the map came back with
+			# two filter buttons reading the same word. These are the places an
+			# accepted job wants the player to be.
+			return "Job targets"
 		_:
 			return "Shops"
 

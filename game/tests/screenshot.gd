@@ -2818,6 +2818,7 @@ func _wanted_scenario(main: Node, scenario: String) -> void:
 	var start := Vector3(-40.0, 0.5, District01.MAIN_ST_Z + 8.0)
 	player.global_position = start
 	await _wait(60)
+	await _clear_pedestrians()
 	# Enough crimes to reach the level honestly, climbing one rung at a time.
 	#
 	# The ladder has to start small. Vehicle theft is worth twenty points and
@@ -2858,8 +2859,40 @@ func _wanted_scenario(main: Node, scenario: String) -> void:
 		# the empty road it is not on.
 		if RoadblockManager.count() > 0:
 			var at: Vector3 = RoadblockManager.positions()[0]
-			player.global_position = at + Vector3(0.0, 0.6, 26.0)
+			# Twenty-six metres due north of a roadblock is not necessarily a
+			# road — on the first render it was the inside of a building, and
+			# the frame came back as empty sky. Walk a ring around the block
+			# and stand on the first side that is open street.
+			for i in 12:
+				var angle := TAU * float(i) / 12.0
+				var spot := at + Vector3(cos(angle), 0.0, sin(angle)) * 24.0
+				spot.y = 0.6
+				if _standable(spot):
+					player.global_position = spot
+					break
 			await _wait(60)
+
+
+## Takes the passers-by off the street, leaving the police on it.
+##
+## `UnderworldDebug.force_report` credits the crime immediately, but the same
+## call still emits `crime_reported`, so any pedestrian who happens to be
+## looking files the incident again a second or two later through the ordinary
+## witness path — and that second report is worth full points, not the ten per
+## cent a confirmation is worth. Whether anybody was looking is chance, which
+## is why the ladder came out at one star once and three the next time from
+## identical instructions.
+##
+## Emptying the pavement makes the forced reports the only reports, so a frame
+## labelled two stars is two stars. The Phase E and F crime frames quiet the
+## street for the same reason. Police are deliberately left alone: they are
+## what the frame is of.
+func _clear_pedestrians() -> void:
+	for node in get_tree().get_nodes_in_group(&"pedestrian"):
+		if node is Node3D:
+			node.global_position = Vector3(400.0, 0.0, 400.0)
+		node.process_mode = Node.PROCESS_MODE_DISABLED
+	await _wait(4)
 
 
 ## How near an officer may get before the tool steps the player away.
@@ -2948,11 +2981,30 @@ func _can_step_to(from: Vector3, to: Vector3) -> bool:
 	across.exclude = [player.get_rid()]
 	if not space.intersect_ray(across).is_empty():
 		return false
+	return _standable(to)
+
+
+## Whether a point is open street the player could be stood on.
+##
+## Ground underneath, and nothing overhead. The roof test is what catches being
+## inside a building: a body placed in a wall is pushed out through the floor,
+## and the four-star frame came back as empty sky with the city above it.
+func _standable(at: Vector3) -> bool:
+	var player: Node3D = GameManager.player
+	if player == null:
+		return false
+	var space := player.get_world_3d().direct_space_state
 	var down := PhysicsRayQueryParameters3D.create(
-		to + Vector3(0.0, 3.0, 0.0), to - Vector3(0.0, 2.0, 0.0)
+		at + Vector3(0.0, 3.0, 0.0), at - Vector3(0.0, 2.0, 0.0)
 	)
 	down.exclude = [player.get_rid()]
-	return not space.intersect_ray(down).is_empty()
+	if space.intersect_ray(down).is_empty():
+		return false
+	var overhead := PhysicsRayQueryParameters3D.create(
+		at + Vector3(0.0, 40.0, 0.0), at + Vector3(0.0, 3.5, 0.0)
+	)
+	overhead.exclude = [player.get_rid()]
+	return space.intersect_ray(overhead).is_empty()
 
 
 ## The last beat before the shutter on a pursuit frame.
@@ -2962,8 +3014,8 @@ func _can_step_to(from: Vector3, to: Vector3) -> bool:
 ## countdown rather than the chase it was composed for. This gives the officers
 ## a moment to close the gap and see the player again, which is short enough
 ## that nobody gets near arresting distance.
-func _regain_sight() -> void:
-	await _wait(40)
+func _regain_sight(frames: int = 40) -> void:
+	await _wait(frames)
 
 
 ## Breaking away, the search that follows, and the moment it runs out.
@@ -2996,10 +3048,15 @@ func _search_scenario(main: Node, scenario: String) -> void:
 ## A car the police are looking for, and the player after leaving it unseen.
 func _vehicle_scenario(main: Node, scenario: String) -> void:
 	var player: Node3D = GameManager.player
-	player.global_position = Vector3(-20.0, 0.5, 44.0)
+	# Main Street, for the same reason the star frames use it: the first render
+	# put the car in the park and the camera came back full of trees with the
+	# vehicle the police are looking for nowhere in shot.
+	var kerb := Vector3(-40.0, 0.4, District01.MAIN_ST_Z + District01.LANE_OFFSET)
+	player.global_position = kerb + Vector3(4.0, 0.1, 4.0)
 	await _wait(60)
+	await _clear_pedestrians()
 	var record := VehicleRegistry.grant(&"sedan", Transform3D(
-		Basis.IDENTITY, Vector3(-20.0, 0.4, 50.0)
+		Basis.IDENTITY, kerb
 	))
 	if record == null:
 		return
@@ -3010,14 +3067,16 @@ func _vehicle_scenario(main: Node, scenario: String) -> void:
 	UnderworldDebug.force_report(CrimeManager.CrimeType.CARJACKING)
 	if car != null:
 		UnderworldDebug.mark_vehicle_known(car)
-	await _keep_ahead(60, Vector3(-20.0, 0.5, 44.0))
+	await _keep_ahead(300, kerb + Vector3(4.0, 0.1, 4.0))
 
 	if scenario == "switched_vehicle":
 		# §158 — out of it where nobody is watching, and away on foot.
 		UnderworldDebug.break_line_of_sight()
 		UnderworldDebug.lose_identity()
 		UnderworldDebug.start_search()
-		player.global_position = Vector3(-48.0, 0.5, 62.0)
+		# On foot, a short walk from the car, which stays at the kerb being the
+		# thing the police are still looking for.
+		player.global_position = kerb + Vector3(16.0, 0.1, 9.0)
 		await _wait(90)
 
 
@@ -3032,8 +3091,11 @@ func _foot_pursuit(main: Node) -> void:
 	await _keep_ahead(420, start)
 	UnderworldDebug.force_pursuit()
 	# Let the officers actually get moving before the shutter.
-	await _keep_ahead(300, start)
-	await _regain_sight()
+	# Shorter, then a longer hold: a foot chase frame wants the officers close
+	# enough to read as a chase, and stepping away right up to the shutter left
+	# the street with nobody on it but the player.
+	await _keep_ahead(200, start)
+	await _regain_sight(100)
 
 
 ## The three addresses, from outside and from the back room.
