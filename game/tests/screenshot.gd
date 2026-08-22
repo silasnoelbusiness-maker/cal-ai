@@ -2868,14 +2868,25 @@ func _wanted_scenario(main: Node, scenario: String) -> void:
 			var at: Vector3 = RoadblockManager.positions()[0]
 			# Twenty-six metres due north of a roadblock is not necessarily a
 			# road — on the first render it was the inside of a building, and
-			# the frame came back as empty sky. Walk a ring around the block
-			# and stand on the first side that is open street.
+			# the frame came back as empty sky. So walk a ring around it and
+			# take the open side that faces
+			# furthest into the city. Taking the first side that happened to be
+			# standable once put the camera at the southern boundary, and a
+			# third of the five-star frame was the empty ground past the map.
+			var chosen := Vector3.INF
+			var inward := INF
 			for i in 12:
 				var angle := TAU * float(i) / 12.0
 				var spot := at + Vector3(cos(angle), 0.0, sin(angle)) * 20.0
 				spot.y = 0.6
 				if not _standable(spot):
 					continue
+				var from_edge := spot.length()
+				if from_edge < inward:
+					inward = from_edge
+					chosen = spot
+			if chosen != Vector3.INF:
+				var spot: Vector3 = chosen
 				player.global_position = spot
 				# Standing near the block is not the same as looking at it —
 				# the first night frame was a car park with the roadblock
@@ -2887,7 +2898,6 @@ func _wanted_scenario(main: Node, scenario: String) -> void:
 				# point with a fine on it. Hold position, sidestepping anybody
 				# who gets close enough to reach.
 				await _keep_ahead(90, spot, 5.0)
-				break
 
 
 ## Takes the passers-by off the street, leaving the police on it.
