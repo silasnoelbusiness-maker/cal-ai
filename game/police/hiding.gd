@@ -24,6 +24,9 @@ const HIDING_GROUP := &"hiding_spot"
 ## How near a police unit has to be for entering somewhere in front of them to
 ## count as having been watched.
 const OBSERVED_RANGE := 34.0
+## How near the middle of a room the player has to be for that room to be the
+## one hiding them. Generous — interiors are large — but finite.
+const INTERIOR_REACH := 40.0
 
 
 ## Whether the player is somewhere that hides them at all. True inside an
@@ -33,11 +36,18 @@ static func in_cover(tree: SceneTree) -> bool:
 	if player == null or tree == null:
 		return false
 	# Interiors are the ordinary case: a room the player has walked into is a
-	# room the street cannot see into. Asked of the rooms themselves, which
-	# already track whether the player is standing in them.
+	# room the street cannot see into.
+	#
+	# The room's own flag is asked first and then checked against where the
+	# player actually is. The flag is set by an Area3D, and a test that
+	# teleports the player across the city can leave it saying yes about a room
+	# a hundred metres away — which made standing in the middle of Main Street
+	# count as cover.
 	for node in tree.get_nodes_in_group(&"retail_unit"):
 		var room := node as RetailUnit
-		if room != null and room.is_player_inside():
+		if room == null or not room.is_player_inside():
+			continue
+		if room.global_position.distance_to(player.global_position) <= INTERIOR_REACH:
 			return true
 	for node in tree.get_nodes_in_group(HIDING_GROUP):
 		var area := node as Area3D

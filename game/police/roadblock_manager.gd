@@ -32,7 +32,10 @@ const MAX_DISTANCE_FROM_PLAYER := 260.0
 ## Two blocks this close together are one block with extra cars.
 const MIN_SEPARATION := 70.0
 ## Junction nodes have several ways out; a block belongs on a stretch of road.
-const MAX_SUCCESSORS_FOR_BLOCK := 1
+## Two is still a stretch — lane sampling gives a straight-on and a turning at
+## plenty of ordinary points — while a real junction has three or four, which
+## is what §45 means by not blocking the box.
+const MAX_SUCCESSORS_FOR_BLOCK := 2
 ## Seconds a block stands before it is stood down.
 const LIFETIME := 55.0
 ## How often placement is reconsidered.
@@ -193,13 +196,19 @@ func _too_close_to_existing(position: Vector3) -> bool:
 
 ## A quick look for anything solid where the barrier would stand. Cheap on
 ## purpose: a sphere cast against the world layer, not a survey.
+##
+## The height and the radius both matter. The first pass put a 3.2m sphere a
+## metre off the ground, which hit the carriageway itself at every single node
+## in the city — three hundred candidates, none of them usable, and no
+## roadblock ever placed. It sits at windscreen height now and is only wide
+## enough to catch a wall.
 func _obstructed(position: Vector3) -> bool:
 	var space := get_tree().root.world_3d.direct_space_state
 	var shape := SphereShape3D.new()
-	shape.radius = 3.2
+	shape.radius = 1.4
 	var query := PhysicsShapeQueryParameters3D.new()
 	query.shape = shape
-	query.transform = Transform3D(Basis.IDENTITY, position + Vector3(0.0, 1.0, 0.0))
+	query.transform = Transform3D(Basis.IDENTITY, position + Vector3(0.0, 1.8, 0.0))
 	query.collision_mask = 1
 	query.collide_with_areas = false
 	return not space.intersect_shape(query, 1).is_empty()

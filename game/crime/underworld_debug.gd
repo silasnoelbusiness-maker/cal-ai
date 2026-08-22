@@ -50,9 +50,18 @@ static func break_line_of_sight() -> void:
 
 
 ## Opens a search around wherever the police last had eyes.
+##
+## Drives the real path rather than opening the zone behind everybody's back.
+## The first version called SearchManager.begin() directly, which left
+## WantedManager not escaping and the response manager still in PURSUIT — a
+## search nothing else in the game agreed was happening, and one that being
+## spotted therefore could not end.
 static func start_search() -> void:
 	break_line_of_sight()
-	SearchManager.begin(PoliceMemory.search_origin(), WantedManager.level)
+	if not WantedManager.is_wanted():
+		return
+	WantedManager.call("_begin_escaping")
+	PoliceResponseManager.call("_set_state", PoliceResponseManager.State.SEARCHING)
 
 
 static func clear_wanted() -> void:

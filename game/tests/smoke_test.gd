@@ -12514,7 +12514,7 @@ func _test_fence() -> void:
 	# §63 — and the legitimate items are untouched.
 	if honest != null:
 		_check(
-			int(inventory.call("count_of", honest)) >= 2,
+			int(inventory.call("count_of", honest.id)) >= 2,
 			"while what the player actually bought stays where it was"
 		)
 
