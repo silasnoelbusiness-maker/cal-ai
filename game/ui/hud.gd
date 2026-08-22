@@ -834,6 +834,15 @@ func _build_phase_m_screens() -> void:
 		screen.opened.connect(_on_screen_visibility_changed)
 		screen.closed.connect(_on_screen_visibility_changed)
 
+	# The arrest summary is deliberately not one of those. Every other screen
+	# freezes the game while it is up, and this one must not: the whole of
+	# Phase R rests on the city never stopping — the hours in custody have
+	# already passed, shops have opened and closed and a delivery has landed
+	# while the player was inside. A card that froze the world to tell them
+	# that would be arguing with itself. So it is an overlay the player
+	# dismisses when they have read it, and the world runs behind it.
+	host.add_child(_arrest_summary)
+
 	# The stand beside a car offers COMPARE, and comparing is something the
 	# sales desk screen does, so the two hand off rather than stacking.
 	_vehicle_detail_panel.compare_requested.connect(_on_compare_requested)
@@ -851,7 +860,6 @@ func _phase_m_screens() -> Array:
 		_property_sale_panel, _real_estate_panel,
 		_company_dashboard, _staff_schedule_panel, _manager_panel, _logistics_panel,
 		_branch_finance_panel, _underworld_panel, _contact_panel, _legal_panel,
-		_arrest_summary,
 	]
 
 

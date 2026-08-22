@@ -102,7 +102,8 @@ end never stands between a test and the game.
 | `P` | Open your profile: net worth, vehicles, home, lifestyle |
 | `H` | Open the property portfolio: holdings, mortgages, income |
 | `L` | Open logistics: the depot, its stock, shipments, rounds and vans |
-| `U` | Open the underworld: reputation, contacts, jobs and illegal earnings |
+| `U` | Open the underworld: reputation, contacts, jobs, requests and career |
+| `L` | Open the legal screen: record, cases, court dates and what is owed |
 | Left mouse | Attack with whatever is in your hand · place equipment · place furniture |
 | `R` | Rotate the equipment or furniture being placed |
 
@@ -881,6 +882,75 @@ Illegal money lands in the player's pocket like any other income and is tagged
 by source. That is exactly as far as Phase Q goes: the ledger is preparation
 for laundering, not laundering.
 
+## The game remembers
+
+Phase R is the phase where consequences stop being a fine and start being a
+history. It also turns three contacts who all did the same thing into three
+people with opinions.
+
+### The record
+
+An arrest writes one entry, and one pursuit is one entry — a theft, the escape
+and the robbery at the end of it are a single incident judged at the worst
+thing in it, not three separate marks. From those entries comes one number,
+which everything else reads as a tier. Serious history keeps its full weight
+for months and petty history fades to a residue that never quite disappears,
+and doing the same thing again counts for a little more each time, capped.
+That difference is the whole point: one bad evening and a career should not
+look alike.
+
+Nothing on that side deletes anything. A record is friction — it costs money,
+it costs hours, and it makes some doors heavier — and never demolition. No
+business closes, no property is taken, no vehicle is confiscated and no
+employee resigns because of it.
+
+### Court
+
+A minor arrest is dealt with at the roadside. A serious one opens a case with a
+date four days out, which is long enough that it arrives while the player is
+busy running things — that collision is deliberate. The Civic Court is a door
+on the Civic Hall, deliberately not next to the precinct, and turning up is the
+largest single thing that decides how the hearing goes. Counsel comes in three
+fictional tiers that shift the odds and reduce a fine; none of them buys an
+acquittal, and none can re-roll a case that has been heard. A case resolves
+exactly once, whatever the player does with saves.
+
+Missing a date costs money once, not every hour, and relists the hearing rather
+than letting it lapse.
+
+What cannot be paid — a fine, a release, a court cost — becomes a balance. It
+does not grow, nothing forecloses on it, and a player with nothing in the
+account still walks out.
+
+### What it costs elsewhere
+
+Ordinary work never asks about a record, so a player can always earn. A trusted
+role can decline, and says why. Cheap landlords do not check, which is what
+guarantees a roof; premium ones do, and usually want a larger deposit rather
+than saying no. Lenders ask only on a fresh application — mortgages and loans
+already running are untouched. A serious case the city can pin on the owner
+costs the company a capped slice of reputation that decays over a fortnight,
+and touches nothing else: not cash, not equity, not valuation, not one branch
+in particular.
+
+### The career
+
+Trust is per contact and separate from reputation. Doing three jobs for the
+fence teaches the garage nothing about you. Each contact has a four-rung ladder
+gated on both numbers together, so no single stat farmed in one place opens the
+good work.
+
+Contacts ask for things now. The fence names a line it wants and pays over the
+odds for that part of the load; an ordinary sale still always works, and
+selling them the wrong thing is simply a sale. The garage names a class, or
+once it trusts you a specific car in good enough order — which is the reason
+not to wreck it on the way. Turning up with a wreck gets you told so and an
+ordinary price, because refusing would leave the player holding a hot car with
+nowhere to put it. Requests expire so nothing can be farmed.
+
+A speciality is not chosen. It is whatever has actually been done most of, and
+it is worth a few per cent on that line of work and nothing else.
+
 ## Layout
 
 ```
@@ -1349,6 +1419,36 @@ And the two that matter most for what this game is: a Phase P save loads with
 no crime in it and inherits none of it, and a company keeps trading —
 deliveries landing, shops open, books balancing — while its owner is being
 chased across the city.
+
+Phase R tests what the game now remembers. That a minor arrest leaves a line
+and no court date while a serious one opens both; that three crimes in one
+chase make one incident judged at the worst thing in it, and the next arrest
+starts from nothing; that repeat offending moves the tier, that a second
+offence of a kind counts for more than the first without being catastrophic,
+and that petty history fades while serious history outlasts it and neither is
+ever wiped off. That a hearing cannot be sat before its day, applies its
+outcome exactly once, and still cannot be resolved twice after a reload; that
+missing one costs money once rather than every hour and relists the case rather
+than letting it escape; that better counsel shifts the odds without buying an
+acquittal and cannot re-roll a case already heard; that a balance owed never
+accrues interest and never leaves a broke player stuck.
+
+Then what the record costs elsewhere: that ordinary work never asks, so a
+player can always earn, and a trusted role declines with a reason; that a cheap
+landlord never checks — which is what makes it impossible to be made homeless
+by a record — and a premium one does, usually for a larger deposit rather than
+a refusal; that new borrowing gets harder while existing mortgages are
+untouched; that a small offence does not touch the company at all, a serious
+public one costs a capped slice of reputation, and that slice decays away.
+
+And the career: that trust is per person and teaches nobody else anything; that
+walking away costs more than bad luck, and only with the person let down; that
+a ladder rung needs reputation and trust together and neither alone will do;
+that a filled order pays once while the wrong goods are simply a sale; that a
+wreck does not satisfy a request for a car in one piece; and that a speciality
+comes from what has been done rather than points spent. Plus the migration that
+matters: a save from before Phase R loads with no criminal history invented for
+it and its reputation preserved exactly.
 
 ## What is next
 

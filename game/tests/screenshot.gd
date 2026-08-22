@@ -60,7 +60,13 @@ extends Node
 ##             foot_pursuit, roadblock_night, wanted_cleared, fence_exterior,
 ##             fence_screen, chop_shop, chop_delivery, criminal_contact,
 ##             job_offer, criminal_reputation, underworld_jobs,
-##             business_while_wanted
+##             business_while_wanted, arrest_summary, criminal_record,
+##             active_case, court_reminder, civic_court, case_outcome,
+##             record_tier, premium_refused, financing_refused, scandal_notice,
+##             company_after_scandal, underworld_overview, contact_list,
+##             contact_trust, broker_board, goods_request, vehicle_request,
+##             higher_tier_job, career_progress, income_split,
+##             business_with_court_pending
 ##   distance  camera distance override, for overview shots
 ##   yaw       camera yaw override
 ##   pitch     camera pitch override
@@ -385,6 +391,14 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"chop_shop", "chop_delivery", "criminal_contact", "job_offer", \
 		"criminal_reputation", "underworld_jobs", "business_while_wanted":
 			await _phase_q_scenario(main, scenario)
+
+		"arrest_summary", "criminal_record", "active_case", "court_reminder", \
+		"civic_court", "case_outcome", "record_tier", "premium_refused", \
+		"financing_refused", "scandal_notice", "company_after_scandal", \
+		"underworld_overview", "contact_list", "contact_trust", \
+		"broker_board", "goods_request", "vehicle_request", "higher_tier_job", \
+		"career_progress", "income_split", "business_with_court_pending":
+			await _phase_r_scenario(main, scenario)
 
 		"characters":
 			# The five people the game draws, lined up at reading distance:
@@ -3268,6 +3282,260 @@ func _business_while_wanted(main: Node) -> void:
 	UnderworldDebug.force_report(CrimeManager.CrimeType.CARJACKING)
 	await _wait(180)
 
+	var company: Node = _hud_screen(hud, "CompanyDashboard")
+	company.call("open", CompanyDashboard.Page.LOCATIONS)
+	await _wait(14)
+
+
+# --- Phase R ---------------------------------------------------------------
+
+## The legal and career frames.
+##
+## Every one of these drives the real systems: an arrest is a real arrest, a
+## case is opened by it, and the hearing goes through the one-outcome guard.
+## The tool only decides where the camera stands and which screen is open.
+func _phase_r_scenario(main: Node, scenario: String) -> void:
+	var hud: Node = main.get_node("HUD")
+	EconomyManager.restore(500000)
+	await _wait(90)
+
+	match scenario:
+		"arrest_summary":
+			await _r_arrest_summary(main)
+		"criminal_record", "record_tier":
+			await _r_record(main, scenario)
+		"active_case", "case_outcome":
+			await _r_case(main, scenario)
+		"court_reminder":
+			await _r_court_reminder(main)
+		"civic_court":
+			await _r_civic_court(main)
+		"premium_refused":
+			await _r_premium_refused(main)
+		"financing_refused":
+			await _r_financing_refused(main)
+		"scandal_notice", "company_after_scandal":
+			await _r_scandal(main, scenario)
+		"underworld_overview", "contact_list", "contact_trust", \
+		"broker_board", "goods_request", "vehicle_request", "higher_tier_job", \
+		"career_progress", "income_split":
+			await _r_underworld(main, scenario)
+		"business_with_court_pending":
+			await _r_business_with_court(main)
+
+	await _wait(10)
+
+
+## A record with some weight to it, built out of real arrests.
+func _r_history(serious: int = 3) -> void:
+	LegalManager.clear()
+	for i in serious:
+		LegalDebug.create_arrest(CrimeData.Severity.SEVERE, 4)
+	LegalDebug.create_arrest(CrimeData.Severity.MODERATE, 2)
+
+
+func _r_arrest_summary(main: Node) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	player.global_position = Vector3(-40.0, 0.5, District01.MAIN_ST_Z + 8.0)
+	await _wait(60)
+	# A real pursuit, so the summary lists what a pursuit actually files.
+	for type in [
+		CrimeManager.CrimeType.VEHICLE_THEFT,
+		CrimeManager.CrimeType.HIT_AND_RUN,
+		CrimeManager.CrimeType.ROBBERY,
+	]:
+		UnderworldDebug.force_report(type)
+		await _wait(6)
+	WantedManager.set_level(4)
+	await _wait(20)
+	WantedManager.request_bust()
+	# The summary appears when the arrest finishes, and the HUD opens it.
+	await _wait(int(WantedManager.bust_hold_seconds * 60.0) + 90)
+
+
+func _r_record(main: Node, scenario: String) -> void:
+	var hud: Node = main.get_node("HUD")
+	_r_history(4 if scenario == "record_tier" else 2)
+	await _wait(20)
+	var screen: Node = _hud_screen(hud, "LegalPanel")
+	screen.call("open", LegalPanel.Page.RECORD if scenario == "criminal_record"
+		else LegalPanel.Page.OVERVIEW)
+	await _wait(14)
+
+
+func _r_case(main: Node, scenario: String) -> void:
+	var hud: Node = main.get_node("HUD")
+	LegalManager.clear()
+	LegalDebug.create_case(CrimeManager.CrimeType.ROBBERY, 4)
+	if scenario == "case_outcome":
+		LegalDebug.schedule_court_now()
+		LegalDebug.resolve_court(true)
+	await _wait(20)
+	var screen: Node = _hud_screen(hud, "LegalPanel")
+	screen.call("open", LegalPanel.Page.CASES)
+	await _wait(14)
+
+
+func _r_court_reminder(main: Node) -> void:
+	var player: Node3D = GameManager.player
+	LegalManager.clear()
+	LegalDebug.create_case(CrimeManager.CrimeType.ROBBERY, 4)
+	var case := LegalManager.next_case()
+	if case != null:
+		# The day before, which is when the reminder fires.
+		case.court_day = TimeManager.day_index + 1
+		case.reminder_shown = false
+	player.global_position = Vector3(-40.0, 0.5, District01.MAIN_ST_Z + 8.0)
+	await _wait(30)
+	LegalManager._on_hour_passed(TimeManager.hour)
+	await _wait(20)
+
+
+func _r_civic_court(main: Node) -> void:
+	var player: Node3D = GameManager.player
+	LegalManager.clear()
+	LegalDebug.create_case(CrimeManager.CrimeType.ROBBERY, 4)
+	LegalDebug.schedule_court_now()
+	var doors := get_tree().get_nodes_in_group(&"civic_court")
+	if doors.is_empty():
+		return
+	var door := doors[0] as Node3D
+	player.global_position = door.global_position + Vector3(0.0, 0.5, 9.0)
+	await _wait(60)
+	_look_towards(main, player.global_position, door.global_position)
+	await _wait(20)
+
+
+func _r_premium_refused(main: Node) -> void:
+	var player: Node3D = GameManager.player
+	LegalDebug.set_record_tier(CriminalRecord.Tier.HIGH_RISK)
+	await _wait(20)
+	# Stand outside a premium address and try for it, so the refusal is the
+	# game's own rather than a mocked message.
+	var best: ResidenceProperty = null
+	for node in get_tree().get_nodes_in_group(&"residence"):
+		var home := node as ResidenceProperty
+		if home == null or home.is_leased_by_player():
+			continue
+		if best == null or home.rent_amount > best.rent_amount:
+			best = home
+	if best == null:
+		return
+	player.global_position = best.global_position + Vector3(0.0, 0.5, 6.0)
+	await _wait(40)
+	PropertyManager.lease_residence(best)
+	await _wait(20)
+
+
+func _r_financing_refused(main: Node) -> void:
+	var hud: Node = main.get_node("HUD")
+	LegalDebug.set_record_tier(CriminalRecord.Tier.HIGH_RISK)
+	await _wait(20)
+	var screen: Node = _hud_screen(hud, "RealEstatePanel")
+	screen.call("open")
+	await _wait(14)
+
+
+func _r_scandal(main: Node, scenario: String) -> void:
+	var hud: Node = main.get_node("HUD")
+	var market := _open_shop_at(
+		main, &"unit_main_18", "Interiors/MainStreetUnit", "Silas Market"
+	)
+	BusinessManager.deposit_to_business(market, 40000)
+	market.manual_override = BusinessInstance.Override.FORCE_OPEN
+	market.set_open(true)
+	for i in 4:
+		BusinessManager.simulate_hour_now(market, 12)
+	await _wait(30)
+	LegalManager.clear()
+	LegalDebug.create_case(CrimeManager.CrimeType.ROBBERY, 5)
+	LegalDebug.schedule_court_now()
+	LegalDebug.resolve_court(false)
+	await _wait(30)
+	if scenario == "scandal_notice":
+		# The toast is the frame. Stand in the street to see it land.
+		var player: Node3D = GameManager.player
+		player.global_position = Vector3(-40.0, 0.5, District01.MAIN_ST_Z + 8.0)
+		CompanyManager.apply_owner_scandal(7.0, "Robbery")
+		await _wait(24)
+		return
+	CompanyManager.apply_owner_scandal(7.0, "Robbery")
+	await _wait(20)
+	var screen: Node = _hud_screen(hud, "CompanyDashboard")
+	screen.call("open")
+	await _wait(14)
+
+
+func _r_underworld(main: Node, scenario: String) -> void:
+	var hud: Node = main.get_node("HUD")
+	UnderworldDebug.unlock_all_contacts()
+	UnderworldDebug.set_reputation(64)
+	LegalDebug.set_trust(&"quayside_fence", 58)
+	LegalDebug.set_trust(&"dock_road_garage", 76)
+	LegalDebug.set_trust(&"the_broker", 47)
+	for i in 6:
+		Underworld.career.credit(IllegalJobData.Objective.VEHICLE_DELIVERY)
+	for i in 3:
+		Underworld.career.credit(IllegalJobData.Objective.STOLEN_GOODS_RUN)
+	Underworld.career.requests_filled = 4
+	Underworld.career.best_single_payout = 14200
+	LegalDebug.post_request(&"quayside_fence")
+	LegalDebug.post_request(&"dock_road_garage")
+	LegalDebug.generate_board(&"the_broker")
+	await _wait(30)
+
+	if scenario == "goods_request":
+		var fence: Node = _hud_screen(hud, "ContactPanel")
+		fence.call("open", CriminalContactData.by_id(&"quayside_fence"))
+		await _wait(14)
+		return
+	if scenario == "vehicle_request":
+		var garage: Node = _hud_screen(hud, "ContactPanel")
+		garage.call("open", CriminalContactData.by_id(&"dock_road_garage"))
+		await _wait(14)
+		return
+	if scenario == "broker_board" or scenario == "higher_tier_job":
+		var broker: Node = _hud_screen(hud, "ContactPanel")
+		broker.call("open", CriminalContactData.by_id(&"the_broker"))
+		await _wait(14)
+		return
+
+	var page := UnderworldPanel.Page.STANDING
+	match scenario:
+		"contact_list", "contact_trust":
+			page = UnderworldPanel.Page.CONTACTS
+		"career_progress":
+			page = UnderworldPanel.Page.CAREER
+		"income_split":
+			page = UnderworldPanel.Page.EARNINGS
+		_:
+			page = UnderworldPanel.Page.STANDING
+	var screen: Node = _hud_screen(hud, "UnderworldPanel")
+	screen.call("open", page)
+	await _wait(14)
+
+
+func _r_business_with_court(main: Node) -> void:
+	var hud: Node = main.get_node("HUD")
+	var market := _open_shop_at(
+		main, &"unit_main_18", "Interiors/MainStreetUnit", "Silas Market"
+	)
+	BusinessManager.deposit_to_business(market, 40000)
+	CompanyDebug.stand_up_logistics(market)
+	market.manual_override = BusinessInstance.Override.FORCE_OPEN
+	market.set_open(true)
+	for i in 5:
+		BusinessManager.simulate_hour_now(market, 12)
+	LegalManager.clear()
+	LegalDebug.create_case(CrimeManager.CrimeType.ROBBERY, 4)
+	var case := LegalManager.next_case()
+	if case != null:
+		case.court_day = TimeManager.day_index + 1
+		case.reminder_shown = false
+	await _wait(20)
+	LegalManager._on_hour_passed(TimeManager.hour)
+	await _wait(20)
 	var company: Node = _hud_screen(hud, "CompanyDashboard")
 	company.call("open", CompanyDashboard.Page.LOCATIONS)
 	await _wait(14)
