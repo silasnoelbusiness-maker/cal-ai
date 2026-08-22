@@ -91,6 +91,7 @@ func _rebuild() -> void:
 # --- Money ---------------------------------------------------------------
 
 func _build_money() -> void:
+	_build_eviction_notice()
 	var arrears := _business.total_arrears()
 	if arrears > 0:
 		_body.add_child(ScreenKit.heading("WHAT IT OWES"))
@@ -180,6 +181,52 @@ func _build_money() -> void:
 		_rebuild()
 	)
 	_parts["actions"].add_child(wind_up)
+
+
+## §3 — the notice, at the top of the branch's own money page, where a player
+## looking at a business in trouble will already be. Loud, specific about the
+## amount and the deadline, and offering the four ways out §3 lists: pay,
+## inject capital, close, wind up.
+func _build_eviction_notice() -> void:
+	var unit := _business.property()
+	if unit == null or not unit.is_under_eviction():
+		return
+	var quote := FinanceManager.eviction_quote(unit)
+	if quote.is_empty():
+		return
+	_body.add_child(ScreenKit.heading("EVICTION NOTICE"))
+	_body.add_child(BusinessUIKit.label(
+		"The landlord is taking %s back. Pay what is owed before the deadline "
+		% unit.address
+		+ "and the lease stands. Let it pass and you keep the stock, the "
+		+ "fittings, the staff and the name — but not the address.",
+		13, ScreenKit.BAD
+	))
+	_body.add_child(ScreenKit.row("Business", _business.business_name))
+	_body.add_child(ScreenKit.row("Unit", unit.address))
+	_body.add_child(ScreenKit.row(
+		"Amount required", ScreenKit.money(int(quote["amount"])), true
+	))
+	var days := int(quote["days_left"])
+	_body.add_child(ScreenKit.row(
+		"Deadline", "%d day%s" % [days, "" if days == 1 else "s"], true
+	))
+
+	var pay := BusinessUIKit.button("PAY ARREARS", 160.0)
+	pay.disabled = not bool(quote["affordable"])
+	pay.pressed.connect(func() -> void:
+		FinanceManager.cure_eviction(unit)
+		_rebuild()
+	)
+	_body.add_child(BusinessUIKit.row([
+		BusinessUIKit.stretch_label(
+			"" if bool(quote["affordable"])
+				else "Neither the till nor your pocket covers it.",
+			12, ScreenKit.MUTED
+		),
+		pay,
+	]))
+	_body.add_child(ScreenKit.spacer(10))
 
 
 # --- Closing -------------------------------------------------------------

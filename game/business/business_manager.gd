@@ -1477,6 +1477,69 @@ func reopen_business(business: BusinessInstance) -> bool:
 	return true
 
 
+## The landlord took the premises. §5 and §6: the branch closes and loses its
+## address, and keeps everything else — stock, fittings, staff, brand, history
+## and whatever is in the till. What it needs is somewhere to go.
+##
+## Deliberately not liquidation. Winding the branch up is a decision with money
+## attached and it stays the player's to make; losing a lease is something that
+## happens to them, and it must not also spend their assets for them.
+func evict_business(business: BusinessInstance) -> void:
+	if business == null:
+		return
+	var unit := business.property()
+	close_business(business, "the landlord took the unit back")
+	# The address goes; nothing else does. `property_id` empty is what makes
+	# `needs_premises()` true and keeps the branch out of every sweep that
+	# walks the city looking for a room.
+	business.property_id = &""
+	if unit != null:
+		unit.business_id = &""
+		PropertyManager.end_lease(unit)
+	GameManager.notify(
+		"BUSINESS HAS NO PREMISES\n%s  ·  everything it owns is kept" % (
+			business.business_name.to_upper()
+		),
+		GameManager.Tone.BAD
+	)
+	business_changed.emit(business)
+
+
+## Moves a homeless branch into a unit the player has taken on. The other half
+## of eviction: a business that can never trade again is a deletion with extra
+## steps, and §6 asks for relocation rather than that.
+func relocate_business(
+	business: BusinessInstance, property: CommercialProperty
+) -> bool:
+	if business == null or property == null:
+		return false
+	if not business.needs_premises():
+		return false
+	if not property.is_leased_by_player() or property.business_id != &"":
+		return false
+	if business_for_property(property.property_id) != null:
+		return false
+	var definition := business.type_data()
+	if definition != null and not property.accepts_business(definition):
+		GameManager.notify(
+			"THAT UNIT IS NOT ZONED FOR %s" % definition.display_name.to_upper(),
+			GameManager.Tone.BAD
+		)
+		return false
+	business.property_id = property.property_id
+	property.business_id = business.business_id
+	# Still shut: relocating gives it an address, not a fit-out. The player
+	# reopens it once it has what it needs, exactly as they would a new one.
+	GameManager.notify(
+		"BUSINESS RELOCATED\n%s  ·  %s" % [
+			business.business_name.to_upper(), property.address
+		],
+		GameManager.Tone.GOOD
+	)
+	business_changed.emit(business)
+	return true
+
+
 ## Closure the player did not choose, after the warnings ran out.
 func close_business_for_distress(business: BusinessInstance) -> void:
 	close_business(business, "could not meet its obligations")

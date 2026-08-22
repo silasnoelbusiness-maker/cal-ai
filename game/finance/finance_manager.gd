@@ -15,6 +15,9 @@ extends Node
 signal distress_changed(business: BusinessInstance, state: DistressState.State)
 signal obligation_missed(business: BusinessInstance, kind: Obligation.Kind, amount: int)
 signal business_closed_by_distress(business: BusinessInstance)
+signal eviction_started(property: CommercialProperty)
+signal eviction_cured(property: CommercialProperty)
+signal eviction_completed(property: CommercialProperty)
 signal capital_injected(business: BusinessInstance, amount: int)
 
 ## How far ahead the forecast looks. A week is the cycle rent and loans fall
@@ -22,6 +25,14 @@ signal capital_injected(business: BusinessInstance, amount: int)
 const FORECAST_DAYS := 7
 ## Emergency cover costs a little more than an ordinary shift. §57.
 const BACKUP_WAGE_PREMIUM := 0.15
+
+## Missed rent payments before the landlord serves notice. Three warnings come
+## first — RENT OVERDUE, DEFAULT NOTICE, LEASE AT RISK — so notice is never a
+## surprise, and §2 is explicit that one missed payment must not do this.
+const EVICTION_MISSES := 4
+## Days between the notice and losing the unit. Long enough to sell a car, run
+## a delivery round or borrow, which are the three ways out a player has.
+const EVICTION_CURE_DAYS := 8
 
 var save_id: StringName = &"finance"
 
@@ -32,6 +43,8 @@ var loan_defaults: int = 0
 var businesses_closed: int = 0
 var businesses_liquidated: int = 0
 var properties_foreclosed: int = 0
+## Leased units the landlord took back.
+var evictions: int = 0
 ## Businesses already warned about today, so a distress notice is one line and
 ## not one per hour. §103.
 var _warned_today: Dictionary = {}
@@ -308,6 +321,7 @@ func review_all() -> void:
 
 func _on_day_passed(_day_index: int) -> void:
 	_warned_today.clear()
+	_advance_evictions()
 	for business in BusinessManager.get_businesses():
 		if business.is_closed():
 			continue
@@ -349,12 +363,172 @@ func lease_default_stage(business: BusinessInstance) -> String:
 	var unit := business.property() if business != null else null
 	if unit == null or not unit.has_landlord() or unit.arrears <= 0:
 		return ""
-	var missed := int(float(unit.arrears) / float(maxi(unit.rent_amount, 1)))
+	# A unit nobody is leasing has no tenant to be in default. Arrears can
+	# outlive a lease that was handed back, and reporting them against the
+	# business afterwards would accuse it of owing rent on somewhere it left.
+	if unit.status != CommercialProperty.Status.LEASED:
+		return ""
+	if unit.is_under_eviction():
+		return "EVICTION NOTICE"
+	var missed := unit.missed_rent_payments()
 	if missed >= 3:
 		return "LEASE AT RISK"
 	if missed == 2:
 		return "DEFAULT NOTICE"
 	return "RENT OVERDUE"
+
+
+# --- Eviction ------------------------------------------------------------
+#
+# The oldest unkept promise in the codebase. Arrears have been counted since
+# Phase M and Phase P named the stages; this is the landlord finally acting on
+# them. It is deliberately built in the shape foreclosure already uses — a
+# notice, a deadline, a stated amount to cure and a completion that puts
+# everything inside somewhere safe — because a player who has met one should
+# recognise the other immediately.
+#
+# Two rules it will not break. It applies to leased units only: a unit the
+# player bought has no landlord, and the risk there is the mortgage. And
+# nothing is deleted — §5 lists stock, equipment, employees, brand and history,
+# and the business keeps all five and simply has nowhere to trade from.
+
+## Every unit under notice, for the screens that have to shout about them.
+func evicting_properties() -> Array[CommercialProperty]:
+	var found: Array[CommercialProperty] = []
+	for property in PropertyManager.get_properties():
+		if property.is_under_eviction():
+			found.append(property)
+	return found
+
+
+## What it would take to call the eviction off, and how long is left.
+func eviction_quote(property: CommercialProperty) -> Dictionary:
+	if property == null or not property.is_under_eviction():
+		return {}
+	var business := BusinessManager.business_for_property(property.property_id)
+	var owed := property.arrears
+	var pocket := EconomyManager.cash + (business.cash_balance if business != null else 0)
+	return {
+		"property": property,
+		"address": property.address,
+		"business": business,
+		"business_name": business.business_name if business != null else "",
+		"amount": owed,
+		"days_left": property.days_to_eviction(TimeManager.day_index),
+		"affordable": pocket >= owed,
+	}
+
+
+## Serves notice. Called from the daily sweep, never directly by rent day: the
+## stage before it has to have been shown at least once.
+func _begin_eviction(property: CommercialProperty) -> void:
+	if property == null or property.is_under_eviction() or not property.has_landlord():
+		return
+	property.eviction_day = TimeManager.day_index + EVICTION_CURE_DAYS
+	var business := BusinessManager.business_for_property(property.property_id)
+	GameManager.notify(
+		"EVICTION NOTICE\n%s  ·  $%s in %d days" % [
+			(business.business_name if business != null else property.address).to_upper(),
+			EconomyManager.with_thousands_separator(property.arrears),
+			EVICTION_CURE_DAYS,
+		],
+		GameManager.Tone.BAD
+	)
+	AudioManager.play_ui(&"ui_error")
+	eviction_started.emit(property)
+	if business != null:
+		review(business)
+	SaveManager.autosave("eviction notice")
+
+
+## Paying the arrears. The business pays what it can and the player covers the
+## rest out of their own pocket, because a branch with no money is exactly the
+## branch this happens to and refusing their help would make the notice
+## uncurable for the businesses that need it most.
+func cure_eviction(property: CommercialProperty) -> bool:
+	if property == null or not property.is_under_eviction():
+		return false
+	var owed := property.arrears
+	if owed <= 0:
+		property.eviction_day = -1
+		return true
+	var business := BusinessManager.business_for_property(property.property_id)
+	var from_business := 0
+	if business != null:
+		from_business = mini(owed, maxi(business.cash_balance, 0))
+		if from_business > 0 and not business.debit(
+			from_business, "%s — rent arrears" % property.address, &"rent"
+		):
+			from_business = 0
+	var remainder := owed - from_business
+	if remainder > 0 and not EconomyManager.spend(
+		remainder, "%s — rent arrears" % property.address
+	):
+		# Put back whatever the business already handed over: a half-paid
+		# cure is worse than none, because the money is gone and the notice
+		# still stands.
+		if from_business > 0 and business != null:
+			business.credit(from_business, "Arrears refunded", &"capital")
+		GameManager.notify("YOU CANNOT COVER THE ARREARS", GameManager.Tone.BAD)
+		return false
+
+	property.arrears = 0
+	property.eviction_day = -1
+	GameManager.notify(
+		"EVICTION CANCELLED\n%s  ·  lease in good standing" % property.address.to_upper(),
+		GameManager.Tone.GOOD
+	)
+	AudioManager.play(&"money", AudioBuses.SFX, -8.0)
+	eviction_cured.emit(property)
+	if business != null:
+		review(business)
+	SaveManager.autosave("cured an eviction")
+	return true
+
+
+## The deadline passed. The landlord takes the unit; the business keeps
+## everything it owns and is left needing somewhere to trade from.
+func _complete_eviction(property: CommercialProperty) -> void:
+	if property == null:
+		return
+	var business := BusinessManager.business_for_property(property.property_id)
+	property.eviction_day = -1
+	property.arrears = 0
+	evictions += 1
+	if business != null:
+		BusinessManager.evict_business(business)
+	else:
+		PropertyManager.end_lease(property)
+	GameManager.notify(
+		"UNIT REPOSSESSED\n%s" % property.address.to_upper(), GameManager.Tone.BAD
+	)
+	AudioManager.play(&"shutter", AudioBuses.SFX, -5.0)
+	eviction_completed.emit(property)
+	SaveManager.autosave("lost a lease")
+
+
+## The daily sweep. Serves notice on anything far enough behind, counts down
+## whatever is already under notice, and calls in the ones that ran out.
+func _advance_evictions() -> void:
+	var today := TimeManager.day_index
+	for property in PropertyManager.get_properties():
+		if not property.has_landlord() or property.status != CommercialProperty.Status.LEASED:
+			continue
+		if not property.is_under_eviction():
+			if property.missed_rent_payments() >= EVICTION_MISSES:
+				_begin_eviction(property)
+			continue
+		var left := property.days_to_eviction(today)
+		if left <= 0:
+			_complete_eviction(property)
+			continue
+		GameManager.notify(
+			"EVICTION IN %d DAY%s\n%s  ·  $%s to cure" % [
+				left, "" if left == 1 else "S", property.address.to_upper(),
+				EconomyManager.with_thousands_separator(property.arrears),
+			],
+			GameManager.Tone.BAD
+		)
 
 
 ## A lender calling a loan in is a distress event in its own right, not just
@@ -390,6 +564,7 @@ func clear() -> void:
 	rent_defaults = 0
 	loan_defaults = 0
 	businesses_closed = 0
+	evictions = 0
 	businesses_liquidated = 0
 	properties_foreclosed = 0
 	_warned_today.clear()
@@ -400,6 +575,7 @@ func save_state() -> Dictionary:
 		"missed_wage_runs": missed_wage_runs,
 		"rent_defaults": rent_defaults,
 		"loan_defaults": loan_defaults,
+		"evictions": evictions,
 		"businesses_closed": businesses_closed,
 		"businesses_liquidated": businesses_liquidated,
 		"properties_foreclosed": properties_foreclosed,
@@ -411,6 +587,7 @@ func load_state(state: Dictionary) -> void:
 	missed_wage_runs = int(state.get("missed_wage_runs", 0))
 	rent_defaults = int(state.get("rent_defaults", 0))
 	loan_defaults = int(state.get("loan_defaults", 0))
+	evictions = int(state.get("evictions", 0))
 	businesses_closed = int(state.get("businesses_closed", 0))
 	businesses_liquidated = int(state.get("businesses_liquidated", 0))
 	properties_foreclosed = int(state.get("properties_foreclosed", 0))

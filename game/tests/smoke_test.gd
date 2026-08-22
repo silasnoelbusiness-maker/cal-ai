@@ -302,6 +302,14 @@ func _run() -> void:
 	await _test_logistics_and_crime()
 	_test_logistics_screens_reachable()
 
+	# Phase Q: eviction.
+	_test_lease_default_stages()
+	_test_eviction_notice()
+	_test_eviction_cure()
+	_test_eviction_expiry()
+	_test_owned_property_immune()
+	await _test_eviction_save_load()
+
 	_report()
 
 
@@ -11672,3 +11680,286 @@ func _test_logistics_bottlenecks() -> void:
 		if StringName(issue["id"]) == &"warehouse_empty":
 			after = true
 	_check(not after, "and it clears when there is stock again")
+
+
+# --- Phase Q: eviction ----------------------------------------------------
+
+## A unit the player is really leasing, with a branch trading from it. The
+## earlier phases hand leases back as they close and wind up businesses, so
+## this puts one back rather than quietly skipping every eviction check.
+func _q_leased_unit() -> CommercialProperty:
+	var business := _own_business()
+	if business == null:
+		return null
+	var unit := business.property()
+	if unit == null or not unit.has_landlord():
+		return null
+	if not unit.is_leased_by_player():
+		EconomyManager.restore(60000)
+		PropertyManager.lease(unit)
+		unit.business_id = business.business_id
+	return unit if unit.is_leased_by_player() else null
+
+
+## TEST §2 — the landlord warns three times before doing anything.
+func _test_lease_default_stages() -> void:
+	var business := _own_business()
+	var unit := _q_leased_unit()
+	if business == null or unit == null:
+		return
+	unit.arrears = 0
+	unit.eviction_day = -1
+	_check(
+		FinanceManager.lease_default_stage(business) == "",
+		"a lease that is up to date says nothing"
+	)
+
+	var stages := ["RENT OVERDUE", "DEFAULT NOTICE", "LEASE AT RISK"]
+	for missed in range(1, 4):
+		CompanyDebug.owe_rent(unit, missed)
+		_check(
+			FinanceManager.lease_default_stage(business) == stages[missed - 1],
+			"%d missed payment%s reads %s (%s)" % [
+				missed, "" if missed == 1 else "s", stages[missed - 1],
+				FinanceManager.lease_default_stage(business),
+			]
+		)
+		_check(
+			not unit.is_under_eviction(),
+			"and nobody is taking the unit back yet"
+		)
+
+	# §2 — one missed payment must never repossess.
+	CompanyDebug.owe_rent(unit, 1)
+	FinanceManager.call("_advance_evictions")
+	_check(
+		not unit.is_under_eviction(),
+		"one missed payment does not put a unit under notice"
+	)
+	unit.arrears = 0
+
+
+## TEST §3 — notice, with an amount and a deadline.
+func _test_eviction_notice() -> void:
+	var business := _own_business()
+	var unit := _q_leased_unit()
+	if business == null or unit == null:
+		return
+	unit.eviction_day = -1
+	_notifications.clear()
+
+	CompanyDebug.owe_rent(unit, FinanceManager.EVICTION_MISSES)
+	_check(
+		unit.missed_rent_payments() >= FinanceManager.EVICTION_MISSES,
+		"%d missed payments is enough" % FinanceManager.EVICTION_MISSES
+	)
+	FinanceManager.call("_advance_evictions")
+
+	_check(unit.is_under_eviction(), "the landlord serves notice")
+	_check(
+		unit.days_to_eviction(TimeManager.day_index) > 0,
+		"with a deadline in the future (%d days)" % unit.days_to_eviction(TimeManager.day_index)
+	)
+	_check(
+		FinanceManager.lease_default_stage(business) == "EVICTION NOTICE",
+		"and the branch card says EVICTION NOTICE"
+	)
+	_check(_said("EVICTION"), "the player is told")
+
+	var quote := FinanceManager.eviction_quote(unit)
+	_check(int(quote["amount"]) == unit.arrears, "the notice states what is owed")
+	_check(
+		int(quote["amount"]) > 0 and int(quote["amount"]) < 1000000,
+		"which is the arrears, not an invented figure ($%d)" % int(quote["amount"])
+	)
+	_check(
+		FinanceManager.evicting_properties().has(unit),
+		"and the company screen can see it"
+	)
+	# The shop stops being able to trade only when it loses the unit, not now.
+	_check(not business.needs_premises(), "the branch still has its address")
+
+
+## TEST §4 — paying calls it off.
+func _test_eviction_cure() -> void:
+	var business := _own_business()
+	var unit := _q_leased_unit()
+	if business == null or unit == null or not unit.is_under_eviction():
+		return
+	var owed := unit.arrears
+	EconomyManager.restore(owed + 30000)
+	CompanyDebug.set_cash(business, 0)
+	var before := EconomyManager.cash
+	var owned_units := PropertyManager.leased_by_player().size()
+
+	_check(FinanceManager.cure_eviction(unit), "the arrears can be paid")
+	_check(EconomyManager.cash == before - owed, "the money leaves, once")
+	_check(not unit.is_under_eviction(), "the notice is withdrawn")
+	_check(unit.arrears == 0, "the lease is in good standing")
+	_check(
+		FinanceManager.lease_default_stage(business) == "",
+		"and the branch card stops shouting"
+	)
+	_check(
+		PropertyManager.leased_by_player().size() == owned_units,
+		"the player keeps the unit"
+	)
+	_check(not business.needs_premises(), "and the business keeps its address")
+	_check(
+		business.property_id == unit.property_id,
+		"which is the one it always had"
+	)
+
+
+## TEST §5 and §6 — the deadline passing costs the address and nothing else.
+func _test_eviction_expiry() -> void:
+	var business := _own_business()
+	var unit := _q_leased_unit()
+	if business == null or unit == null:
+		return
+	# Something to lose: stock, fittings, staff, a brand and some history.
+	# The cure test drains the till on purpose, so put money back before
+	# ordering — an assertion that nothing was lost is worth nothing if there
+	# was nothing there to lose.
+	EconomyManager.restore(80000)
+	BusinessManager.deposit_to_business(business, 20000)
+	CompanyDebug.stock_up(business, 40)
+	if business.employees.is_empty():
+		CompanyDebug.hire(business, EmployeeData.Role.CASHIER, 0.7)
+	var stock_before := business.storage_used()
+	_check(stock_before > 0, "the branch has stock to lose (%d units)" % stock_before)
+	var fittings_before := business.equipment.size()
+	var staff_before := business.employees.size()
+	var brand_before := business.brand_id
+	var history_before := business.lifetime_revenue
+	var cash_before := business.cash_balance
+	var count_before := BusinessManager.get_businesses().size()
+
+	CompanyDebug.evict(unit)
+	_check(unit.is_under_eviction(), "a notice is outstanding")
+	CompanyDebug.expire_eviction(unit)
+
+	_check(not unit.is_under_eviction(), "the deadline passes")
+	_check(unit.is_vacant(), "and the landlord has the unit back")
+	_check(
+		BusinessManager.business_for_property(unit.property_id) == null,
+		"nobody is trading from it"
+	)
+
+	# §5 — nothing is silently deleted.
+	_check(
+		BusinessManager.get_businesses().size() == count_before,
+		"the business is still on the books"
+	)
+	_check(business.needs_premises(), "but it has nowhere to trade from")
+	_check(business.is_closed(), "so it is shut")
+	_check(
+		business.storage_used() == stock_before,
+		"it keeps its stock (%d units)" % business.storage_used()
+	)
+	_check(business.equipment.size() == fittings_before, "and its fittings")
+	_check(business.employees.size() == staff_before, "and its people")
+	_check(business.brand_id == brand_before, "and its brand")
+	_check(business.lifetime_revenue == history_before, "and its history")
+	_check(business.cash_balance == cash_before, "and whatever was in the till")
+	_check(
+		not business.can_open(),
+		"it cannot open without premises (%s)" % ", ".join(business.missing_requirements())
+	)
+	_check(
+		business.missing_requirements().has("Premises"),
+		"and says so in as many words"
+	)
+	_check(FinanceManager.evictions >= 1, "the company counts the eviction")
+
+	# §6 — and it can be given a new address rather than only wound up.
+	var vacant: CommercialProperty = null
+	for candidate in PropertyManager.get_properties():
+		if candidate.is_vacant() and candidate.accepts_business(business.type_data()):
+			vacant = candidate
+			break
+	if vacant != null:
+		EconomyManager.restore(60000)
+		PropertyManager.lease(vacant)
+		_check(
+			BusinessManager.relocate_business(business, vacant),
+			"a homeless branch can be moved into another unit"
+		)
+		_check(
+			business.property_id == vacant.property_id,
+			"and it trades from there now"
+		)
+		_check(not business.needs_premises(), "with an address again")
+		_check(
+			BusinessManager.business_for_property(vacant.property_id) == business,
+			"which the city agrees about"
+		)
+
+
+## TEST §7 — a unit the player owns has no landlord to be evicted by.
+func _test_owned_property_immune() -> void:
+	var owned: CommercialProperty = null
+	for property in PropertyManager.get_properties():
+		if property.owned_by_player:
+			owned = property
+			break
+	if owned == null:
+		# Buy one, so the check is real rather than skipped.
+		EconomyManager.restore(400000)
+		for listing in RealEstate.listings():
+			RealEstate.discover(listing.property_id)
+			if RealEstate.buy_with_cash(listing.property_id) != RealEstate.BuyResult.OK:
+				continue
+			owned = PropertyManager.by_id(listing.property_id)
+			if owned != null:
+				break
+	if owned == null:
+		return
+
+	_check(not owned.has_landlord(), "a unit you own has no landlord")
+	owned.arrears = owned.rent_amount * (FinanceManager.EVICTION_MISSES + 4)
+	FinanceManager.call("_advance_evictions")
+	_check(
+		not owned.is_under_eviction(),
+		"so no arrears figure can put it under notice"
+	)
+	_check(
+		RealEstate.owns(owned.property_id) or owned.owned_by_player,
+		"and it is still the player's"
+	)
+	owned.arrears = 0
+
+
+## TEST §8 — a notice survives a save and a load, and does not fire twice.
+func _test_eviction_save_load() -> void:
+	var unit := _q_leased_unit()
+	if unit == null:
+		var business := _own_business()
+		unit = business.property() if business != null else null
+	if unit == null or not unit.has_landlord():
+		return
+	CompanyDebug.evict(unit)
+	if not unit.is_under_eviction():
+		return
+	var owed := unit.arrears
+	var deadline := unit.eviction_day
+	var evictions_before := FinanceManager.evictions
+
+	_check(SaveManager.save_to_slot(8), "a notice can be saved")
+	_check(SaveManager.load_from_slot(8), "and loaded back")
+	await _settle(6)
+
+	var after := PropertyManager.by_id(unit.property_id)
+	_check(after != null, "the unit comes back")
+	if after != null:
+		_check(after.is_under_eviction(), "still under notice")
+		_check(after.arrears == owed, "owing the same ($%d)" % after.arrears)
+		_check(after.eviction_day == deadline, "with the same deadline")
+	_check(
+		FinanceManager.evictions == evictions_before,
+		"and loading did not evict anybody by itself"
+	)
+	if after != null:
+		EconomyManager.restore(after.arrears + 20000)
+		FinanceManager.cure_eviction(after)
+	SaveManager.delete_slot(8)

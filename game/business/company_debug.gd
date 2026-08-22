@@ -329,6 +329,34 @@ static func default_business_loan(business: BusinessInstance, loan: Loan) -> voi
 		BusinessManager.call("_collect_loan_payments")
 
 
+# --- Phase Q: eviction ----------------------------------------------------
+
+## Puts a leased unit far enough behind on its rent to be served notice,
+## without waiting a month of game days for it.
+static func owe_rent(property: CommercialProperty, payments: int) -> void:
+	if property == null or not property.has_landlord():
+		return
+	property.arrears = property.rent_amount * maxi(payments, 0)
+	property.next_rent_due_day = TimeManager.day_index
+
+
+## Serves the notice now, through the real path so the test exercises what the
+## game does rather than a flag it sets itself.
+static func evict(property: CommercialProperty) -> void:
+	if property == null:
+		return
+	owe_rent(property, FinanceManager.EVICTION_MISSES)
+	FinanceManager.call("_begin_eviction", property)
+
+
+## Runs the deadline out. The landlord takes it on the next sweep.
+static func expire_eviction(property: CommercialProperty) -> void:
+	if property == null or not property.is_under_eviction():
+		return
+	property.eviction_day = TimeManager.day_index
+	FinanceManager.call("_advance_evictions")
+
+
 # --- Single-purpose pokes -------------------------------------------------
 
 ## Forces a rush, or clears one. §132 asks for this; nothing else sets it.

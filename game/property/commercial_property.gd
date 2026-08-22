@@ -65,9 +65,12 @@ enum SizeClass { SMALL, MEDIUM, LARGE }
 @export var status: Status = Status.VACANT
 @export var tenant_id: StringName = &""
 @export var next_rent_due_day: int = -1
-## Rent that could not be collected. Nothing evicts on it yet; the number exists
-## so eviction has something to read when it arrives.
+## Rent that could not be collected. Phase Q is when this finally means
+## something: past enough missed payments the landlord serves notice.
 @export var arrears: int = 0
+## Day the landlord takes the unit back, once notice has been served. -1 when
+## there is no notice outstanding, which is the ordinary case.
+@export var eviction_day: int = -1
 ## The business trading from here, if any. Kept as a hint for the save file; the
 ## live answer always comes from BusinessManager.
 @export var business_id: StringName = &""
@@ -236,6 +239,29 @@ func days_until_rent() -> int:
 	return maxi(next_rent_due_day - TimeManager.day_index, 0)
 
 
+## Whether the landlord has served notice on this unit.
+##
+## Only ever true for a leased unit with a landlord. A unit the player owns
+## has nobody to be evicted by — the risk there is the mortgage, and confusing
+## the two would take a building off somebody who had already bought it.
+func is_under_eviction() -> bool:
+	return eviction_day >= 0 and has_landlord()
+
+
+## Days left to find the arrears. Zero means the deadline is today.
+func days_to_eviction(today: int) -> int:
+	return maxi(eviction_day - today, 0) if is_under_eviction() else 0
+
+
+## How many rent payments have been missed, from the arrears and the rent.
+## Derived rather than counted separately: two numbers that must agree is two
+## numbers that eventually will not.
+func missed_rent_payments() -> int:
+	if rent_amount <= 0:
+		return 0
+	return int(float(arrears) / float(rent_amount))
+
+
 # --- Leasing -------------------------------------------------------------
 
 ## Signs the lease. The money has already been taken by PropertyManager, which
@@ -245,6 +271,7 @@ func begin_lease(new_tenant: StringName) -> void:
 	tenant_id = new_tenant
 	next_rent_due_day = TimeManager.day_index + rent_interval_days
 	arrears = 0
+	eviction_day = -1
 	_refresh_prompt()
 	leased.emit(new_tenant)
 
@@ -270,6 +297,7 @@ func end_lease() -> void:
 	tenant_id = &""
 	business_id = &""
 	next_rent_due_day = -1
+	eviction_day = -1
 	_refresh_prompt()
 	_refresh_sign()
 	lease_ended.emit()
@@ -359,6 +387,7 @@ func save_state() -> Dictionary:
 		"tenant": String(tenant_id),
 		"next_rent_due_day": next_rent_due_day,
 		"arrears": arrears,
+		"eviction_day": eviction_day,
 		"rent_amount": rent_amount,
 		"deposit": deposit,
 		"business_id": String(business_id),
@@ -370,6 +399,9 @@ func load_state(state: Dictionary) -> void:
 	tenant_id = StringName(state.get("tenant", String(tenant_id)))
 	next_rent_due_day = int(state.get("next_rent_due_day", next_rent_due_day))
 	arrears = int(state.get("arrears", arrears))
+	# A save from before eviction existed has no notice outstanding, which is
+	# the right answer rather than a default that evicts somebody on load.
+	eviction_day = int(state.get("eviction_day", -1))
 	rent_amount = int(state.get("rent_amount", rent_amount))
 	deposit = int(state.get("deposit", deposit))
 	business_id = StringName(state.get("business_id", String(business_id)))

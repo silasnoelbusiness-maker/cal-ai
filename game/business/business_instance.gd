@@ -639,6 +639,12 @@ func missing_requirements() -> Array[String]:
 	var definition := type_data()
 	if definition == null:
 		return ["Unknown business type"]
+	# A branch that lost its lease keeps everything except an address, and a
+	# shop with no address cannot open however well stocked it is. Listing it
+	# here rather than special-casing closure means every screen that already
+	# says what a business is missing says this too.
+	if needs_premises():
+		return ["Premises"]
 	for role in definition.required_roles:
 		if count_of_role(int(role)) <= 0:
 			var label := String(EquipmentData.Role.keys()[int(role)]).capitalize()
@@ -1253,6 +1259,12 @@ func reputation_multiplier() -> float:
 ## that ends cannot leave a business pointing at a property it no longer has.
 func property() -> CommercialProperty:
 	return PropertyManager.by_id(property_id)
+
+
+## Whether the branch has nowhere to trade from. True only after an eviction:
+## a business is founded in a unit, so an empty property_id means it lost one.
+func needs_premises() -> bool:
+	return property_id == &""
 
 
 ## What the address itself is worth in trade: the pitch and the part of town.
