@@ -2812,15 +2812,26 @@ func _wanted_scenario(main: Node, scenario: String) -> void:
 	}
 	var level: int = int(wanted.get(scenario, 1))
 
-	player.global_position = Vector3(0.0, 0.5, 40.0)
+	# Main Street, which is where the earlier crime frames were composed and is
+	# a street rather than the blank apron behind the precinct — the first
+	# attempt drifted onto that and photographed nothing.
+	var start := Vector3(-40.0, 0.5, District01.MAIN_ST_Z + 8.0)
+	player.global_position = start
 	await _wait(60)
-	# Enough crimes to reach the level honestly.
+	# Enough crimes to reach the level honestly, climbing one rung at a time.
+	#
+	# The ladder has to start small. Vehicle theft is worth twenty points and
+	# two stars begin at twenty, so opening with it can never produce a
+	# one-star frame — the first shot came back showing two. Shoplifting is
+	# the only crime under the second threshold, so it is the bottom rung, and
+	# each rung after it is chosen to land inside the next band rather than
+	# jump over it: 10, 30, 55, 85, 120 against thresholds 0/20/40/70/110.
 	var crimes := [
+		CrimeManager.CrimeType.SHOPLIFTING,
 		CrimeManager.CrimeType.VEHICLE_THEFT,
+		CrimeManager.CrimeType.ASSAULT,
+		CrimeManager.CrimeType.BURGLARY,
 		CrimeManager.CrimeType.CARJACKING,
-		CrimeManager.CrimeType.STORE_ROBBERY,
-		CrimeManager.CrimeType.ROBBERY,
-		CrimeManager.CrimeType.STORE_ROBBERY,
 	]
 	for i in crimes.size():
 		if WantedManager.level >= level:
@@ -2831,8 +2842,11 @@ func _wanted_scenario(main: Node, scenario: String) -> void:
 		WantedManager.set_level(level)
 
 	# The police answer the call themselves — the same dispatch the game uses,
-	# given long enough to arrive.
-	await _wait(220)
+	# given long enough to arrive. Long enough is the operative word: the first
+	# version waited 220 frames, under four real seconds, and photographed a
+	# street the units had not reached yet.
+	await _keep_ahead(600, start)
+	await _regain_sight()
 	# Roadblocks need a moment to find a node they are happy with.
 	if level >= RoadblockManager.MIN_LEVEL:
 		for attempt in 4:
@@ -2848,15 +2862,120 @@ func _wanted_scenario(main: Node, scenario: String) -> void:
 			await _wait(60)
 
 
+## How near an officer may get before the tool steps the player away.
+const EVADE_RANGE := 9.0
+## How far that step goes, and how far from where the scene started the player
+## is allowed to drift while taking it.
+##
+## The leash is short on purpose. A long one let the player back away street
+## after street until the frame was the front door of the police precinct
+## rather than the response it was composed for, so the evasion stays inside
+## the block the camera is pointed at.
+const EVADE_STEP := 14.0
+const EVADE_LEASH := 16.0
+
+
+## Waiting out a police response without being arrested at the end of it.
+##
+## A player who stands perfectly still while four units converge is arrested,
+## and an arrest clears the wanted level — which is the one thing these frames
+## exist to show. The first attempt at the star frames came back with BUSTED
+## across the middle of them for exactly that reason.
+##
+## Nothing here makes the player un-arrestable. The police run their real
+## pursuit against a target that keeps moving, which is what a player at four
+## stars is doing anyway; the tool just supplies the moving. The step is always
+## directly away from whoever is closest, and a leash keeps it from wandering
+## out of the streets the camera is framing.
+func _keep_ahead(frames: int, start: Vector3) -> void:
+	var player: Node3D = GameManager.player
+	if player == null:
+		await _wait(frames)
+		return
+	var waited := 0
+	while waited < frames:
+		await _wait(8)
+		waited += 8
+		var closest: Node3D = null
+		var nearest := INF
+		for node in get_tree().get_nodes_in_group(&"police"):
+			var unit := node as Node3D
+			if unit == null or not is_instance_valid(unit):
+				continue
+			var away := unit.global_position.distance_to(player.global_position)
+			if away < nearest:
+				nearest = away
+				closest = unit
+		if closest == null or nearest > EVADE_RANGE:
+			continue
+		# Straight-away is the obvious step and the wrong one, because the leash
+		# can clamp it back past the officer it was running from. Eight
+		# directions are tried instead and the one that ends up furthest from
+		# them — after the leash has had its say — wins.
+		var best := player.global_position
+		var best_gap := nearest
+		for i in 8:
+			var angle := TAU * float(i) / 8.0
+			var step := Vector3(cos(angle), 0.0, sin(angle)) * EVADE_STEP
+			var candidate: Vector3 = player.global_position + step
+			candidate = start + (candidate - start).limit_length(EVADE_LEASH)
+			candidate.y = start.y
+			if not _can_step_to(player.global_position, candidate):
+				continue
+			var gap := candidate.distance_to(closest.global_position)
+			if gap > best_gap:
+				best_gap = gap
+				best = candidate
+		player.global_position = best
+
+
+## Whether a step is somewhere the player could actually have walked to.
+##
+## Without this the search happily picked a point inside the building on the
+## north side of the street, and a body placed inside a wall is pushed out
+## through the floor: the five-star frame came back as empty grey sky with the
+## player somewhere underneath the city.
+##
+## Two questions, both asked of the physics the game already has. Is there a
+## wall between here and there, and is there any ground once you arrive.
+func _can_step_to(from: Vector3, to: Vector3) -> bool:
+	var player: Node3D = GameManager.player
+	if player == null:
+		return false
+	var space := player.get_world_3d().direct_space_state
+	var eye := Vector3(0.0, 1.0, 0.0)
+	var across := PhysicsRayQueryParameters3D.create(from + eye, to + eye)
+	across.exclude = [player.get_rid()]
+	if not space.intersect_ray(across).is_empty():
+		return false
+	var down := PhysicsRayQueryParameters3D.create(
+		to + Vector3(0.0, 3.0, 0.0), to - Vector3(0.0, 2.0, 0.0)
+	)
+	down.exclude = [player.get_rid()]
+	return not space.intersect_ray(down).is_empty()
+
+
+## The last beat before the shutter on a pursuit frame.
+##
+## Stepping away breaks line of sight, and a broken line of sight is the state
+## the HUD calls ESCAPING — so a frame taken immediately after a step shows a
+## countdown rather than the chase it was composed for. This gives the officers
+## a moment to close the gap and see the player again, which is short enough
+## that nobody gets near arresting distance.
+func _regain_sight() -> void:
+	await _wait(40)
+
+
 ## Breaking away, the search that follows, and the moment it runs out.
 func _search_scenario(main: Node, scenario: String) -> void:
 	var player: Node3D = GameManager.player
 	var hud: Node = main.get_node("HUD")
-	player.global_position = Vector3(0.0, 0.5, 40.0)
+	var start := Vector3(-40.0, 0.5, District01.MAIN_ST_Z + 8.0)
+	player.global_position = start
 	await _wait(60)
 	UnderworldDebug.force_report(CrimeManager.CrimeType.STORE_ROBBERY)
 	UnderworldDebug.force_report(CrimeManager.CrimeType.CARJACKING)
-	await _wait(150)
+	await _keep_ahead(420, start)
 
 	# Away from them, then out of sight.
 	player.global_position = Vector3(-58.0, 0.5, 66.0)
@@ -2891,7 +3010,7 @@ func _vehicle_scenario(main: Node, scenario: String) -> void:
 	UnderworldDebug.force_report(CrimeManager.CrimeType.CARJACKING)
 	if car != null:
 		UnderworldDebug.mark_vehicle_known(car)
-	await _wait(60)
+	await _keep_ahead(60, Vector3(-20.0, 0.5, 44.0))
 
 	if scenario == "switched_vehicle":
 		# §158 — out of it where nobody is watching, and away on foot.
@@ -2905,14 +3024,16 @@ func _vehicle_scenario(main: Node, scenario: String) -> void:
 ## §117 — officers coming after somebody who left the car behind.
 func _foot_pursuit(main: Node) -> void:
 	var player: Node3D = GameManager.player
-	player.global_position = Vector3(0.0, 0.5, 30.0)
+	var start := Vector3(-40.0, 0.5, District01.MAIN_ST_Z + 8.0)
+	player.global_position = start
 	await _wait(60)
 	UnderworldDebug.force_report(CrimeManager.CrimeType.ROBBERY)
 	UnderworldDebug.force_report(CrimeManager.CrimeType.ASSAULT)
-	await _wait(180)
+	await _keep_ahead(420, start)
 	UnderworldDebug.force_pursuit()
 	# Let the officers actually get moving before the shutter.
-	await _wait(150)
+	await _keep_ahead(300, start)
+	await _regain_sight()
 
 
 ## The three addresses, from outside and from the back room.
