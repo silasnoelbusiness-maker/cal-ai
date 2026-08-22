@@ -573,6 +573,11 @@ func bottleneck_report(limit: int = 8, at_hour: int = -1) -> Array[Dictionary]:
 			row["business"] = business
 			row["business_name"] = business.business_name
 			found.append(row)
+	# The depot's problems belong in the same list as the kitchen's. A company
+	# whose vans are all out is held up exactly as surely as one whose cook
+	# cannot keep up, and a player who has to look in two places for that is a
+	# player who looks in one.
+	found.append_array(LogisticsManager.bottlenecks())
 	found.sort_custom(func(a, b): return float(a["severity"]) > float(b["severity"]))
 	return found.slice(0, maxi(limit, 1))
 

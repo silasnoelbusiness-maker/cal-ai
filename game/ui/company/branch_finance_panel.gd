@@ -115,8 +115,13 @@ func _build_money() -> void:
 	_body.add_child(ScreenKit.spacer(8))
 	_body.add_child(ScreenKit.heading("WHAT IS COMING"))
 	for entry in FinanceManager.obligations_for(_business):
+		# "Rent · Rent — 88 Central Boulevard" says rent twice. When the label
+		# already opens with what kind of thing it is, the label is enough.
+		var kind := entry.kind_name()
+		var described := entry.label if entry.label.begins_with(kind) \
+			else "%s  ·  %s" % [kind, entry.label]
 		_body.add_child(ScreenKit.row(
-			"%s  ·  %s" % [entry.kind_name(), entry.label],
+			described,
 			"%s%s" % [
 				ScreenKit.money(entry.amount),
 				"  ·  %s late" % ScreenKit.money(entry.overdue) if entry.is_overdue() else "",

@@ -282,6 +282,7 @@ func _run() -> void:
 	_test_hq_terminals()
 	_test_auto_replenish()
 	_test_delivery_route()
+	_test_logistics_bottlenecks()
 	_test_manager_backup()
 	_test_short_handed_shop()
 	_test_no_backup()
@@ -11633,3 +11634,41 @@ func _test_short_handed_shop() -> void:
 		not shop.short_handed_roles(12).has(EmployeeData.Role.CASHIER),
 		"paying them puts it right"
 	)
+
+
+## TEST §66 — a depot's problems appear in the company's own operations
+## report, not in a second list nobody opens.
+func _test_logistics_bottlenecks() -> void:
+	_p_setup()
+	var warehouse := _p_warehouse()
+	if warehouse == null:
+		return
+	var held := {}
+	for id: StringName in warehouse.stock.keys():
+		held[id] = warehouse.held(id)
+		warehouse.take(id, warehouse.held(id))
+
+	var issues := LogisticsManager.bottlenecks()
+	var empty_found := false
+	for issue in issues:
+		if StringName(issue["id"]) == &"warehouse_empty":
+			empty_found = true
+	_check(empty_found, "an empty depot is a logistics problem")
+
+	var reported := false
+	for issue in CompanyManager.bottleneck_report(20):
+		if StringName(issue["id"]) == &"warehouse_empty":
+			reported = true
+	_check(reported, "and it reaches the company's operations report")
+	_check(
+		not CompanyManager.bottleneck_report(20).is_empty(),
+		"which is the same list the kitchen problems go in"
+	)
+
+	for id: StringName in held:
+		warehouse.add(id, int(held[id]))
+	var after := false
+	for issue in LogisticsManager.bottlenecks():
+		if StringName(issue["id"]) == &"warehouse_empty":
+			after = true
+	_check(not after, "and it clears when there is stock again")

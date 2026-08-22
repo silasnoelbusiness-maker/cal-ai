@@ -2295,8 +2295,11 @@ func _phase_p_scenario(main: Node, scenario: String) -> void:
 		"logistics_bottlenecks":
 			await _logistics_screen(main, scenario)
 
-		"company_van", "delivery_driver", "warehouse_delivery":
+		"company_van", "warehouse_delivery":
 			await _delivery_in_the_street(main, scenario)
+
+		"delivery_driver":
+			await _the_driver(main)
 
 		"branch_transfer":
 			await _branch_to_branch(main)
@@ -2352,12 +2355,21 @@ func _logistics_screen(main: Node, scenario: String) -> void:
 			route.departure_hour = 7
 
 	if scenario == "logistics_bottlenecks":
-		# A depot that cannot keep up: nearly empty, with branches asking.
-		for id: StringName in warehouse.stock.keys():
-			warehouse.take(id, warehouse.held(id) - 4)
+		# A depot that cannot keep up. Four shipments booked and nothing free
+		# to drive them, an empty depot behind them, and a branch with a bare
+		# store room at the other end — three different logistics problems,
+		# which is what the report is for.
 		if branch != null:
+			for run in 4:
+				LogisticsManager.request_transfer(
+					TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+					TransferOrder.Place.BUSINESS, branch.business_id,
+					{&"bottled_water": 6}
+				)
 			for id: StringName in branch.storage.keys():
 				branch.take_storage(id, branch.storage_of(id))
+		for id: StringName in warehouse.stock.keys():
+			warehouse.take(id, warehouse.held(id))
 
 	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
 	await _wait(30)
@@ -2414,22 +2426,84 @@ func _delivery_in_the_street(main: Node, scenario: String) -> void:
 	var depot_door := PropertyManager.by_id(&"warehouse_dock_14")
 	if depot_door != null:
 		player.global_position = depot_door.global_position + Vector3(0.0, 0.6, -4.0)
-	await _wait(150)
 
+	# Wait for the van to appear rather than for a fixed number of frames: it
+	# is spawned by the review tick, and a fixed wait either catches nothing
+	# or catches the delivery already finished.
+	var van := await _wait_for_van(order, player)
+	if van == null:
+		return
 	if scenario == "warehouse_delivery":
 		# Let it get down the road, so the frame is a van in traffic rather
-		# than a van still at the kerb.
-		await _wait(240)
+		# than a van still at the kerb — then follow it again, because it has
+		# moved and the player has not.
+		await _wait(90)
+		van = await _wait_for_van(order, player)
+	await _wait(20)
 
-	# Follow it. The van is the real one the logistics layer put on the road;
-	# all this does is stand the player where they can see it, which is what a
-	# player who wanted to watch their own delivery would do anyway.
+
+## The person who drives the van: a real employee, on a real rota, hired into
+## the role Phase P added. §29.
+func _the_driver(main: Node) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	var market := BusinessManager.get_businesses()[0]
+	CompanyDebug.stand_up_logistics(market)
+	var driver := CompanyFleet.free_driver(TimeManager.hour)
+	if driver == null:
+		for worker in market.employees:
+			if worker.role == EmployeeData.Role.DELIVERY_DRIVER:
+				driver = worker
+				break
+	if driver == null:
+		return
+	# A working week rather than the round-the-clock shift the debug hire
+	# gives, so the rota reads like a rota.
+	driver.clear_shifts()
+	driver.set_weekly_shifts([
+		ShiftSlot.make(
+			8, 17, EmployeeData.Role.DELIVERY_DRIVER, ShiftSlot.EVERY_DAY,
+			market.business_id
+		),
+	])
+	# Out on a run, so the screen shows somebody with a job on rather than an
+	# empty week.
+	var branch := _second_branch(main)
+	if branch != null:
+		var made := LogisticsManager.request_transfer(
+			TransferOrder.Place.WAREHOUSE,
+			LogisticsManager.primary_warehouse().warehouse_id,
+			TransferOrder.Place.BUSINESS, branch.business_id, {&"bottled_water": 30}
+		)
+		if made["order"] != null:
+			LogisticsManager.dispatch_transfer(made["order"], null, driver)
+
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	await _wait(150)
+	var rota: Node = _hud_screen(hud, "StaffSchedulePanel")
+	rota.call("open", driver)
+	await _wait(14)
+
+
+## Stands the player behind whichever van the logistics layer put on the road
+## for this shipment, once there is one. The van is real and nothing here
+## places it; all this does is put the camera where a player who wanted to
+## watch their own delivery would be standing.
+func _wait_for_van(order: TransferOrder, player: Node3D) -> Vehicle:
 	var traffic := LogisticsManager.traffic
-	var van := traffic.van_for(order.transfer_id) if traffic != null else null
-	if van != null:
-		var behind := van.global_transform * Vector3(0.0, 0.0, 5.5)
-		player.global_position = Vector3(behind.x, van.global_position.y + 0.6, behind.z)
-		await _wait(45)
+	if traffic == null:
+		return null
+	for attempt in 40:
+		var van := traffic.van_for(order.transfer_id)
+		if van != null:
+			var behind: Vector3 = van.global_transform * Vector3(0.0, 0.0, 6.0)
+			player.global_position = Vector3(
+				behind.x, van.global_position.y + 0.9, behind.z
+			)
+			await _wait(20)
+			return traffic.van_for(order.transfer_id)
+		await _wait(15)
+	return null
 
 
 ## Two shops of the player's own, moving stock between them without the depot
@@ -2512,6 +2586,16 @@ func _distress_scenario(main: Node, scenario: String) -> void:
 	var branch := _second_branch(main)
 	var patient: BusinessInstance = branch if branch != null else market
 
+	# A morning's trade behind the figures, so the forecast is forecasting
+	# something rather than reading zero across the board.
+	for business in [market, branch]:
+		if business == null:
+			continue
+		business.manual_override = BusinessInstance.Override.FORCE_OPEN
+		business.set_open(true)
+		for i in 5:
+			BusinessManager.simulate_hour_now(business, 12)
+
 	match scenario:
 		"business_warning", "wages_overdue":
 			CompanyDebug.set_cash(patient, 60)
@@ -2552,6 +2636,11 @@ func _distress_scenario(main: Node, scenario: String) -> void:
 				BranchFinancePanel.Page.LIQUIDATE if scenario == "liquidation_screen"
 					else BranchFinancePanel.Page.CLOSE
 			)
+		"wages_overdue", "rent_overdue":
+			# The branch's own money page, which names what is owed and to
+			# whom, rather than the company card that only totals it.
+			var owed: Node = _hud_screen(hud, "BranchFinancePanel")
+			owed.call("open", patient)
 		_:
 			var company: Node = _hud_screen(hud, "CompanyDashboard")
 			company.call("open", CompanyDashboard.Page.LOCATIONS)
