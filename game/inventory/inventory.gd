@@ -53,6 +53,18 @@ func has_stolen_goods() -> bool:
 	return stolen_count() > 0
 
 
+## Every stack of unpaid goods, as {"item", "quantity"}. What a fence needs to
+## price a sale before making it — the arrest takes them without asking, but
+## somebody buying them has to say what they are worth first.
+func stolen_stacks() -> Array[Dictionary]:
+	var found: Array[Dictionary] = []
+	for slot in get_slots():
+		if slot.stolen <= 0 or slot.item == null:
+			continue
+		found.append({"item": slot.item, "quantity": slot.stolen})
+	return found
+
+
 ## Drops every unpaid item and leaves the legitimate ones. Returns how many were
 ## taken. Used by the arrest.
 func remove_stolen() -> int:

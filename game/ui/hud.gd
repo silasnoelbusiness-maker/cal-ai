@@ -53,6 +53,8 @@ var _manager_panel: ManagerPanel = null
 ## Phase P: the company's distribution.
 var _logistics_panel: LogisticsPanel = null
 var _branch_finance_panel: BranchFinancePanel = null
+var _underworld_panel: UnderworldPanel = null
+var _contact_panel: ContactPanel = null
 var _property_sale_panel: PropertySalePanel = null
 var _real_estate_panel: RealEstatePanel = null
 @onready var _store_panel: PanelContainer = %StorePanel
@@ -366,6 +368,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			_logistics_panel.open()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("underworld"):
+		if _underworld_panel.is_open():
+			close_screens()
+		else:
+			close_screens()
+			_underworld_panel.open()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("company"):
 		if _company_dashboard.is_open():
 			close_screens()
@@ -486,6 +496,12 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 			_company_dashboard.open()
 		&"logistics":
 			_logistics_panel.open()
+		&"underworld":
+			_underworld_panel.open()
+		&"underworld_contact":
+			var door := context as CriminalContactPoint
+			if door != null:
+				_contact_panel.open(door.contact())
 		&"company_staff":
 			_company_dashboard.open(CompanyDashboard.Page.EMPLOYEES)
 		&"manager":
@@ -732,6 +748,10 @@ func _build_phase_m_screens() -> void:
 	_logistics_panel.name = "LogisticsPanel"
 	_branch_finance_panel = BranchFinancePanel.new()
 	_branch_finance_panel.name = "BranchFinancePanel"
+	_underworld_panel = UnderworldPanel.new()
+	_underworld_panel.name = "UnderworldPanel"
+	_contact_panel = ContactPanel.new()
+	_contact_panel.name = "ContactPanel"
 	_property_sale_panel = PropertySalePanel.new()
 	_property_sale_panel.name = "PropertySalePanel"
 	_real_estate_panel = RealEstatePanel.new()
@@ -758,7 +778,7 @@ func _phase_m_screens() -> Array:
 		_furniture_store_panel, _furnishing_panel, _home_storage_panel, _profile_panel,
 		_property_sale_panel, _real_estate_panel,
 		_company_dashboard, _staff_schedule_panel, _manager_panel, _logistics_panel,
-		_branch_finance_panel,
+		_branch_finance_panel, _underworld_panel, _contact_panel,
 	]
 
 
