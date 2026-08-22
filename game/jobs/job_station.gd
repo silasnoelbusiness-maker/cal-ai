@@ -74,7 +74,10 @@ func _perform(interactor: Node3D) -> void:
 	var stats: PlayerStats = interactor.call("get_stats")
 	stats.add_energy(-job.energy_cost)
 
-	EconomyManager.deposit(job.pay, "Shift — %s" % job.title)
+	EconomyManager.deposit(
+		job.pay, "Shift — %s" % job.title,
+		EconomyManager.Source.LEGAL, EconomyManager.Stream.EMPLOYMENT
+	)
 	_shifts_worked_today += 1
 	_refresh_prompt()
 

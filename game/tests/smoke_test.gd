@@ -5005,6 +5005,19 @@ func _test_empire_and_crime() -> void:
 	# business, not the door happening to be open at whatever hour it now is.
 	# So this asks the stronger question — do they still trade afterwards.
 	_check(BusinessManager.owned_count() == 2, "both businesses survive the arrest")
+	_check(
+		market.property() != null and coffee.property() != null,
+		"and keep their premises"
+	)
+	# Restocked again for the same reason the test restocks above: the hours in
+	# custody are real trading hours and the shelves were sold through while the
+	# player was inside. That is §99 working. What is being asked here is
+	# whether the business still functions afterwards.
+	for ingredient: StringName in [&"coffee_beans", &"milk_carton", &"paper_cup"]:
+		coffee.add_storage(ingredient, 12)
+	market.add_storage(&"bottled_water", 30)
+	for shelf in market.shelves():
+		market.stock_shelf(shelf.slot_id, &"bottled_water", shelf.room_left())
 	var market_after := market.revenue_today
 	var coffee_after := coffee.revenue_today
 	BusinessManager.simulate_hour_now(market, 12)
@@ -13782,6 +13795,35 @@ func _test_income_statistics() -> void:
 	_check(
 		EconomyManager.illegal_income == illegal_before + 700,
 		"and a fence payout is (%d)" % EconomyManager.illegal_income
+	)
+	# §92 — the four streams are kept apart, not just legal against illegal.
+	var wages := EconomyManager.income_from(EconomyManager.Stream.EMPLOYMENT)
+	EconomyManager.deposit(
+		300, "Shift", EconomyManager.Source.LEGAL, EconomyManager.Stream.EMPLOYMENT
+	)
+	_check(
+		EconomyManager.income_from(EconomyManager.Stream.EMPLOYMENT) == wages + 300,
+		"employment income is counted on its own (%d)"
+		% EconomyManager.income_from(EconomyManager.Stream.EMPLOYMENT)
+	)
+	var rent := EconomyManager.income_from(EconomyManager.Stream.RENTAL)
+	EconomyManager.deposit(
+		450, "Rent", EconomyManager.Source.LEGAL, EconomyManager.Stream.RENTAL
+	)
+	_check(
+		EconomyManager.income_from(EconomyManager.Stream.RENTAL) == rent + 450,
+		"and so is rent received (%d)"
+		% EconomyManager.income_from(EconomyManager.Stream.RENTAL)
+	)
+	# Anything from crime lands in the illegal stream whatever the caller says,
+	# so the two figures can never drift apart.
+	var illegal_stream := EconomyManager.income_from(EconomyManager.Stream.ILLEGAL)
+	EconomyManager.deposit(
+		200, "Chop", EconomyManager.Source.CRIME, EconomyManager.Stream.BUSINESS
+	)
+	_check(
+		EconomyManager.income_from(EconomyManager.Stream.ILLEGAL) == illegal_stream + 200,
+		"crime money is illegal income however it is filed"
 	)
 	# §93 — it spends the same. Nothing launders anything.
 	_check(EconomyManager.cash > 0, "illegal money is spendable cash like any other")

@@ -131,6 +131,8 @@ func save_to_slot(slot: int = 1) -> bool:
 			"cash": EconomyManager.cash,
 			"income": EconomyManager.total_income,
 			"expenses": EconomyManager.total_expenses,
+			"illegal": EconomyManager.illegal_income,
+			"lifetime": EconomyManager.lifetime_for_save(),
 		},
 		"entities": _collect_entities(),
 	}
@@ -218,6 +220,11 @@ func _apply_payload(payload: Dictionary) -> void:
 		int(economy.get("cash", EconomyManager.cash)),
 		int(economy.get("income", EconomyManager.total_income)),
 		int(economy.get("expenses", EconomyManager.total_expenses))
+	)
+	# The lifetime split is Phase R's; a save without it simply has none, and
+	# the figures start from whatever this session earns.
+	EconomyManager.restore_lifetime(
+		economy.get("lifetime", {}), int(economy.get("illegal", 0))
 	)
 
 	var entities: Dictionary = payload.get("entities", {})

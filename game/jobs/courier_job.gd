@@ -118,7 +118,10 @@ func _on_destination_reached(marker: MapMarker) -> void:
 	_bonus_deadline = -1.0
 	_runs_completed += 1
 
-	EconomyManager.deposit(fee + bonus, "Courier delivery")
+	EconomyManager.deposit(
+		fee + bonus, "Courier delivery",
+		EconomyManager.Source.LEGAL, EconomyManager.Stream.EMPLOYMENT
+	)
 	# A run takes a few minutes of the day whatever else happens, so the job
 	# cannot be farmed by driving in circles between two neighbouring markers.
 	TimeManager.advance_minutes(8)

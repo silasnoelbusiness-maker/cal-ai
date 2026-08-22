@@ -428,12 +428,26 @@ func _build_earnings() -> void:
 	_body.add_child(ScreenKit.row("Total", ScreenKit.money(total), true))
 
 	_body.add_child(ScreenKit.spacer(8))
-	_body.add_child(ScreenKit.heading("AND THE LEGITIMATE SIDE"))
-	# §93 — the two figures side by side is the whole point of tracking them
-	# separately, and the comparison is the player's own business.
-	var legal := maxi(EconomyManager.total_income - total, 0)
-	_body.add_child(ScreenKit.row("Legal income", ScreenKit.money(legal)))
-	_body.add_child(ScreenKit.row("Illegal income", ScreenKit.money(total)))
+	_body.add_child(ScreenKit.heading("WHERE YOUR MONEY HAS COME FROM"))
+	# §92 — the four streams side by side. §93 — none of this launders
+	# anything; the money all spends the same and only the record differs.
+	for stream: EconomyManager.Stream in [
+		EconomyManager.Stream.EMPLOYMENT,
+		EconomyManager.Stream.BUSINESS,
+		EconomyManager.Stream.RENTAL,
+		EconomyManager.Stream.ILLEGAL,
+	]:
+		_body.add_child(ScreenKit.row(
+			EconomyManager.stream_name(stream),
+			ScreenKit.money(EconomyManager.income_from(stream)),
+			stream == EconomyManager.Stream.ILLEGAL
+		))
+	var other := EconomyManager.income_from(EconomyManager.Stream.OTHER)
+	if other > 0:
+		_body.add_child(ScreenKit.row("Other", ScreenKit.money(other)))
+	_body.add_child(ScreenKit.row(
+		"Everything, ever", ScreenKit.money(EconomyManager.total_income), true
+	))
 	_body.add_child(BusinessUIKit.label(
 		"Both spend the same. Only one of them is safe.", 12, ScreenKit.MUTED
 	))

@@ -222,7 +222,10 @@ func withdraw_from_business(business: BusinessInstance, amount: int) -> Transfer
 		return TransferResult.INVALID_AMOUNT
 	if not business.debit(amount, "Owner drawing", &"drawing"):
 		return TransferResult.NOT_ENOUGH_FUNDS
-	EconomyManager.deposit(amount, "%s — owner drawing" % business.business_name)
+	EconomyManager.deposit(
+		amount, "%s — owner drawing" % business.business_name,
+		EconomyManager.Source.LEGAL, EconomyManager.Stream.BUSINESS
+	)
 	funds_transferred.emit(business, -amount)
 	return TransferResult.OK
 

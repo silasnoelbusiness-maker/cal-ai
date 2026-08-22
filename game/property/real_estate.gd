@@ -942,7 +942,10 @@ func _collect_rent(tenant: TenantData) -> void:
 	var owed := tenant.rent_amount * (1 + tenant.missed_payments)
 	tenant.missed_payments = 0
 	tenant.payment_state = TenantData.PaymentState.CURRENT
-	EconomyManager.deposit(owed, "%s — rental income" % record.address)
+	EconomyManager.deposit(
+		owed, "%s — rental income" % record.address,
+		EconomyManager.Source.LEGAL, EconomyManager.Stream.RENTAL
+	)
 	_rent_collected += owed
 	_rent_today += owed
 	rent_received.emit(record, owed)
