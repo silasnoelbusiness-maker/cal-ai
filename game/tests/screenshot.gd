@@ -1910,17 +1910,31 @@ func _phase_n_scenario(main: Node, scenario: String) -> void:
 			await _wait(14)
 
 
-## Winds one of the property screens down to its last section.
+## Winds a screen down to its last section. The screenshot tool has no mouse
+## wheel, and several of these lists say the interesting part last — the
+## discount under a bulk order, the last row of a property's figures.
 func _scroll_to_bottom(panel: Node) -> void:
+	var scroll: ScrollContainer = null
 	var list: Node = panel.get("_list")
-	if list == null:
-		return
-	var scroll := (list as Node).get_parent() as ScrollContainer
+	if list != null:
+		scroll = (list as Node).get_parent() as ScrollContainer
+	if scroll == null:
+		scroll = _find_scroll(panel)
 	if scroll == null:
 		return
 	await _wait(4)
 	scroll.scroll_vertical = int(scroll.get_v_scroll_bar().max_value)
-	await _wait(4)
+	await _wait(6)
+
+
+func _find_scroll(node: Node) -> ScrollContainer:
+	for child in node.get_children():
+		if child is ScrollContainer:
+			return child
+		var deeper := _find_scroll(child)
+		if deeper != null:
+			return deeper
+	return null
 
 
 ## Puts the player on the pavement in front of an address, facing its door.
@@ -2395,6 +2409,10 @@ func _logistics_screen(main: Node, scenario: String) -> void:
 	await _wait(14)
 	if queued != null and scenario == "shipment_queued":
 		await _wait(6)
+	if scenario == "bulk_order":
+		# The discount is the whole point of this frame and it sits below the
+		# fold, so scroll the screen the way a player reading it would.
+		await _scroll_to_bottom(screen)
 
 
 ## A van actually on the road between the depot and a shop, with the player
