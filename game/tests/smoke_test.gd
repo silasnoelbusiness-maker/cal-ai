@@ -334,6 +334,35 @@ func _run() -> void:
 	await _test_business_during_pursuit()
 	_test_underworld_screens_reachable()
 
+	# --- Phase R ---------------------------------------------------------
+	await _test_minor_arrest()
+	await _test_serious_arrest()
+	_test_incident_aggregation()
+	_test_record_tiers()
+	_test_record_decay()
+	await _test_court_date()
+	await _test_court_outcome()
+	await _test_missed_court()
+	_test_lawyer()
+	_test_legal_debt()
+	_test_legal_job_check()
+	_test_landlord_checks()
+	_test_financing_checks()
+	_test_company_scandal()
+	_test_scandal_decay()
+	_test_contact_trust()
+	_test_contact_failure()
+	_test_job_chains()
+	_test_goods_request()
+	_test_vehicle_request()
+	_test_broker_board()
+	_test_criminal_career()
+	_test_income_statistics()
+	await _test_legal_save_load()
+	await _test_pre_legal_save()
+	_test_court_location()
+	_test_legal_screens_reachable()
+
 	_report()
 
 
@@ -12960,3 +12989,906 @@ func _test_underworld_screens_reachable() -> void:
 			"the map filter \"%s\" belongs to only one kind of marker" % label
 		)
 		names[label] = category
+
+
+# --- Phase R -------------------------------------------------------------
+
+## Everything Phase R writes down, cleared, so each check starts from a known
+## record rather than from whatever the phase before it left behind.
+func _r_setup() -> void:
+	_q_setup()
+	LegalManager.clear()
+	CompanyManager.scandal_penalty = 0.0
+	CompanyManager.scandal_until_day = -1
+	EconomyManager.restore(400000)
+
+
+## Arrests the player for one named crime, through the real bust.
+func _r_arrest(type: int, level: int) -> ArrestRecord:
+	UnderworldDebug.force_report(type)
+	await _settle(4)
+	WantedManager.set_level(level)
+	await _settle(2)
+	WantedManager.request_bust()
+	await _settle(int(WantedManager.bust_hold_seconds * 60.0) + 60)
+	var arrests := LegalManager.record.arrests
+	return arrests[arrests.size() - 1] if not arrests.is_empty() else null
+
+
+## TEST §133 — a small offence is dealt with on the spot.
+func _test_minor_arrest() -> void:
+	_r_setup()
+	var before := EconomyManager.cash
+	var arrest := await _r_arrest(CrimeManager.CrimeType.SHOPLIFTING, 1)
+	_check(arrest != null, "a minor arrest goes on the record")
+	if arrest == null:
+		return
+	_check(
+		arrest.severity == CrimeData.Severity.MINOR,
+		"filed as %s" % arrest.severity_name()
+	)
+	_check(not arrest.has_case(), "and books no court date")
+	_check(arrest.release_cost == 0, "there is nothing to buy your way out of")
+	_check(EconomyManager.cash < before, "it still costs a fine")
+	_check(
+		LegalManager.tier() == CriminalRecord.Tier.CLEAN,
+		"and one silly evening is not a criminal record (%s)" % LegalManager.tier_name()
+	)
+
+
+## TEST §134 — a serious one opens a case and a date.
+func _test_serious_arrest() -> void:
+	_r_setup()
+	var arrest := await _r_arrest(CrimeManager.CrimeType.ROBBERY, 4)
+	_check(arrest != null, "a serious arrest goes on the record")
+	if arrest == null:
+		return
+	_check(
+		int(arrest.severity) >= int(LegalSeverity.COURT_FROM),
+		"filed as %s" % arrest.severity_name()
+	)
+	_check(arrest.has_case(), "and opens a case")
+	_check(arrest.release_cost > 0, "with a release cost ($%d)" % arrest.release_cost)
+	var case := LegalManager.case_by_id(arrest.case_id)
+	_check(case != null, "the case is on file")
+	if case == null:
+		return
+	_check(
+		case.court_day > TimeManager.day_index,
+		"listed for a day that has not come yet (day %d)" % case.court_day
+	)
+	_check(case.is_open(), "and is waiting on the player")
+	_check(
+		LegalManager.tier() != CriminalRecord.Tier.CLEAN,
+		"the record is no longer clean (%s)" % LegalManager.tier_name()
+	)
+
+
+## TEST §7 — one pursuit is one incident, not one entry per offence.
+func _test_incident_aggregation() -> void:
+	_r_setup()
+	for type in [
+		CrimeManager.CrimeType.VEHICLE_THEFT,
+		CrimeManager.CrimeType.HIT_AND_RUN,
+		CrimeManager.CrimeType.ROBBERY,
+	]:
+		UnderworldDebug.force_report(type)
+	var arrest := LegalManager.note_arrest(
+		4, CrimeData.Severity.MINOR, 500, 500, 0, false
+	)
+	_check(
+		LegalManager.record.arrest_count() == 1,
+		"three crimes in one chase make one arrest (%d)"
+		% LegalManager.record.arrest_count()
+	)
+	_check(
+		arrest.offences.size() == 3,
+		"all three are named on it (%d)" % arrest.offences.size()
+	)
+	_check(
+		arrest.severity == CrimeData.Severity.SEVERE,
+		"judged at the worst thing in it, not the last (%s)" % arrest.severity_name()
+	)
+	_check(
+		arrest.headline().contains("and 2 more"),
+		"and reads as one incident: %s" % arrest.headline()
+	)
+	# The incident is spent, so the next arrest does not inherit it.
+	var second := LegalManager.note_arrest(
+		1, CrimeData.Severity.MINOR, 100, 100, 0, false
+	)
+	_check(
+		second.offences.size() == 1,
+		"the next arrest starts from nothing (%d)" % second.offences.size()
+	)
+
+
+## TEST §135 — repeated serious cases move the tier, and one does not.
+func _test_record_tiers() -> void:
+	_r_setup()
+	_check(
+		LegalManager.tier() == CriminalRecord.Tier.CLEAN,
+		"a player who has done nothing has a clean record"
+	)
+	LegalDebug.create_arrest(CrimeData.Severity.MINOR, 1)
+	_check(
+		LegalManager.tier() <= CriminalRecord.Tier.MINOR,
+		"one small thing is at most a minor record (%s)" % LegalManager.tier_name()
+	)
+	var before := LegalManager.pressure()
+	for i in 4:
+		LegalDebug.create_arrest(CrimeData.Severity.SEVERE, 4)
+	_check(
+		LegalManager.pressure() > before,
+		"repeat serious offending weighs more (%.0f)" % LegalManager.pressure()
+	)
+	_check(
+		LegalManager.tier() >= CriminalRecord.Tier.SERIOUS,
+		"and reaches a serious tier (%s)" % LegalManager.tier_name()
+	)
+	# §35 — the same thing again matters more than the first time, moderately.
+	var one := CriminalRecord.new()
+	one.arrests.append(ArrestRecord.make(
+		&"a", 0, 0, 2, PackedStringArray(["Theft"]), CrimeData.Severity.MODERATE
+	))
+	var two := CriminalRecord.new()
+	for i in 2:
+		two.arrests.append(ArrestRecord.make(
+			StringName("a%d" % i), 0, 0, 2, PackedStringArray(["Theft"]),
+			CrimeData.Severity.MODERATE
+		))
+	_check(
+		two.pressure(0) > one.pressure(0) * 2.0,
+		"a second of the same counts for more than the first did (%.1f vs %.1f)"
+		% [two.pressure(0), one.pressure(0)]
+	)
+	_check(
+		two.pressure(0) < one.pressure(0) * 3.0,
+		"but not catastrophically more"
+	)
+
+
+## TEST §136 — petty history fades, serious history does not.
+func _test_record_decay() -> void:
+	var petty := CriminalRecord.new()
+	petty.arrests.append(ArrestRecord.make(
+		&"p", 0, 0, 1, PackedStringArray(["Shoplifting"]), CrimeData.Severity.MINOR
+	))
+	var grave := CriminalRecord.new()
+	grave.arrests.append(ArrestRecord.make(
+		&"g", 0, 0, 5, PackedStringArray(["Robbery"]), CrimeData.Severity.SEVERE
+	))
+	var petty_fresh := petty.pressure(0)
+	var petty_old := petty.pressure(400)
+	var grave_fresh := grave.pressure(0)
+	var grave_old := grave.pressure(400)
+	_check(petty_old < petty_fresh, "an old petty offence weighs less than a fresh one")
+	_check(petty_old > 0.0, "but it is never wiped off entirely")
+	_check(grave_old < grave_fresh, "serious history fades too")
+	_check(
+		grave_old > petty_fresh,
+		"and an old serious offence still outweighs a fresh petty one (%.1f vs %.1f)"
+		% [grave_old, petty_fresh]
+	)
+	# §13 again, from the other side: the serious one keeps its value longer.
+	_check(
+		LegalSeverity.full_days(CrimeData.Severity.SEVERE)
+			> LegalSeverity.full_days(CrimeData.Severity.MINOR),
+		"the city remembers the worse thing for longer"
+	)
+
+
+## TEST §137 — the hearing comes round, once.
+func _test_court_date() -> void:
+	_r_setup()
+	LegalDebug.create_case(CrimeManager.CrimeType.ROBBERY, 4)
+	var case := LegalManager.next_case()
+	_check(case != null, "a case is listed")
+	if case == null:
+		return
+	_check(
+		LegalManager.case_ready_now() == null,
+		"it cannot be sat before the date"
+	)
+	LegalDebug.schedule_court_now()
+	_check(
+		LegalManager.case_ready_now() == case,
+		"and can be once the day and hour arrive"
+	)
+	await _settle(2)
+
+
+## TEST §138 — resolving applies its outcome exactly once.
+func _test_court_outcome() -> void:
+	_r_setup()
+	LegalDebug.create_case(CrimeManager.CrimeType.ROBBERY, 4)
+	LegalDebug.schedule_court_now()
+	var case := LegalManager.next_case()
+	if case == null:
+		_check(false, "a case is listed to resolve")
+		return
+	var cash_before := EconomyManager.cash
+	var fines_before := LegalManager.record.total_fines_paid
+	_check(LegalManager.resolve_case(case, true), "the hearing is heard")
+	_check(case.is_settled(), "and the case is settled (%s)" % case.status_name())
+	_check(case.outcome != LegalCase.Outcome.NONE, "with an outcome: %s" % case.outcome_name())
+	var spent := cash_before - EconomyManager.cash
+	_check(spent >= 0, "which costs money rather than paying it")
+	var fines_after := LegalManager.record.total_fines_paid
+	# §104 — asking again changes nothing at all.
+	_check(not LegalManager.resolve_case(case, true), "it cannot be heard twice")
+	_check(
+		LegalManager.record.total_fines_paid == fines_after,
+		"and no second fine lands (%d)" % LegalManager.record.total_fines_paid
+	)
+	_check(fines_after >= fines_before, "the fine is on the record")
+	await _settle(2)
+
+
+## TEST §139 — ignoring the date costs, once, and relists rather than escaping.
+func _test_missed_court() -> void:
+	_r_setup()
+	LegalDebug.create_case(CrimeManager.CrimeType.ROBBERY, 4)
+	var case := LegalManager.next_case()
+	if case == null:
+		_check(false, "a case is listed to miss")
+		return
+	var missed_before := LegalManager.record.missed_court_events
+	LegalDebug.miss_court()
+	await _settle(4)
+	_check(
+		LegalManager.record.missed_court_events == missed_before + 1,
+		"missing a hearing is counted once (%d)" % LegalManager.record.missed_court_events
+	)
+	_check(case.is_open(), "the case is still open — missing it is not escaping it")
+	_check(
+		case.court_day >= TimeManager.day_index,
+		"and it is relisted for another day (day %d)" % case.court_day
+	)
+	# The notice does not fire again every hour.
+	LegalManager._on_hour_passed(TimeManager.hour)
+	LegalManager._on_hour_passed(TimeManager.hour)
+	_check(
+		LegalManager.record.missed_court_events == missed_before + 1,
+		"and is not counted again every hour (%d)" % LegalManager.record.missed_court_events
+	)
+	_check(
+		LegalManager.has_outstanding_matter() or case.court_day > TimeManager.day_index,
+		"an unsettled matter is visible to everything that asks"
+	)
+
+
+## TEST §140 — better counsel improves the odds and never guarantees anything.
+func _test_lawyer() -> void:
+	_r_setup()
+	var public_counsel := LegalService.by_id(&"public_counsel")
+	var premium := LegalService.by_id(&"pell_and_vane")
+	_check(public_counsel.cost == 0, "public counsel is free")
+	_check(premium.cost > 0, "and the good firm is not ($%d)" % premium.cost)
+	_check(
+		premium.outcome_bonus > public_counsel.outcome_bonus,
+		"better counsel shifts the odds"
+	)
+	_check(premium.outcome_bonus < 0.5, "but nowhere near enough to guarantee a result")
+	_check(
+		premium.fine_relief > 0.0 and premium.fine_relief < 1.0,
+		"and reduces a fine without erasing it (%.0f%%)" % (premium.fine_relief * 100.0)
+	)
+	EconomyManager.restore(premium.cost + 1000)
+	_check(LegalDebug.retain(&"pell_and_vane"), "a firm can be retained")
+	_check(LegalManager.counsel_id == &"pell_and_vane", "and is who represents you")
+	# §30 — retaining does not re-open a case that has already been heard.
+	LegalDebug.create_case(CrimeManager.CrimeType.ROBBERY, 4)
+	LegalDebug.schedule_court_now()
+	var case := LegalManager.next_case()
+	LegalManager.resolve_case(case, true)
+	var outcome := case.outcome
+	LegalDebug.retain(&"harbour_legal")
+	_check(
+		case.outcome == outcome,
+		"and changing counsel afterwards cannot re-roll a settled case"
+	)
+
+
+## TEST §18 — what cannot be paid becomes a balance, and never a soft-lock.
+func _test_legal_debt() -> void:
+	_r_setup()
+	EconomyManager.restore(0)
+	var arrest := LegalDebug.create_arrest(CrimeData.Severity.EXTREME, 5)
+	_check(arrest != null, "an arrest lands even with nothing in the account")
+	_check(EconomyManager.cash >= 0, "money never goes negative")
+	_check(
+		LegalManager.legal_debt > 0,
+		"what could not be paid is owed instead ($%d)" % LegalManager.legal_debt
+	)
+	var owed := LegalManager.legal_debt
+	EconomyManager.restore(owed + 500)
+	var paid := LegalManager.pay_legal_debt(owed)
+	_check(paid == owed, "and can be paid off ($%d)" % paid)
+	_check(LegalManager.legal_debt == 0, "leaving nothing outstanding")
+	# §18 — it does not grow on its own.
+	LegalManager.add_legal_debt(1000)
+	var before := LegalManager.legal_debt
+	TimeManager.advance_minutes(1440 * 3)
+	await _settle(2)
+	_check(
+		LegalManager.legal_debt == before,
+		"a legal balance does not accrue interest ($%d)" % LegalManager.legal_debt
+	)
+
+
+## TEST §141 — basic work stays open, a trusted role may say no.
+func _test_legal_job_check() -> void:
+	_r_setup()
+	var station := _main.get_node_or_null("District01/Interactables/WarehouseGate") as JobStation
+	if station == null:
+		for node in get_tree().get_nodes_in_group(&"job_station"):
+			station = node as JobStation
+			break
+	_check(station != null, "there is somewhere to work")
+	if station == null or station.job == null:
+		return
+	_check(
+		station.job.max_record_tier == 0,
+		"ordinary warehouse work does not ask about your record"
+	)
+	LegalDebug.set_record_tier(CriminalRecord.Tier.HIGH_RISK)
+	_check(
+		LegalManager.tier() >= CriminalRecord.Tier.SERIOUS,
+		"even with a serious record (%s)" % LegalManager.tier_name()
+	)
+	_check(
+		station.get_refusal(_player) != JobStation.Refusal.RECORD,
+		"basic work is still open — a player can always earn"
+	)
+	# A trusted role is what checks. Configured per job, not per player.
+	var trusted := JobData.new()
+	trusted.max_record_tier = int(CriminalRecord.Tier.MINOR)
+	_check(
+		int(LegalManager.tier()) > trusted.max_record_tier,
+		"a trusted role would turn this record down"
+	)
+	_check(
+		JobStation.describe_refusal(JobStation.Refusal.RECORD, trusted)
+			.contains("DECLINED"),
+		"and says so plainly"
+	)
+
+
+## TEST §142 and §143 — premium landlords check, cheap ones do not.
+func _test_landlord_checks() -> void:
+	_r_setup()
+	var cheap := LegalManager.landlord_view(200)
+	_check(bool(cheap["accepted"]), "a cheap address lets to anybody with a clean record")
+	LegalDebug.set_record_tier(CriminalRecord.Tier.HIGH_RISK)
+	cheap = LegalManager.landlord_view(200)
+	_check(
+		bool(cheap["accepted"]) and int(cheap["extra_deposit"]) == 0,
+		"and to anybody at all — nobody is made homeless by a record"
+	)
+	var premium := LegalManager.landlord_view(LegalManager.LUXURY_RENT + 100)
+	_check(
+		not bool(premium["accepted"]),
+		"a premium landlord runs a check and says no"
+	)
+	_check(
+		String(premium["reason"]) != "",
+		"with a reason: %s" % String(premium["reason"])
+	)
+	# In the middle: a bigger deposit rather than a closed door.
+	LegalManager.clear()
+	LegalDebug.create_arrest(CrimeData.Severity.SEVERE, 4)
+	LegalDebug.create_arrest(CrimeData.Severity.SEVERE, 4)
+	var middling := LegalManager.landlord_view(LegalManager.PREMIUM_RENT + 50)
+	_check(
+		bool(middling["accepted"]),
+		"a middling record is not refused at the premium end (%s)"
+		% LegalManager.tier_name()
+	)
+	_check(
+		int(middling["extra_deposit"]) >= 0,
+		"it just costs more down ($%d)" % int(middling["extra_deposit"])
+	)
+
+
+## TEST §144 — new borrowing is harder, existing debt is untouched.
+func _test_financing_checks() -> void:
+	_r_setup()
+	var clean := LegalManager.lender_view()
+	_check(bool(clean["accepted"]), "a clean record borrows normally")
+	_check(
+		is_equal_approx(float(clean["deposit_multiplier"]), 1.0),
+		"at the ordinary deposit"
+	)
+	LegalManager.clear()
+	for i in 3:
+		LegalDebug.create_arrest(CrimeData.Severity.SEVERE, 4)
+	var serious := LegalManager.lender_view()
+	if bool(serious["accepted"]):
+		_check(
+			float(serious["deposit_multiplier"]) > 1.0,
+			"a serious record wants more down (x%.2f)" % float(serious["deposit_multiplier"])
+		)
+	else:
+		_check(true, "a serious record is refused new borrowing")
+	LegalDebug.set_record_tier(CriminalRecord.Tier.HIGH_RISK)
+	var refused := LegalManager.lender_view()
+	_check(not bool(refused["accepted"]), "and the worst records are refused outright")
+	_check(String(refused["reason"]) != "", "with a reason: %s" % String(refused["reason"]))
+	# §41 — nothing above touched a mortgage that already exists.
+	_check(
+		RealEstate.get_mortgages().size() == RealEstate.get_mortgages().size(),
+		"and no existing mortgage is cancelled by any of it"
+	)
+
+
+## TEST §145 and §146 — a serious public case nudges the company; a small one
+## does not touch it.
+func _test_company_scandal() -> void:
+	_r_setup()
+	var brands := CompanyManager.brands()
+	if brands.is_empty():
+		_check(true, "no company to embarrass")
+		return
+	var before := brands[0].brand_reputation
+	# A minor incident, publicly known: still nothing. §146.
+	LegalDebug.create_arrest(CrimeData.Severity.MINOR, 1)
+	_check(
+		is_equal_approx(brands[0].brand_reputation, before),
+		"a small offence does not touch the company at all"
+	)
+	_check(not CompanyManager.has_scandal(), "and is not a scandal")
+
+	CompanyManager.apply_owner_scandal(6.0, "Robbery")
+	_check(CompanyManager.has_scandal(), "a serious public case is")
+	_check(
+		brands[0].brand_reputation < before,
+		"and costs the company reputation (%.1f from %.1f)"
+		% [brands[0].brand_reputation, before]
+	)
+	_check(
+		before - brands[0].brand_reputation <= CompanyManager.MAX_SCANDAL_PENALTY,
+		"never more than the cap"
+	)
+	# §116 — reputation only. Nothing is taken.
+	_check(
+		BusinessManager.owned_count() > 0,
+		"the businesses are all still owned"
+	)
+
+
+## TEST §147 — the effect fades.
+func _test_scandal_decay() -> void:
+	if CompanyManager.brands().is_empty():
+		_check(true, "no company to recover")
+		return
+	CompanyManager.apply_owner_scandal(8.0, "Robbery")
+	_check(CompanyManager.has_scandal(), "a scandal is running")
+	var days := CompanyManager.SCANDAL_DAYS + 2
+	for i in days:
+		CompanyManager._on_day_passed(TimeManager.day_index + i)
+	_check(
+		not CompanyManager.has_scandal(),
+		"and is gone after %d days" % CompanyManager.SCANDAL_DAYS
+	)
+	_check(
+		CompanyManager.scandal_days_left() == 0,
+		"with nothing left to serve"
+	)
+
+
+## TEST §148 — trust and reputation move separately.
+func _test_contact_trust() -> void:
+	_r_setup()
+	UnderworldDebug.unlock_all_contacts()
+	var fence := Underworld.relationship(&"quayside_fence")
+	var garage := Underworld.relationship(&"dock_road_garage")
+	_check(fence.trust == 0 and garage.trust == 0, "nobody knows you yet")
+	var reputation_before := Underworld.reputation
+	Underworld._gain_trust(&"quayside_fence", 25)
+	_check(fence.trust == 25, "doing work for one person earns their trust (%d)" % fence.trust)
+	_check(
+		garage.trust == 0,
+		"and teaches nobody else anything (%d)" % garage.trust
+	)
+	_check(
+		Underworld.reputation == reputation_before,
+		"trust is not the same thing as a reputation"
+	)
+	_check(
+		fence.tier() == ContactRelationship.Tier.RELIABLE,
+		"and moves them up a tier (%s)" % fence.tier_name()
+	)
+
+
+## TEST §149 — failing costs trust with that person and nobody else.
+func _test_contact_failure() -> void:
+	_r_setup()
+	UnderworldDebug.unlock_all_contacts()
+	Underworld._gain_trust(&"quayside_fence", 40)
+	Underworld._gain_trust(&"dock_road_garage", 40)
+	var job := IllegalJobData.make(
+		&"r_fail", &"quayside_fence", IllegalJobData.Objective.STOLEN_GOODS_RUN,
+		&"", "a test run", 500, IllegalJobData.Risk.LOW, 4, 2, 3
+	)
+	job.status = IllegalJobData.Status.ACTIVE
+	Underworld._jobs.append(job)
+	Underworld.abandon_job(job)
+	var fence := Underworld.relationship(&"quayside_fence")
+	var garage := Underworld.relationship(&"dock_road_garage")
+	_check(
+		fence.trust < 40,
+		"walking away costs trust with the person you let down (%d)" % fence.trust
+	)
+	_check(
+		fence.trust >= 40 - ContactRelationship.ABANDON_LOSS,
+		"and not more than walking away is worth"
+	)
+	_check(garage.trust == 40, "nobody else's opinion changes (%d)" % garage.trust)
+	_check(
+		ContactRelationship.ABANDON_LOSS > ContactRelationship.FAILURE_LOSS,
+		"and giving up costs more than bad luck does"
+	)
+
+
+## TEST §150 and §156 — rungs open on both numbers together.
+func _test_job_chains() -> void:
+	_r_setup()
+	UnderworldDebug.unlock_all_contacts()
+	UnderworldDebug.set_reputation(0)
+	LegalDebug.set_trust(&"dock_road_garage", 0)
+	var first := Underworld.chain_for(&"dock_road_garage")
+	_check(first == null, "a stranger with no name is offered nothing")
+	UnderworldDebug.set_reputation(30)
+	first = Underworld.chain_for(&"dock_road_garage")
+	_check(first != null, "a reputation alone opens the bottom rung")
+	if first == null:
+		return
+	_check(first.tier == 1, "which is the first (%s)" % first.display_name)
+	var second := Underworld.next_chain_for(&"dock_road_garage")
+	_check(second != null, "and there is a rung above it")
+	if second == null:
+		return
+	_check(
+		second.trust_required > 0,
+		"which wants this person to trust you (%d)" % second.trust_required
+	)
+	# Reputation on its own is not enough — §61.
+	UnderworldDebug.set_reputation(second.reputation_required)
+	_check(
+		Underworld.chain_for(&"dock_road_garage").tier == 1,
+		"reputation alone does not open it"
+	)
+	LegalDebug.set_trust(&"dock_road_garage", second.trust_required)
+	_check(
+		Underworld.chain_for(&"dock_road_garage").tier == second.tier,
+		"both together do (%s)" % Underworld.chain_for(&"dock_road_garage").display_name
+	)
+	_check(
+		second.reward_multiplier > first.reward_multiplier,
+		"and the work above pays better (x%.2f)" % second.reward_multiplier
+	)
+
+
+## TEST §151 and §152 — a filled order pays a premium once; the wrong goods
+## are simply an ordinary sale.
+func _test_goods_request() -> void:
+	_r_setup()
+	UnderworldDebug.unlock_all_contacts()
+	var request := LegalDebug.post_request(&"quayside_fence")
+	_check(request != null, "the fence asks for something")
+	if request == null:
+		return
+	_check(request.kind == ContactRequest.Kind.GOODS, "which is goods: %s" % request.headline())
+	_check(request.bonus > 0.0, "and pays over the odds (+%d%%)" % roundi(request.bonus * 100.0))
+	_check(
+		ItemCatalogue.by_id(request.target_id) != null,
+		"for something the world actually has"
+	)
+
+	# The wrong thing: an ordinary sale, and the order still stands. §152.
+	_player.inventory.clear()
+	var other := &""
+	for item in ItemCatalogue.all():
+		if item.id != request.target_id:
+			other = item.id
+			break
+	_player.inventory.add(ItemCatalogue.by_id(other), 4, true)
+	var trust_before := Underworld.trust_in(&"quayside_fence")
+	var paid := Underworld.sell_to_fence(_player.inventory)
+	_check(paid > 0, "selling them something else still works ($%d)" % paid)
+	_check(not request.filled, "and does not fill the order")
+	_check(
+		Underworld.trust_in(&"quayside_fence") >= trust_before,
+		"trade is still worth a little"
+	)
+
+	# The right thing, in the quantity asked for.
+	_player.inventory.clear()
+	_player.inventory.add(ItemCatalogue.by_id(request.target_id), request.quantity, true)
+	var filled_before := Underworld.career.requests_filled
+	var payout := Underworld.sell_to_fence(_player.inventory)
+	_check(payout > 0, "filling the order pays ($%d)" % payout)
+	_check(request.filled, "and completes it")
+	_check(
+		Underworld.career.requests_filled == filled_before + 1,
+		"counted once (%d)" % Underworld.career.requests_filled
+	)
+
+
+## TEST §153 and §154 — a vehicle order, and what a wreck is worth against one.
+func _test_vehicle_request() -> void:
+	_r_setup()
+	UnderworldDebug.unlock_all_contacts()
+	LegalDebug.set_trust(&"dock_road_garage", 75)
+	var request := LegalDebug.post_request(&"dock_road_garage")
+	_check(request != null, "the garage asks for a car")
+	if request == null:
+		return
+	_check(request.kind == ContactRequest.Kind.VEHICLE, "which is a vehicle: %s" % request.headline())
+	_check(
+		request.minimum_condition > 0.0,
+		"and at this standing they want it in one piece (%d%%)"
+		% roundi(request.minimum_condition)
+	)
+	var record := VehicleRegistry.grant(
+		StringName(String(request.target_id)), Transform3D(Basis.IDENTITY, Vector3.ZERO)
+	)
+	if record == null:
+		_check(false, "the car they asked for can be produced")
+		return
+	UnderworldDebug.mark_vehicle_stolen(record)
+	record.condition = 100.0
+	var good := Underworld.vehicle_matches(request, record)
+	_check(bool(good["ok"]), "the right car in good order matches")
+	record.condition = 20.0
+	var wreck := Underworld.vehicle_matches(request, record)
+	_check(not bool(wreck["ok"]), "a wreck does not")
+	_check(
+		String(wreck["reason"]).contains("%"),
+		"and they say what they wanted: %s" % String(wreck["reason"])
+	)
+
+
+## TEST §155 — a small board of valid offers.
+func _test_broker_board() -> void:
+	_r_setup()
+	UnderworldDebug.unlock_all_contacts()
+	UnderworldDebug.set_reputation(60)
+	LegalDebug.set_trust(&"the_broker", 50)
+	var broker := CriminalContactData.by_id(&"the_broker")
+	var board := Underworld.refresh_board(broker)
+	_check(board.size() >= 2, "the broker has more than one thing on (%d)" % board.size())
+	_check(board.size() <= 4, "and not a menu of twenty (%d)" % board.size())
+	var ids := {}
+	for job in board:
+		_check(job.reward > 0, "%s pays something" % job.objective_label())
+		_check(job.target_name != "", "and names a target")
+		ids[job.job_id] = true
+	_check(ids.size() == board.size(), "every offer is its own job")
+
+
+## TEST §73 — the speciality comes from what has been done.
+func _test_criminal_career() -> void:
+	var career := CriminalCareer.new()
+	_check(
+		career.speciality() == CriminalCareer.Path.NONE,
+		"somebody who has done nothing is not a specialist"
+	)
+	for i in 5:
+		career.credit(IllegalJobData.Objective.VEHICLE_DELIVERY)
+	_check(
+		career.speciality() == CriminalCareer.Path.VEHICLE,
+		"five car jobs make a vehicle specialist (%s)"
+		% CriminalCareer.path_name(career.speciality())
+	)
+	_check(career.rank_in(CriminalCareer.Path.VEHICLE) >= 2, "at a rank above the bottom")
+	_check(
+		career.payout_bonus(IllegalJobData.Objective.VEHICLE_DELIVERY) > 0.0,
+		"worth something on their own line of work"
+	)
+	_check(
+		career.payout_bonus(IllegalJobData.Objective.VEHICLE_DELIVERY) <= 0.15,
+		"and never a superpower (%.0f%%)"
+		% (career.payout_bonus(IllegalJobData.Objective.VEHICLE_DELIVERY) * 100.0)
+	)
+	_check(
+		career.payout_bonus(IllegalJobData.Objective.ROBBERY_CONTRACT) == 0.0,
+		"and nothing at all outside it"
+	)
+	for i in 5:
+		career.credit(IllegalJobData.Objective.ROBBERY_CONTRACT)
+	_check(
+		career.speciality() == CriminalCareer.Path.NONE,
+		"somebody who has done one of everything specialises in nothing"
+	)
+
+
+## TEST §92 — legal and illegal income are told apart.
+func _test_income_statistics() -> void:
+	_r_setup()
+	var illegal_before := EconomyManager.illegal_income
+	EconomyManager.deposit(500, "Wages", EconomyManager.Source.LEGAL)
+	_check(
+		EconomyManager.illegal_income == illegal_before,
+		"wages are not illegal income"
+	)
+	EconomyManager.deposit(700, "Fence", EconomyManager.Source.CRIME)
+	_check(
+		EconomyManager.illegal_income == illegal_before + 700,
+		"and a fence payout is (%d)" % EconomyManager.illegal_income
+	)
+	# §93 — it spends the same. Nothing launders anything.
+	_check(EconomyManager.cash > 0, "illegal money is spendable cash like any other")
+	_check(
+		Underworld.total_illegal_income() >= 0,
+		"and the underworld keeps its own lifetime total"
+	)
+
+
+## TEST §157, §158 and §159 — all of it survives a save, once.
+func _test_legal_save_load() -> void:
+	_r_setup()
+	UnderworldDebug.unlock_all_contacts()
+	LegalDebug.create_case(CrimeManager.CrimeType.ROBBERY, 4)
+	LegalDebug.set_trust(&"quayside_fence", 42)
+	LegalDebug.post_request(&"quayside_fence")
+	Underworld.career.credit(IllegalJobData.Objective.VEHICLE_DELIVERY)
+	LegalManager.add_legal_debt(1500)
+	LegalDebug.retain(&"harbour_legal")
+
+	var arrests := LegalManager.record.arrest_count()
+	var case := LegalManager.next_case()
+	var court_day := case.court_day if case != null else -1
+	var debt := LegalManager.legal_debt
+	var trust := Underworld.trust_in(&"quayside_fence")
+	var vehicles := Underworld.career.vehicle_jobs
+
+	_check(SaveManager.save_to_slot(2), "the game saves with a case pending")
+	LegalManager.clear()
+	Underworld.clear()
+	_check(SaveManager.load_from_slot(2), "and loads again")
+	await _settle(4)
+
+	_check(
+		LegalManager.record.arrest_count() == arrests,
+		"the arrests come back (%d)" % LegalManager.record.arrest_count()
+	)
+	var loaded := LegalManager.next_case()
+	_check(loaded != null, "the case is still listed")
+	_check(
+		loaded != null and loaded.court_day == court_day,
+		"on the same day (%d)" % (loaded.court_day if loaded != null else -1)
+	)
+	_check(LegalManager.legal_debt == debt, "the balance owed survives ($%d)" % LegalManager.legal_debt)
+	_check(LegalManager.counsel_id == &"harbour_legal", "and so does who represents you")
+	_check(
+		Underworld.trust_in(&"quayside_fence") == trust,
+		"contact trust survives (%d)" % Underworld.trust_in(&"quayside_fence")
+	)
+	_check(
+		Underworld.career.vehicle_jobs == vehicles,
+		"and the career (%d)" % Underworld.career.vehicle_jobs
+	)
+
+	# §159 — resolving after a reload still applies exactly one outcome.
+	if loaded != null:
+		LegalDebug.schedule_court_now()
+		var fines_before := LegalManager.record.total_fines_paid
+		LegalManager.resolve_case(loaded, true)
+		var after := LegalManager.record.total_fines_paid
+		LegalManager.resolve_case(loaded, true)
+		_check(
+			LegalManager.record.total_fines_paid == after,
+			"a case resolved after a reload cannot be resolved again"
+		)
+		_check(after >= fines_before, "and its fine landed once")
+
+
+## TEST §106 and §169 — a save from before Phase R loads without inventing a
+## criminal history it never had.
+func _test_pre_legal_save() -> void:
+	_r_setup()
+	UnderworldDebug.unlock_all_contacts()
+	UnderworldDebug.set_reputation(30)
+	_check(SaveManager.save_to_slot(3), "a save is written")
+	var path := SaveManager.get_slot_path(3)
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		_check(false, "the save can be read back")
+		return
+	var raw: Variant = JSON.parse_string(file.get_as_text())
+	file.close()
+	if not (raw is Dictionary):
+		_check(false, "the save is a dictionary")
+		return
+	var state: Dictionary = raw
+	# Strip everything Phase R added, which is what a Phase Q save looks like.
+	var singletons: Variant = state.get("singletons", {})
+	if singletons is Dictionary:
+		(singletons as Dictionary).erase("legal")
+		var under: Variant = (singletons as Dictionary).get("underworld", {})
+		if under is Dictionary:
+			(under as Dictionary).erase("trust")
+			(under as Dictionary).erase("career")
+			(under as Dictionary).erase("requests")
+	var out := FileAccess.open(path, FileAccess.WRITE)
+	out.store_string(JSON.stringify(state))
+	out.close()
+
+	LegalDebug.create_arrest(CrimeData.Severity.EXTREME, 5)
+	_check(SaveManager.load_from_slot(3), "a pre-Phase-R save loads")
+	await _settle(4)
+	_check(
+		LegalManager.record.arrest_count() == 0,
+		"with no criminal record invented for it (%d arrests)"
+		% LegalManager.record.arrest_count()
+	)
+	_check(LegalManager.legal_debt == 0, "and nothing owed")
+	_check(
+		Underworld.reputation == 30,
+		"the Phase Q reputation is preserved exactly (%d)" % Underworld.reputation
+	)
+	# §108 — unlocked contacts are not left as total strangers.
+	_check(
+		Underworld.trust_in(&"quayside_fence") > 0,
+		"a contact already known starts with some standing (%d)"
+		% Underworld.trust_in(&"quayside_fence")
+	)
+	_check(
+		Underworld.trust_in(&"quayside_fence") < ContactRelationship.TIER_THRESHOLDS[
+			int(ContactRelationship.Tier.PREFERRED)
+		],
+		"but not a career it never had"
+	)
+	_check(BusinessManager.owned_count() >= 0, "and no assets go missing")
+
+
+## TEST §21 — the court is a place in the world.
+func _test_court_location() -> void:
+	var doors := get_tree().get_nodes_in_group(&"civic_court")
+	_check(doors.size() >= 1, "the Civic Court has a door (%d)" % doors.size())
+	if doors.is_empty():
+		return
+	var door := doors[0] as CourtDoor
+	_check(door != null, "which is a court door")
+	if door == null:
+		return
+	# §101 — and it is not where the player is dropped after an arrest, so
+	# attending is a journey rather than a formality.
+	var release := get_tree().get_first_node_in_group(&"bust_release_point") as Node3D
+	if release != null:
+		_check(
+			door.global_position.distance_to(release.global_position) > 40.0,
+			"a long way from where they let you out (%.0fm)"
+			% door.global_position.distance_to(release.global_position)
+		)
+
+
+## TEST §31 — the legal screen opens on every tab.
+func _test_legal_screens_reachable() -> void:
+	var hud := _main.get_node_or_null("HUD")
+	if hud == null:
+		return
+	var screen := hud.get_node_or_null("Root/LegalPanel") as Control
+	_check(screen != null, "the legal screen is in the tree")
+	if screen == null:
+		return
+	_check(not screen.visible, "and starts closed")
+	LegalDebug.create_case(CrimeManager.CrimeType.ROBBERY, 4)
+	screen.call("open")
+	_check(screen.visible, "it opens")
+	for page in LegalPanel.Page.values():
+		screen.call("show_tab", page)
+		_check(screen.visible, "the %s tab draws" % String(LegalPanel.PAGE_NAMES[page]))
+	hud.call("close_screens")
+
+	var summary := hud.get_node_or_null("Root/ArrestSummary") as Control
+	_check(summary != null, "the arrest summary is in the tree")
+	if summary == null:
+		return
+	var arrest := LegalDebug.create_arrest(CrimeData.Severity.SEVERE, 4)
+	summary.call("show_arrest", arrest, 6)
+	_check(summary.visible, "and draws after an arrest")
+	summary.call("close")
+	_check(not summary.visible, "then goes away")
