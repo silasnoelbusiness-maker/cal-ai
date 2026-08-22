@@ -2885,7 +2885,8 @@ func _vehicle_scenario(main: Node, scenario: String) -> void:
 	if record == null:
 		return
 	UnderworldDebug.mark_vehicle_stolen(record)
-	var car := VehicleRegistry.spawn(record)
+	VehicleRegistry.call("_spawn", record)
+	var car := record.node as Vehicle
 	await _wait(30)
 	UnderworldDebug.force_report(CrimeManager.CrimeType.CARJACKING)
 	if car != null:
@@ -2946,7 +2947,7 @@ func _underworld_location(main: Node, scenario: String) -> void:
 			))
 			if record != null:
 				UnderworldDebug.mark_vehicle_stolen(record)
-				VehicleRegistry.spawn(record)
+				VehicleRegistry.call("_spawn", record)
 			await _wait(30)
 
 	if scenario == "fence_exterior" or scenario == "chop_shop":

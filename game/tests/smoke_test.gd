@@ -329,7 +329,7 @@ func _run() -> void:
 	_test_criminal_reputation()
 	_test_illegal_job()
 	_test_failed_job()
-	await _test_crime_save_load()
+	await _test_wanted_save_load()
 	await _test_pre_crime_save()
 	await _test_business_during_pursuit()
 	_test_underworld_screens_reachable()
@@ -12257,6 +12257,17 @@ func _test_search_reacquisition() -> void:
 	WantedManager.clear_wanted("")
 
 
+## The live car for a record. The registry spawns owned vehicles from its own
+## sweep when the player is near them; a test cannot wait for that, so this
+## asks for it directly and hands back the node the registry itself stored.
+func _q_live_car(record: OwnedVehicle) -> Vehicle:
+	if record == null:
+		return null
+	if not record.is_spawned():
+		VehicleRegistry.call("_spawn", record)
+	return record.node as Vehicle
+
+
 ## TEST §28 and §29 — the police look for a car, and ownership is beside the
 ## point.
 func _test_known_vehicle() -> void:
@@ -12264,7 +12275,7 @@ func _test_known_vehicle() -> void:
 	var record := VehicleRegistry.grant(&"sedan", Transform3D.IDENTITY)
 	if record == null:
 		return
-	var car := VehicleRegistry.spawn(record)
+	var car := _q_live_car(record)
 	if car == null:
 		return
 	_check(record.owner_id == &"player", "the player owns this car legitimately")
@@ -12297,7 +12308,7 @@ func _test_vehicle_switch() -> void:
 	await _teleport(Vector3(0.0, 0.5, 60.0))
 	WantedManager.set_level(2)
 	var first := VehicleRegistry.grant(&"hatchback", Transform3D.IDENTITY)
-	var car := VehicleRegistry.spawn(first) if first != null else null
+	var car := _q_live_car(first)
 	if car == null:
 		return
 	UnderworldDebug.mark_vehicle_known(car)
@@ -12326,7 +12337,7 @@ func _test_vehicle_switch() -> void:
 	UnderworldDebug.force_pursuit()
 	_check(PoliceMemory.player_identified, "being seen puts the description back")
 	var second := VehicleRegistry.grant(&"coupe", Transform3D.IDENTITY)
-	var other := VehicleRegistry.spawn(second) if second != null else null
+	var other := _q_live_car(second)
 	if other != null:
 		PoliceMemory.note_sighting(_player.global_position)
 		PoliceMemory.mark_vehicle_known(other)
@@ -12677,8 +12688,10 @@ func _test_failed_job() -> void:
 	_check(Underworld.active_job() == null, "the player is free to take something else")
 
 
-## TEST §120, §122 and §171 — the heat and the work survive a save.
-func _test_crime_save_load() -> void:
+## TEST §120, §122 and §171 — the heat and the work survive a save. Phase G
+## already checks the crime *history* round-trips; this is the live chase, the
+## reputation and the running job.
+func _test_wanted_save_load() -> void:
 	_q_setup()
 	await _teleport(Vector3(10.0, 0.5, 50.0))
 	UnderworldDebug.set_reputation(45)
@@ -12821,7 +12834,7 @@ func _test_business_during_pursuit() -> void:
 	if van != null:
 		_check(not van.stolen, "the company van is not stolen")
 		_check(
-			not PoliceMemory.is_vehicle_known(VehicleRegistry.spawn(van)),
+			not PoliceMemory.is_vehicle_known(_q_live_car(van)),
 			"and nobody is looking for it"
 		)
 
