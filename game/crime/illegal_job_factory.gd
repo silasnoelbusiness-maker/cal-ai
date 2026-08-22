@@ -26,13 +26,28 @@ const BASE_REWARD := {
 }
 
 
+## Builds one offer.
+##
+## Phase R adds the optional `chain` — the rung of this contact's ladder the
+## player has earned. When one is given it decides which objectives are on the
+## table and multiplies the money, so higher standing produces genuinely
+## different work rather than the same work with a bigger number. Without one
+## the Phase Q behaviour is unchanged, which is what the older tests expect.
 static func build(
-	id: StringName, contact: CriminalContactData, reputation: int
+	id: StringName, contact: CriminalContactData, reputation: int,
+	chain: JobChain = null
 ) -> IllegalJobData:
 	if contact == null or contact.job_types.is_empty():
 		return null
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
+	var job: IllegalJobData = null
+	if chain != null and not chain.objectives.is_empty():
+		var objective: int = chain.objectives[rng.randi_range(0, chain.objectives.size() - 1)]
+		job = _for_objective(objective, id, contact, reputation, rng)
+		if job != null:
+			job.reward = int(round(float(job.reward) * chain.reward_multiplier / 50.0)) * 50
+		return job
 	var kind: StringName = contact.job_types[
 		rng.randi_range(0, contact.job_types.size() - 1)
 	]
@@ -46,6 +61,57 @@ static func build(
 		&"high_risk_theft":
 			return _high_risk_theft(id, contact, reputation, rng)
 	return null
+
+
+static func _for_objective(
+	objective: int, id: StringName, contact: CriminalContactData,
+	reputation: int, rng: RandomNumberGenerator
+) -> IllegalJobData:
+	match objective:
+		IllegalJobData.Objective.VEHICLE_DELIVERY:
+			return _vehicle_delivery(id, contact, reputation, rng)
+		IllegalJobData.Objective.STOLEN_GOODS_RUN:
+			return _stolen_goods(id, contact, reputation, rng)
+		IllegalJobData.Objective.ROBBERY_CONTRACT:
+			return _robbery(id, contact, reputation, rng)
+		IllegalJobData.Objective.HIGH_RISK_THEFT:
+			return _high_risk_theft(id, contact, reputation, rng)
+		IllegalJobData.Objective.MULTI_STOP_RUN:
+			return _multi_stop(id, contact, reputation, rng)
+		IllegalJobData.Objective.RETRIEVE_STASH:
+			return _retrieve(id, contact, reputation, rng)
+	return null
+
+
+## §79 — a package collected and dropped at two or three marked points, against
+## a clock. The parcel is deliberately nothing: it is a thing to be moved, and
+## the game never says what is in it.
+static func _multi_stop(
+	id: StringName, contact: CriminalContactData, reputation: int,
+	rng: RandomNumberGenerator
+) -> IllegalJobData:
+	var stops := rng.randi_range(2, 3)
+	var job := IllegalJobData.make(
+		id, contact.contact_id, IllegalJobData.Objective.MULTI_STOP_RUN,
+		&"", "a sealed parcel, %d drops" % stops,
+		_reward(IllegalJobData.Risk.MEDIUM, reputation, rng),
+		IllegalJobData.Risk.MEDIUM, 5, 4, stops
+	)
+	return job
+
+
+## §80 — fetch a marked package back from somewhere and hand it over. Same
+## abstraction, one leg instead of several.
+static func _retrieve(
+	id: StringName, contact: CriminalContactData, reputation: int,
+	rng: RandomNumberGenerator
+) -> IllegalJobData:
+	return IllegalJobData.make(
+		id, contact.contact_id, IllegalJobData.Objective.RETRIEVE_STASH,
+		&"", "a package somebody left behind",
+		_reward(IllegalJobData.Risk.LOW, reputation, rng),
+		IllegalJobData.Risk.LOW, 8, 3, 1
+	)
 
 
 ## §85 — get a car of the kind they asked for and bring it in. Uses the theft
