@@ -17,6 +17,9 @@ signal brand_changed(brand: BrandData)
 signal branch_opened(brand: BrandData, business: BusinessInstance)
 signal employee_transferred(worker: EmployeeData, from_id: StringName, to_id: StringName)
 signal milestone_reached(milestone: StringName, description: String)
+## Raised when the owner's own conduct catches up with the company. §46.
+signal scandal_started(magnitude: float, reason: String)
+signal scandal_cleared()
 
 enum TransferResult { OK, NO_EMPLOYEE, NO_TARGET, SAME_BUSINESS, ROLE_NOT_USED, SCHEDULE_CLASH }
 
@@ -47,6 +50,12 @@ const MILESTONES: Array = [
 ## worth something; it is not worth more than the shops themselves.
 const BRAND_PREMIUM_CEILING := 0.18
 
+## The most brand reputation an owner scandal may ever cost, and how long it
+## takes to work off. §114 and §51: a large company must not be brought down by
+## its owner's night out, and the effect must not be permanent.
+const MAX_SCANDAL_PENALTY := 12.0
+const SCANDAL_DAYS := 14
+
 var save_id: StringName = &"company"
 
 ## The company's name has lived on BusinessManager since Phase I, and the
@@ -55,6 +64,13 @@ var save_id: StringName = &"company"
 ## of them wins. This owns the *meaning* of the company; that owns the field.
 var company_id: StringName = &"player_company"
 var _brands: Array[BrandData] = []
+
+## How much brand reputation the owner's last public case is costing, and the
+## day it stops costing it. §44-§51: a nudge with an expiry, never a collapse,
+## and never anything that touches equity.
+var scandal_penalty: float = 0.0
+var scandal_until_day: int = -1
+var scandal_reason: String = ""
 var _next_brand_number: int = 1
 var _milestones_reached: Dictionary = {}
 ## Alerts already raised this hour, so a manager with a problem says it once.
@@ -181,6 +197,61 @@ func prune_brands() -> int:
 
 
 # --- Brands --------------------------------------------------------------
+
+## The owner has been publicly linked to something serious. §44.
+##
+## This is the only door between the criminal record and the company, and it is
+## deliberately narrow: a temporary reputation penalty, capped, that decays on
+## its own. §116 — it does not touch business cash, equity or valuation, and
+## §47 — it lands on the company rather than on any one shop.
+func apply_owner_scandal(magnitude: float, reason: String = "") -> void:
+	if magnitude <= 0.0:
+		return
+	# A bigger company is more visible, but only a little — §114 says a large
+	# company must not collapse because its owner had a bad night.
+	var visibility := 1.0 + clampf(float(_brands.size()) * 0.08, 0.0, 0.4)
+	var penalty := clampf(magnitude * visibility, 0.0, MAX_SCANDAL_PENALTY)
+	scandal_penalty = clampf(scandal_penalty + penalty, 0.0, MAX_SCANDAL_PENALTY)
+	scandal_until_day = TimeManager.day_index + SCANDAL_DAYS
+	scandal_reason = reason
+	for brand in _brands:
+		brand.brand_reputation = clampf(brand.brand_reputation - penalty, 0.0, 100.0)
+	GameManager.notify(
+		"OWNER SCANDAL
+%s  ·  -%d company reputation" % [
+			get_company_name().to_upper(), roundi(penalty)
+		],
+		GameManager.Tone.BAD
+	)
+	AudioManager.play(&"scandal", AudioBuses.SFX, -9.0)
+	scandal_started.emit(penalty, reason)
+	company_changed.emit()
+
+
+func has_scandal() -> bool:
+	return scandal_penalty > 0.0
+
+
+func scandal_days_left() -> int:
+	return maxi(scandal_until_day - TimeManager.day_index, 0)
+
+
+## §51 — the effect fades. Called once a day; the penalty is worked off in
+## even steps so the company recovers whether or not the player does anything.
+func _decay_scandal() -> void:
+	if scandal_penalty <= 0.0:
+		return
+	if TimeManager.day_index >= scandal_until_day:
+		scandal_penalty = 0.0
+		scandal_reason = ""
+		scandal_cleared.emit()
+		company_changed.emit()
+		return
+	var step := MAX_SCANDAL_PENALTY / float(SCANDAL_DAYS)
+	scandal_penalty = maxf(scandal_penalty - step, 0.0)
+	for brand in _brands:
+		brand.brand_reputation = clampf(brand.brand_reputation + step * 0.5, 0.0, 100.0)
+
 
 func brands() -> Array[BrandData]:
 	return _brands.duplicate()
@@ -635,6 +706,7 @@ func _raise_manager_alerts() -> void:
 
 
 func _on_day_passed(_day_index: int) -> void:
+	_decay_scandal()
 	for brand in _brands:
 		var branches := branches_of(brand)
 		if branches.is_empty():
@@ -732,6 +804,9 @@ func save_state() -> Dictionary:
 		"brands": stored,
 		"next_brand": _next_brand_number,
 		"milestones": milestones,
+		"scandal": scandal_penalty,
+		"scandal_until": scandal_until_day,
+		"scandal_reason": scandal_reason,
 	}
 
 
@@ -742,6 +817,10 @@ func load_state(state: Dictionary) -> void:
 	_next_brand_number = int(state.get("next_brand", _brands.size() + 1))
 	for id in state.get("milestones", []):
 		_milestones_reached[StringName(id)] = true
+	# §109 — a scandal in progress survives a reload, expiry and all.
+	scandal_penalty = float(state.get("scandal", 0.0))
+	scandal_until_day = int(state.get("scandal_until", -1))
+	scandal_reason = String(state.get("scandal_reason", ""))
 	migrate_unbranded()
 	company_changed.emit()
 

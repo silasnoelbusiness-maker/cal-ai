@@ -437,6 +437,23 @@ func get_bust_fine() -> int:
 	return maxi(int(round(float(base) * float(fine_by_severity[index]))), 0)
 
 
+## The two halves of the fine, published separately.
+##
+## Phase R's legal system prices a release and a court fine from the same two
+## ideas — how wanted they were, how bad the worst thing was — and §4 says it
+## must not build its own copies of those numbers. So it reads these rather
+## than reaching into the arrays.
+func fine_by_level(value: int) -> int:
+	if value <= 0 or value >= bust_fine_by_level.size():
+		return int(bust_fine_by_level[1]) if bust_fine_by_level.size() > 1 else 0
+	return int(bust_fine_by_level[value])
+
+
+func severity_multiplier(band: CrimeData.Severity) -> float:
+	var index := clampi(int(band), 0, fine_by_severity.size() - 1)
+	return float(fine_by_severity[index])
+
+
 ## Hours the arrest costs. Businesses, logistics and property all simulate
 ## through it — the clock moving is the whole point.
 func get_bust_hours() -> int:

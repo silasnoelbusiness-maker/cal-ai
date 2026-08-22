@@ -123,6 +123,31 @@ static func _build(id: StringName) -> AudioStreamWAV:
 		&"reputation":
 			return _chime([494.0, 622.0, 784.0], 0.60, 0.20)
 
+		# Legal. §123 asks for subtle cues and explicitly not courtroom drama,
+		# so these are quieter and flatter than the police set: a case opening
+		# is two low notes, a reminder is a single soft one, a resolution
+		# settles downward, and the record tier changing is the only one with
+		# any weight to it.
+		&"case_opened":
+			return _chime([392.0, 330.0], 0.50, 0.16)
+		&"court_reminder":
+			return _blip(523.0, 0.14, 0.14)
+		&"case_resolved":
+			return _chime([587.0, 494.0, 392.0], 0.55, 0.16)
+		&"record_tier":
+			return _chime([330.0, 392.0, 466.0], 0.65, 0.18)
+		&"scandal":
+			return _sweep(420.0, 200.0, 0.6, 0.15)
+
+		# Underworld career. §124 — restrained, and distinct from the legal set
+		# by being brighter rather than louder.
+		&"contact_trust":
+			return _chime([659.0, 784.0], 0.36, 0.18)
+		&"request_posted":
+			return _blip(740.0, 0.09, 0.20)
+		&"career_tier":
+			return _chime([523.0, 659.0, 784.0, 988.0], 0.70, 0.18)
+
 		# World interaction.
 		&"door":
 			return _noise_hit(0.22, 0.26, 1100.0, 0.70, 90.0)
