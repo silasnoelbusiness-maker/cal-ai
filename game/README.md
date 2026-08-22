@@ -102,6 +102,7 @@ end never stands between a test and the game.
 | `P` | Open your profile: net worth, vehicles, home, lifestyle |
 | `H` | Open the property portfolio: holdings, mortgages, income |
 | `L` | Open logistics: the depot, its stock, shipments, rounds and vans |
+| `U` | Open the underworld: reputation, contacts, jobs and illegal earnings |
 | Left mouse | Attack with whatever is in your hand · place equipment · place furniture |
 | `R` | Rotate the equipment or furniture being placed |
 
@@ -785,6 +786,96 @@ A mortgage warns at three missed payments and a notice arrives at six, with ten
 days to find the arrears. Curing it costs the arrears and not the whole debt.
 Losing the property never leaves the player with nowhere to sleep.
 
+## Crime, and the police
+
+Phase Q is the crime side grown up. The legal simulation underneath it does not
+pause for any of it: a player being chased across Central still has shops
+trading, vans delivering and rent falling due.
+
+### What the police know
+
+The most important idea in the whole phase is that what is true and what the
+police have been told are two different things, and the gap between them is
+where escaping happens. `PoliceMemory` holds only what somebody could
+plausibly have observed — where the player was when last seen, when that was,
+roughly which way they were going, and what they were driving if anybody got a
+look at it. It does not hold the player's position and nothing in it reads it.
+
+Knowing the *player* and knowing the *car* are kept apart. A witness who
+watched somebody get into a car knows both; the moment the player gets out,
+those come apart, and that is what makes abandoning a vehicle worth doing.
+Police no longer recognise anybody they merely look at — they need a
+description or a car they are looking for.
+
+### Wanted, in points
+
+Stars are presentation. Underneath is one meter, and every crime adds to it, so
+a theft then a robbery is worse than either alone. Each star changes what
+happens: more units, further out, searching longer, and above three, units that
+try to cut the player off rather than queue behind them. What it never changes
+is how fast police drive. A harder level is more police behaving better, not
+the same police cheating.
+
+### The pursuit state machine
+
+CLEAR, REPORTED, RESPONDING, PURSUIT, ESCAPING, SEARCHING, COOLDOWN, CLEARED,
+BUSTED. `PoliceResponseManager` owns them and everything else reads them:
+`SearchManager` runs the area, `PursuitCoordinator` hands out roles,
+`RoadblockManager` decides whether it may block a road, the HUD picks a word.
+
+Heat only drains once line of sight is broken. A player standing in front of an
+officer is not escaping, however long they stand there.
+
+### Searching
+
+When the police lose the player they search a circle around where they were
+last seen, which widens as they work outwards and never becomes the whole city.
+The map draws that circle and nothing else — no officer positions, because the
+search is meant to leave that uncertain.
+
+`PursuitCoordinator` gives each unit a corner of it rather than sending
+everybody to the same kerb, and during a chase makes one car PRIMARY, the rest
+SECONDARY on their own approaches, and some INTERCEPT.
+
+### Hiding
+
+World visibility, not invisibility. A room the player walked into is a room the
+street cannot see into, and that is the whole mechanic — no stealth meter, no
+crouch. Ducking into a shop while an officer watches does not lose them;
+ducking in unseen does. Owning the building makes no difference, and a car the
+police are looking for parked outside undoes most of it.
+
+### Roadblocks
+
+Four stars and up, on validated road nodes: never inside a junction, never
+overlapping a building, never in front of the player, never so many that the
+city is sealed. They expire on their own and come down with the wanted level. A
+roadblock is meant to create a decision, not a capture.
+
+### Being caught
+
+The fine is the level's fine surcharged by the worst thing actually done, so
+three stars for a string of thefts is not three stars for armed robbery. An
+arrest also costs hours that the city runs through — a day's trading lost is a
+consequence a business owner feels. Legal vehicles and businesses are never
+touched; stolen goods and stolen vehicles are.
+
+### The underworld
+
+Entirely apart from the company. Committing a crime does not make the player's
+shops criminal and nothing in `crime/` touches a business.
+
+Criminal reputation is its own number in five tiers, and it unlocks work rather
+than weapons. A fence buys what the player should not have at thirty to sixty
+per cent depending on standing. A vehicle buyer takes cars that are genuinely
+stolen and refuses ones the player owns — that is what the dealership is for —
+with a cooldown and a falloff so one street cannot be farmed. A broker offers
+four kinds of work, each reusing gameplay the game already has.
+
+Illegal money lands in the player's pocket like any other income and is tagged
+by source. That is exactly as far as Phase Q goes: the ledger is preparation
+for laundering, not laundering.
+
 ## Layout
 
 ```
@@ -828,6 +919,12 @@ business/models/  operating_model, counter_service_model, table_service_model,
 logistics/    logistics_manager, warehouse_data, warehouse_instance,
               transfer_order, delivery_route, warehouse_terminal,
               delivery_traffic, dropoff_point
+crime/        crime_manager, crime_data, crime_profile, crime_event,
+              criminal_reputation, criminal_contact, criminal_contact_point,
+              illegal_job, illegal_job_factory, underworld_manager,
+              restricted_area, crime_debug, underworld_debug
+police/       police_response_manager, police_memory, search_manager,
+              pursuit_coordinator, roadblock_manager, hiding
 finance/      finance_manager, obligation, distress_state, liquidation
 staff/        backup_pool
 vehicles/company/  company_fleet
@@ -837,6 +934,7 @@ customers/    customer_ai, customer_spawner, customer_demand,
 ui/company/   company_dashboard, staff_schedule_panel, manager_panel,
               branch_finance_panel
 ui/logistics/ logistics_panel
+ui/underworld/  underworld_panel, contact_panel
 tests/        smoke_test, screenshot
 main.tscn     entry scene
 ```
@@ -1201,6 +1299,52 @@ rotas, manager permissions, cleanliness and milestones survives a save and a loa
 exactly once; and that a Phase N save with no company in it loads, keeps every
 business, employee, wage and skill it had, and quietly grows a brand for each.
 
+The logistics and failure checks are the largest single block. Goods
+conservation is the thing most of them are really testing: a depot holds what
+it is given and no more, a bulk order is discounted once and delivered once, a
+reservation cannot be sold out from under a shipment, a shipment cancelled on
+the dock releases exactly what it held, a shipment that fails mid-journey puts
+its cargo back, a delivery the player watches and one they do not both land
+the same units in the same place, and a run the player gives up on halfway
+loses nothing. Then the failure side: wages going into arrears, staff who stop
+turning up after three missed pay runs, a manager calling cover for a shop
+that requires no staff at all, the distress states in order, a loan called in
+after four misses and brought back into good standing by paying it, closing a
+branch without losing its lease or its stock, winding one up and getting
+eighty per cent for the stock and half for the fittings, a brand surviving the
+loss of a branch, a mortgage warning, its notice, curing it, and losing the
+property without losing the roof over the player's head. And migration: a
+Phase O save loads with no logistics in it and does not inherit a depot, a
+fleet or a shipment from the session before.
+
+The crime and police checks come next. Eviction from the first warning to the
+landlord taking the unit back, including a business that keeps every last
+thing it owns except the address. Then the crime table itself — every crime
+banded, priced and answered for, a robbery worse than a shoplifting, a
+carjacking worse than taking an empty car, and violence worth nothing on the
+street. The wanted thresholds at every star; that each star sends more units
+further and searches longer without any police car becoming faster; the
+pursuit states and the transitions between them; that the police know where
+the player *was* and that walking away does not update it; the search area,
+its growth, and that units are spread around it rather than stacked;
+reacquisition; a legally owned car becoming one the police look for without
+becoming stolen; losing a description by switching cars unseen and failing to
+by switching them watched; roadblocks that appear only at four stars, never in
+a junction, never on top of the player and never so many that the city is
+sealed; hiding that does not work in the middle of the street; a fine that
+rises with what was actually done; a fence that pays under value and leaves
+legitimate goods alone; a buyer that refuses the player's own car and takes a
+stolen one exactly once; reputation tiers and what they unlock; a job that
+pays once and cannot be completed twice; a job walked away from that pays
+nothing; and the heat, the search, the reputation and the running job all
+surviving a save without paying anybody twice or restoring a patrol fleet that
+no longer exists.
+
+And the two that matter most for what this game is: a Phase P save loads with
+no crime in it and inherits none of it, and a company keeps trading —
+deliveries landing, shops open, books balancing — while its owner is being
+chased across the city.
+
 ## What is next
 
 Nothing is started. The audio and front-end pass left the most obvious thread of
@@ -1252,6 +1396,23 @@ named (RENT OVERDUE, DEFAULT NOTICE, LEASE AT RISK), and the card on the
 company screen says so — but no landlord ever actually takes a unit back. The
 foreclosure machinery is the shape it should copy: a notice, a deadline, a
 stated amount to cure, and a completion that rehouses whatever was inside.
+
+The crime expansion left threads of its own. Police response is reconstructed
+from the wanted state on load rather than restored unit by unit, which is
+honest but means a chase always resumes as a search — a saved pursuit can never
+come back as a pursuit. Interception is a heading and a guess rather than a
+route, so a unit told to cut somebody off sometimes arrives at a perfectly
+sensible place the player was never going. Roadblocks pick their node by
+distance and heading and know nothing about whether the route past them is
+actually pleasant to drive. And hiding is binary: a room hides you completely
+or not at all, with no notion of a window somebody could look through.
+
+The underworld is three contacts and four job types, which is deliberately the
+smallest thing that is a system rather than a feature. Nothing generates work
+in the world — a job is a line of text and a target, not a marked van waiting
+somewhere — and the robbery contract is the only one that puts a marker on the
+map. Illegal income is tagged and goes straight into the same pocket as
+everything else; there is nothing to launder and nothing that cares.
 
 The logistics phase left threads of its own. There is one depot in the city
 and the code takes a list, so a second is a table entry and a building rather

@@ -54,7 +54,13 @@ extends Node
 ##             manager_backup, finance_forecast, business_warning,
 ##             wages_overdue, rent_overdue, business_critical, branch_closure,
 ##             liquidation_screen, foreclosure_warning, foreclosure_cure,
-##             company_logistics
+##             company_logistics, eviction_notice, eviction_cured, wanted_one,
+##             wanted_two, wanted_three, wanted_four, wanted_five,
+##             police_search, search_map, known_vehicle, switched_vehicle,
+##             foot_pursuit, roadblock_night, wanted_cleared, fence_exterior,
+##             fence_screen, chop_shop, chop_delivery, criminal_contact,
+##             job_offer, criminal_reputation, underworld_jobs,
+##             business_while_wanted
 ##   distance  camera distance override, for overview shots
 ##   yaw       camera yaw override
 ##   pitch     camera pitch override
@@ -371,6 +377,14 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"liquidation_screen", "foreclosure_warning", "foreclosure_cure", \
 		"company_logistics":
 			await _phase_p_scenario(main, scenario)
+
+		"eviction_notice", "eviction_cured", "wanted_one", "wanted_two", \
+		"wanted_three", "wanted_four", "wanted_five", "police_search", \
+		"search_map", "known_vehicle", "switched_vehicle", "foot_pursuit", \
+		"roadblock_night", "wanted_cleared", "fence_exterior", "fence_screen", \
+		"chop_shop", "chop_delivery", "criminal_contact", "job_offer", \
+		"criminal_reputation", "underworld_jobs", "business_while_wanted":
+			await _phase_q_scenario(main, scenario)
 
 		"characters":
 			# The five people the game draws, lined up at reading distance:
@@ -2725,3 +2739,278 @@ func _second_branch(main: Node) -> BusinessInstance:
 	CompanyDebug.hire(branch, EmployeeData.Role.CASHIER, 0.7)
 	branch.manual_override = BusinessInstance.Override.FORCE_OPEN
 	return branch
+
+
+# --- Phase Q ---------------------------------------------------------------
+
+## The crime and police frames.
+##
+## Every one of these drives the real systems: the wanted level is raised by
+## reporting real crimes, the roadblocks are placed by RoadblockManager against
+## its own validation, and the search is the one the police actually run. The
+## tool only decides where the camera stands.
+func _phase_q_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	EconomyManager.restore(500000)
+	await _wait(90)
+
+	match scenario:
+		"eviction_notice", "eviction_cured":
+			await _eviction_scenario(main, scenario)
+		"wanted_one", "wanted_two", "wanted_three", "wanted_four", "wanted_five", \
+		"roadblock_night":
+			await _wanted_scenario(main, scenario)
+		"police_search", "search_map", "wanted_cleared":
+			await _search_scenario(main, scenario)
+		"known_vehicle", "switched_vehicle":
+			await _vehicle_scenario(main, scenario)
+		"foot_pursuit":
+			await _foot_pursuit(main)
+		"fence_exterior", "fence_screen", "chop_shop", "chop_delivery", \
+		"criminal_contact", "job_offer":
+			await _underworld_location(main, scenario)
+		"criminal_reputation", "underworld_jobs":
+			await _underworld_screen(main, scenario)
+		"business_while_wanted":
+			await _business_while_wanted(main)
+
+	await _wait(10)
+
+
+## §3 — the notice on the branch's own money page, and the same page after it
+## has been paid.
+func _eviction_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	var market := _open_shop_at(
+		main, &"unit_main_18", "Interiors/MainStreetUnit", "Silas Market"
+	)
+	BusinessManager.deposit_to_business(market, 6000)
+	var unit := market.property()
+	if unit == null:
+		return
+	CompanyDebug.evict(unit)
+	if scenario == "eviction_cured":
+		EconomyManager.restore(unit.arrears + 60000)
+		FinanceManager.cure_eviction(unit)
+
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	await _wait(150)
+	var finance: Node = _hud_screen(hud, "BranchFinancePanel")
+	finance.call("open", market)
+	await _wait(14)
+
+
+## The five levels, and what each one puts on the street. The heat is earned by
+## reporting real crimes rather than set, so the response is the real one.
+func _wanted_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var wanted := {
+		"wanted_one": 1, "wanted_two": 2, "wanted_three": 3,
+		"wanted_four": 4, "wanted_five": 5, "roadblock_night": 5,
+	}
+	var level: int = int(wanted.get(scenario, 1))
+
+	player.global_position = Vector3(0.0, 0.5, 40.0)
+	await _wait(60)
+	# Enough crimes to reach the level honestly.
+	var crimes := [
+		CrimeManager.CrimeType.VEHICLE_THEFT,
+		CrimeManager.CrimeType.CARJACKING,
+		CrimeManager.CrimeType.STORE_ROBBERY,
+		CrimeManager.CrimeType.ROBBERY,
+		CrimeManager.CrimeType.STORE_ROBBERY,
+	]
+	for i in crimes.size():
+		if WantedManager.level >= level:
+			break
+		UnderworldDebug.force_report(crimes[i], player.global_position)
+		await _wait(6)
+	if WantedManager.level < level:
+		WantedManager.set_level(level)
+
+	# The police answer the call themselves — the same dispatch the game uses,
+	# given long enough to arrive.
+	await _wait(220)
+	# Roadblocks need a moment to find a node they are happy with.
+	if level >= RoadblockManager.MIN_LEVEL:
+		for attempt in 4:
+			if RoadblockManager.count() > 0:
+				break
+			UnderworldDebug.spawn_roadblock()
+			await _wait(20)
+		# Stand where one of them is, so the frame is the block rather than
+		# the empty road it is not on.
+		if RoadblockManager.count() > 0:
+			var at: Vector3 = RoadblockManager.positions()[0]
+			player.global_position = at + Vector3(0.0, 0.6, 26.0)
+			await _wait(60)
+
+
+## Breaking away, the search that follows, and the moment it runs out.
+func _search_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	player.global_position = Vector3(0.0, 0.5, 40.0)
+	await _wait(60)
+	UnderworldDebug.force_report(CrimeManager.CrimeType.STORE_ROBBERY)
+	UnderworldDebug.force_report(CrimeManager.CrimeType.CARJACKING)
+	await _wait(150)
+
+	# Away from them, then out of sight.
+	player.global_position = Vector3(-58.0, 0.5, 66.0)
+	UnderworldDebug.break_line_of_sight()
+	UnderworldDebug.start_search()
+	await _wait(90)
+
+	if scenario == "wanted_cleared":
+		WantedManager.clear_wanted("WANTED LEVEL CLEARED")
+		await _wait(30)
+	elif scenario == "search_map":
+		var map: Control = hud.get_node_or_null("CityMap")
+		if map != null:
+			map.call("open")
+			await _wait(16)
+
+
+## A car the police are looking for, and the player after leaving it unseen.
+func _vehicle_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	player.global_position = Vector3(-20.0, 0.5, 44.0)
+	await _wait(60)
+	var record := VehicleRegistry.grant(&"sedan", Transform3D(
+		Basis.IDENTITY, Vector3(-20.0, 0.4, 50.0)
+	))
+	if record == null:
+		return
+	UnderworldDebug.mark_vehicle_stolen(record)
+	var car := VehicleRegistry.spawn(record)
+	await _wait(30)
+	UnderworldDebug.force_report(CrimeManager.CrimeType.CARJACKING)
+	if car != null:
+		UnderworldDebug.mark_vehicle_known(car)
+	await _wait(60)
+
+	if scenario == "switched_vehicle":
+		# §158 — out of it where nobody is watching, and away on foot.
+		UnderworldDebug.break_line_of_sight()
+		UnderworldDebug.lose_identity()
+		UnderworldDebug.start_search()
+		player.global_position = Vector3(-48.0, 0.5, 62.0)
+		await _wait(90)
+
+
+## §117 — officers coming after somebody who left the car behind.
+func _foot_pursuit(main: Node) -> void:
+	var player: Node3D = GameManager.player
+	player.global_position = Vector3(0.0, 0.5, 30.0)
+	await _wait(60)
+	UnderworldDebug.force_report(CrimeManager.CrimeType.ROBBERY)
+	UnderworldDebug.force_report(CrimeManager.CrimeType.ASSAULT)
+	await _wait(180)
+	UnderworldDebug.force_pursuit()
+	# Let the officers actually get moving before the shutter.
+	await _wait(150)
+
+
+## The three addresses, from outside and from the back room.
+func _underworld_location(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	UnderworldDebug.set_reputation(55)
+	UnderworldDebug.unlock_all_contacts()
+
+	var wanted_door := {
+		"fence_exterior": &"quayside_fence",
+		"fence_screen": &"quayside_fence",
+		"chop_shop": &"dock_road_garage",
+		"chop_delivery": &"dock_road_garage",
+		"criminal_contact": &"the_broker",
+		"job_offer": &"the_broker",
+	}
+	var id: StringName = wanted_door.get(scenario, &"quayside_fence")
+	var door := _contact_door(id)
+	if door == null:
+		return
+	player.global_position = door.global_position + Vector3(0.0, 0.6, 7.0)
+	await _wait(120)
+
+	match scenario:
+		"fence_screen":
+			UnderworldDebug.give_stolen_goods(&"energy_drink", 7)
+			UnderworldDebug.give_stolen_goods(&"snack_bar", 5)
+		"chop_delivery":
+			var record := VehicleRegistry.grant(&"suv", Transform3D(
+				Basis.IDENTITY, door.global_position + Vector3(3.0, 0.4, 8.0)
+			))
+			if record != null:
+				UnderworldDebug.mark_vehicle_stolen(record)
+				VehicleRegistry.spawn(record)
+			await _wait(30)
+
+	if scenario == "fence_exterior" or scenario == "chop_shop":
+		return
+
+	var screen: Node = _hud_screen(hud, "ContactPanel")
+	screen.call("open", CriminalContactData.by_id(id))
+	await _wait(14)
+
+
+## The underworld screen itself.
+func _underworld_screen(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	UnderworldDebug.set_reputation(62)
+	UnderworldDebug.unlock_all_contacts()
+	# Something behind the figures, so no tab reads zero.
+	UnderworldDebug.give_stolen_goods(&"energy_drink", 6)
+	var inventory = player.call("get_inventory")
+	Underworld.sell_to_fence(inventory)
+	var job := UnderworldDebug.create_job(&"the_broker")
+	if job != null:
+		Underworld.accept_job(job)
+
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	await _wait(150)
+	var screen: Node = _hud_screen(hud, "UnderworldPanel")
+	screen.call(
+		"open",
+		UnderworldPanel.Page.JOBS if scenario == "underworld_jobs"
+			else UnderworldPanel.Page.STANDING
+	)
+	await _wait(14)
+
+
+## §107 and §173 — the company screen, while its owner is wanted.
+func _business_while_wanted(main: Node) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	var market := _open_shop_at(
+		main, &"unit_main_18", "Interiors/MainStreetUnit", "Silas Market"
+	)
+	BusinessManager.deposit_to_business(market, 40000)
+	CompanyDebug.stand_up_logistics(market)
+	market.manual_override = BusinessInstance.Override.FORCE_OPEN
+	market.set_open(true)
+	for i in 5:
+		BusinessManager.simulate_hour_now(market, 12)
+
+	player.global_position = Vector3(0.0, 0.5, 40.0)
+	await _wait(60)
+	UnderworldDebug.force_report(CrimeManager.CrimeType.STORE_ROBBERY)
+	UnderworldDebug.force_report(CrimeManager.CrimeType.CARJACKING)
+	await _wait(180)
+
+	var company: Node = _hud_screen(hud, "CompanyDashboard")
+	company.call("open", CompanyDashboard.Page.LOCATIONS)
+	await _wait(14)
+
+
+## The door of a given contact, wherever in the city it stands.
+func _contact_door(contact_id: StringName) -> Node3D:
+	for node in get_tree().get_nodes_in_group(&"criminal_contact"):
+		var door := node as CriminalContactPoint
+		if door != null and door.contact_id == contact_id:
+			return door
+	return null

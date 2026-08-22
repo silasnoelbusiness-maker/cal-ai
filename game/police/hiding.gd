@@ -65,6 +65,16 @@ static func observed(tree: SceneTree) -> bool:
 	return false
 
 
+## How often the answer is worth recomputing. The HUD asks every frame and the
+## answer involves a raycast per nearby officer, which is exactly the kind of
+## thing §180 warns about — the geometry does not change in a sixtieth of a
+## second, so neither does this.
+const CACHE_SECONDS := 0.25
+
+static var _cached: bool = false
+static var _cached_at: float = -1.0
+
+
 ## The question the HUD asks: is the player actually hidden right now.
 ##
 ## Three things have to be true. They are somewhere that hides them, nobody can
@@ -73,13 +83,24 @@ static func observed(tree: SceneTree) -> bool:
 ## rather than as a cone, because a player who was visible half a second ago
 ## was watched going in whatever the geometry says now.
 static func is_hidden(tree: SceneTree) -> bool:
+	var now := float(Time.get_ticks_msec()) / 1000.0
+	if _cached_at >= 0.0 and now - _cached_at < CACHE_SECONDS:
+		return _cached
+	_cached_at = now
+	_cached = _compute(tree)
+	return _cached
+
+
+static func _compute(tree: SceneTree) -> bool:
 	if not WantedManager.is_wanted():
 		return false
 	if PoliceMemory.has_fresh_sighting():
 		return false
-	if observed(tree):
+	if not in_cover(tree):
+		# Cheapest test first: standing in the street is not hiding, and there
+		# is no reason to cast a ray at every officer to find that out.
 		return false
-	return in_cover(tree)
+	return not observed(tree)
 
 
 ## §34's other half — a known car parked outside still draws attention, so

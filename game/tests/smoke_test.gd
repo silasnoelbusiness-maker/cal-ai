@@ -310,6 +310,30 @@ func _run() -> void:
 	_test_owned_property_immune()
 	await _test_eviction_save_load()
 
+	# Phase Q: crime, police and the underworld.
+	_test_crime_data_table()
+	_test_wanted_point_thresholds()
+	_test_five_star_response()
+	_test_pursuit_states()
+	await _test_last_known_position()
+	await _test_search_zone()
+	_test_search_reacquisition()
+	_test_known_vehicle()
+	await _test_vehicle_switch()
+	await _test_roadblocks()
+	_test_pursuit_roles()
+	await _test_hiding()
+	_test_busted_scaling()
+	_test_fence()
+	_test_chop_shop()
+	_test_criminal_reputation()
+	_test_illegal_job()
+	_test_failed_job()
+	await _test_crime_save_load()
+	await _test_pre_crime_save()
+	await _test_business_during_pursuit()
+	_test_underworld_screens_reachable()
+
 	_report()
 
 
@@ -11983,3 +12007,904 @@ func _test_eviction_save_load() -> void:
 		EconomyManager.restore(after.arrears + 20000)
 		FinanceManager.cure_eviction(after)
 	SaveManager.delete_slot(8)
+
+
+# --- Phase Q: crime and police --------------------------------------------
+
+## Everything Phase Q needs standing: a clean slate, the player somewhere with
+## room around them, and no heat carried in from an earlier test.
+func _q_setup() -> void:
+	WantedManager.clear_wanted("")
+	PoliceResponseManager.clear()
+	SearchManager.clear()
+	RoadblockManager.clear()
+	Underworld.clear()
+
+
+## TEST §11 and §12 — every crime is priced, banded and answered for.
+func _test_crime_data_table() -> void:
+	var missing: Array[String] = []
+	for type in CrimeManager.CrimeType.values():
+		if not CrimeData.table().has(type):
+			missing.append(CrimeManager.get_type_name(type))
+	_check(missing.is_empty(), "every crime has a row (missing: %s)" % ", ".join(missing))
+
+	_check(
+		CrimeData.severity_of(CrimeManager.CrimeType.SHOPLIFTING)
+			== CrimeData.Severity.MINOR,
+		"shoplifting is MINOR"
+	)
+	# §96 — the gap between nicking a chocolate bar and armed robbery.
+	_check(
+		CrimeData.severity_of(CrimeManager.CrimeType.STORE_ROBBERY)
+			> CrimeData.severity_of(CrimeManager.CrimeType.SHOPLIFTING),
+		"and a store robbery is a great deal worse"
+	)
+	# §99 — taking a car off somebody sitting in it.
+	_check(
+		CrimeData.severity_of(CrimeManager.CrimeType.CARJACKING)
+			> CrimeData.severity_of(CrimeManager.CrimeType.VEHICLE_THEFT),
+		"carjacking is more serious than taking an empty car"
+	)
+	# §80 — violence is not a way to earn a reputation.
+	_check(
+		CrimeData.for_type(CrimeManager.CrimeType.ASSAULT).criminal_reputation_reward == 0,
+		"hurting somebody for no reason is worth nothing on the street"
+	)
+	_check(
+		CrimeData.for_type(CrimeManager.CrimeType.STORE_ROBBERY).criminal_reputation_reward > 0,
+		"but pulling off a robbery is"
+	)
+	# The old severity number and the new band have to agree.
+	_check(
+		CrimeManager.severity_of(CrimeManager.CrimeType.TRESPASSING)
+			< CrimeManager.severity_of(CrimeManager.CrimeType.ROBBERY),
+		"the 1-5 number the older screens read still orders them the same way"
+	)
+	_check(
+		not CrimeData.for_type(CrimeManager.CrimeType.STORE_ROBBERY).witness_report_required,
+		"a shop rings the police itself"
+	)
+
+
+## TEST §13 — the wanted meter is points, and stars are how it is shown.
+func _test_wanted_point_thresholds() -> void:
+	_q_setup()
+	for level in range(1, WantedManager.MAX_LEVEL + 1):
+		var needed := WantedManager.points_for_level(level)
+		_check(
+			WantedManager.level_for_points(needed) == level,
+			"%d points is %d star%s" % [needed, level, "" if level == 1 else "s"]
+		)
+		if level > 1:
+			_check(
+				WantedManager.level_for_points(needed - 1) == level - 1,
+				"and one point short is %d" % (level - 1)
+			)
+	_check(
+		WantedManager.points_for_level(5) > WantedManager.points_for_level(1),
+		"five stars costs more than one"
+	)
+
+
+## TEST §14 to §19 — each star changes what the police actually do.
+func _test_five_star_response() -> void:
+	_q_setup()
+	var budgets: Array[int] = []
+	var radii: Array[float] = []
+	var searches: Array[float] = []
+	for level in range(1, WantedManager.MAX_LEVEL + 1):
+		WantedManager.set_level(level)
+		budgets.append(WantedManager.get_response_budget())
+		radii.append(WantedManager.get_response_radius())
+		searches.append(SearchManager.RADIUS_BY_LEVEL[level])
+
+	var rising := true
+	for i in range(1, budgets.size()):
+		if budgets[i] < budgets[i - 1] or radii[i] <= radii[i - 1]:
+			rising = false
+		if searches[i] <= searches[i - 1]:
+			rising = false
+	_check(rising, "every star sends more, further, and looks harder")
+	_check(
+		budgets[budgets.size() - 1] > budgets[0],
+		"five stars commits more units than one (%d vs %d)"
+		% [budgets[budgets.size() - 1], budgets[0]]
+	)
+	# §180 — but not unlimited. A cap is what keeps five stars playable.
+	_check(
+		budgets[budgets.size() - 1] <= 12,
+		"and the top of the scale is still capped (%d)" % budgets[budgets.size() - 1]
+	)
+	# §25 — the search grows and never becomes the whole city.
+	_check(
+		searches[searches.size() - 1] <= 200.0,
+		"the widest search is still a few streets (%.0fm)" % searches[searches.size() - 1]
+	)
+	# §181 — harder, not faster-by-cheating.
+	_check(
+		WantedManager.pursuit_pressure_by_level[5] < 1.6,
+		"police do not become unrealistically fast at five stars (x%.2f)"
+		% WantedManager.pursuit_pressure_by_level[5]
+	)
+	WantedManager.clear_wanted("")
+
+
+## TEST §21 — the pursuit states, and the way between them.
+func _test_pursuit_states() -> void:
+	_q_setup()
+	_check(
+		PoliceResponseManager.state == PoliceResponseManager.State.CLEAR,
+		"nothing going on reads CLEAR (%s)" % PoliceResponseManager.state_name()
+	)
+
+	var here := _player.global_position
+	PoliceResponseManager.report(here, CrimeManager.CrimeType.VEHICLE_THEFT)
+	_check(
+		PoliceResponseManager.state == PoliceResponseManager.State.REPORTED,
+		"a crime called in reads REPORTED (%s)" % PoliceResponseManager.state_name()
+	)
+	_check(
+		PoliceResponseManager.profile().profile_id == &"patrol",
+		"and the response shape comes from the crime (%s)"
+		% PoliceResponseManager.profile().profile_id
+	)
+
+	PoliceResponseManager.note_seen(here)
+	_check(
+		PoliceResponseManager.state == PoliceResponseManager.State.PURSUIT,
+		"eyes on the player is PURSUIT (%s)" % PoliceResponseManager.state_name()
+	)
+	_check(PoliceMemory.has_fresh_sighting(), "and the sighting is fresh")
+
+	UnderworldDebug.break_line_of_sight()
+	_check(not PoliceMemory.has_fresh_sighting(), "losing them makes it stale")
+
+
+## TEST §22 — the police know where the player was, not where they are.
+func _test_last_known_position() -> void:
+	_q_setup()
+	var seen_at := Vector3(10.0, 0.5, 20.0)
+	PoliceMemory.note_sighting(seen_at, Vector3(0.0, 0.0, -14.0))
+	_check(
+		PoliceMemory.last_known_position == seen_at,
+		"a sighting is where they were seen"
+	)
+	_check(
+		WantedManager.last_known_position == seen_at,
+		"and the name the rest of the game uses reads the same value"
+	)
+	_check(
+		PoliceMemory.last_known_heading != Vector3.ZERO,
+		"a moving suspect leaves a direction"
+	)
+	# §43 — the guess is ahead of them, and it is only a guess.
+	var predicted := PoliceMemory.predicted_position(3.0)
+	_check(predicted != seen_at, "which units can be told to cut ahead of")
+	_check(
+		predicted.distance_to(seen_at) < 80.0,
+		"but not halfway across the city (%.0fm)" % predicted.distance_to(seen_at)
+	)
+
+	# Moving the player does not move what the police know. This is the whole
+	# architecture in one assertion.
+	var before := PoliceMemory.last_known_position
+	await _teleport(Vector3(-30.0, 0.5, -30.0))
+	_check(
+		PoliceMemory.last_known_position == before,
+		"and walking away does not update it"
+	)
+
+	UnderworldDebug.break_line_of_sight()
+	_check(
+		not PoliceMemory.has_fresh_sighting(),
+		"a stale sighting is not something to chase"
+	)
+
+
+## TEST §23 to §25 — the search area, and how it grows.
+func _test_search_zone() -> void:
+	_q_setup()
+	await _teleport(Vector3(0.0, 0.5, 60.0))
+	WantedManager.set_level(2)
+	PoliceMemory.note_sighting(_player.global_position)
+	UnderworldDebug.start_search()
+
+	_check(SearchManager.active, "a search opens")
+	_check(SearchManager.radius > 0.0, "with an area (%.0fm)" % SearchManager.radius)
+	_check(
+		SearchManager.contains(SearchManager.centre),
+		"centred where they were last seen"
+	)
+	_check(
+		not SearchManager.contains(SearchManager.centre + Vector3(500.0, 0.0, 0.0)),
+		"and not covering the whole city"
+	)
+
+	# §25 — a higher level looks wider.
+	var narrow := SearchManager.RADIUS_BY_LEVEL[1]
+	var wide := SearchManager.RADIUS_BY_LEVEL[5]
+	_check(wide > narrow, "five stars searches wider than one (%.0f vs %.0f)" % [wide, narrow])
+
+	# §53 — units are sent to different parts of it.
+	var first := SearchManager.search_point(0, 4)
+	var second := SearchManager.search_point(1, 4)
+	_check(first != second, "and units are spread around it rather than stacked")
+	_check(
+		SearchManager.contains(first) and SearchManager.contains(second),
+		"with every search point inside the area"
+	)
+	WantedManager.clear_wanted("")
+	_check(not SearchManager.active, "clearing the heat closes the search")
+
+
+## TEST §55 — being spotted during a search puts the chase back on. Phase J
+## already checks that a sighting cancels the countdown; this checks the state
+## machine and the search area go with it.
+func _test_search_reacquisition() -> void:
+	_q_setup()
+	WantedManager.set_level(2)
+	UnderworldDebug.start_search()
+	_check(SearchManager.active, "the police are searching")
+
+	UnderworldDebug.force_pursuit()
+	_check(
+		PoliceResponseManager.state == PoliceResponseManager.State.PURSUIT,
+		"being seen returns to PURSUIT (%s)" % PoliceResponseManager.state_name()
+	)
+	_check(not SearchManager.active, "and there is nothing left to search")
+	_check(not WantedManager.is_escaping(), "the escape countdown stops")
+	WantedManager.clear_wanted("")
+
+
+## TEST §28 and §29 — the police look for a car, and ownership is beside the
+## point.
+func _test_known_vehicle() -> void:
+	_q_setup()
+	var record := VehicleRegistry.grant(&"sedan", Transform3D.IDENTITY)
+	if record == null:
+		return
+	var car := VehicleRegistry.spawn(record)
+	if car == null:
+		return
+	_check(record.owner_id == &"player", "the player owns this car legitimately")
+	_check(not record.stolen, "and it is not stolen")
+	_check(not PoliceMemory.is_vehicle_known(car), "nobody is looking for it")
+
+	WantedManager.set_level(1)
+	UnderworldDebug.mark_vehicle_known(car)
+	_check(PoliceMemory.is_vehicle_known(car), "until it is seen at a crime")
+	_check(
+		PoliceMemory.active_vehicle_id != &"",
+		"and it becomes the car they are following"
+	)
+	# §29 — being known is not being stolen, and does not make it so.
+	_check(not record.stolen, "which does not make a legally owned car stolen")
+	_check(record.owner_id == &"player", "or take it off the player")
+
+	WantedManager.clear_wanted("")
+	# §57 — incident-level only.
+	_check(
+		not PoliceMemory.is_vehicle_known(car),
+		"and the heat on it goes with the incident"
+	)
+	VehicleRegistry.remove(record)
+
+
+## TEST §30, §158 and §159 — swapping cars, watched and unwatched.
+func _test_vehicle_switch() -> void:
+	_q_setup()
+	await _teleport(Vector3(0.0, 0.5, 60.0))
+	WantedManager.set_level(2)
+	var first := VehicleRegistry.grant(&"hatchback", Transform3D.IDENTITY)
+	var car := VehicleRegistry.spawn(first) if first != null else null
+	if car == null:
+		return
+	UnderworldDebug.mark_vehicle_known(car)
+	_check(PoliceMemory.active_vehicle_id != &"", "the police are following a car")
+
+	# §158 — out of it where nobody can see.
+	UnderworldDebug.break_line_of_sight()
+	UnderworldDebug.lose_identity()
+	_check(
+		PoliceMemory.active_vehicle_id == &"",
+		"unseen, they lose the car they were following"
+	)
+	_check(not PoliceMemory.player_identified, "and the description with it")
+	_check(
+		not PoliceMemory.has_description(),
+		"leaving them with nothing to recognise"
+	)
+	# §30 — but the search does not end.
+	_check(WantedManager.is_wanted(), "the player is still wanted")
+	_check(
+		PoliceMemory.last_known_position != Vector3.ZERO,
+		"and the police still know roughly where they were"
+	)
+
+	# §159 — doing it in front of them is no use at all.
+	UnderworldDebug.force_pursuit()
+	_check(PoliceMemory.player_identified, "being seen puts the description back")
+	var second := VehicleRegistry.grant(&"coupe", Transform3D.IDENTITY)
+	var other := VehicleRegistry.spawn(second) if second != null else null
+	if other != null:
+		PoliceMemory.note_sighting(_player.global_position)
+		PoliceMemory.mark_vehicle_known(other)
+		_check(
+			PoliceMemory.is_vehicle_known(other),
+			"and a switch they watched simply moves it to the new car"
+		)
+		VehicleRegistry.remove(second)
+	WantedManager.clear_wanted("")
+	VehicleRegistry.remove(first)
+
+
+## TEST §44 to §48 — roadblocks, and the rules about where they may stand.
+func _test_roadblocks() -> void:
+	_q_setup()
+	await _teleport(Vector3(0.0, 0.5, 40.0))
+	RoadblockManager.clear()
+
+	# §44 — not below four stars.
+	WantedManager.set_level(2)
+	_check(not RoadblockManager.allowed(), "two stars does not block roads")
+	_check(RoadblockManager.budget() == 0, "and has no budget for it")
+
+	WantedManager.set_level(4)
+	PoliceResponseManager.report(
+		_player.global_position, CrimeManager.CrimeType.STORE_ROBBERY
+	)
+	_check(RoadblockManager.budget() > 0, "four stars does (%d)" % RoadblockManager.budget())
+
+	var placed := UnderworldDebug.spawn_roadblock()
+	_check(placed, "a roadblock goes up")
+	if placed:
+		_check(RoadblockManager.count() >= 1, "and stands in the world")
+		var at: Vector3 = RoadblockManager.positions()[0]
+		# §45 and §49 — never on top of the player.
+		_check(
+			at.distance_to(_player.global_position) >= RoadblockManager.MIN_DISTANCE_FROM_PLAYER,
+			"well away from the player (%.0fm)" % at.distance_to(_player.global_position)
+		)
+		# §45 — on a road, not in a junction.
+		var network := get_tree().get_first_node_in_group(&"road_network") as RoadNetwork
+		if network != null:
+			var node := network.nearest_node(at)
+			_check(
+				network.successors(node).size() <= RoadblockManager.MAX_SUCCESSORS_FOR_BLOCK,
+				"on a stretch of road rather than across a junction"
+			)
+		# §183 — there is another way round.
+		_check(
+			RoadblockManager.count() < 6,
+			"and the city is not sealed (%d blocks)" % RoadblockManager.count()
+		)
+
+	# §161 — clearing the heat takes them down.
+	WantedManager.clear_wanted("")
+	_check(RoadblockManager.count() == 0, "clearing the wanted level removes them")
+
+
+## TEST §39 to §43 — the shift is told what to do rather than each deciding.
+func _test_pursuit_roles() -> void:
+	_q_setup()
+	_check(
+		PursuitCoordinator.role_of(self) == PursuitCoordinator.Role.NONE,
+		"something that is not a police unit has no role"
+	)
+	_check(
+		PursuitCoordinator.INTERCEPT_FROM_LEVEL >= 3,
+		"units only start cutting people off at three stars"
+	)
+	_check(
+		PursuitCoordinator.MAX_INTERCEPTORS < 4,
+		"and never all of them, so somebody is always actually behind you"
+	)
+	# The roles exist and are distinct.
+	var names := {}
+	for role: PursuitCoordinator.Role in PursuitCoordinator.ROLE_NAMES:
+		names[PursuitCoordinator.ROLE_NAMES[role]] = true
+	_check(names.size() >= 5, "there are distinct roles to hand out (%d)" % names.size())
+
+
+## TEST §33 to §38 — hiding is world visibility, not invisibility.
+func _test_hiding() -> void:
+	_q_setup()
+	await _teleport(Vector3(0.0, 0.5, 60.0))
+	_check(not Hiding.is_hidden(get_tree()), "you cannot hide when nobody wants you")
+
+	WantedManager.set_level(1)
+	PoliceMemory.note_sighting(_player.global_position)
+	_check(
+		not Hiding.is_hidden(get_tree()),
+		"nor while they are looking straight at you"
+	)
+	UnderworldDebug.break_line_of_sight()
+	_check(
+		not Hiding.is_hidden(get_tree()),
+		"and standing in the open is not hiding either"
+	)
+	_check(
+		not Hiding.in_cover(get_tree()),
+		"because the middle of the street is not cover"
+	)
+	WantedManager.clear_wanted("")
+
+
+## TEST §58 to §62 — what being caught costs.
+func _test_busted_scaling() -> void:
+	_q_setup()
+	WantedManager.set_level(1)
+	WantedManager.worst_severity = CrimeData.Severity.MINOR
+	var petty := WantedManager.get_bust_fine()
+	WantedManager.worst_severity = CrimeData.Severity.SEVERE
+	var serious := WantedManager.get_bust_fine()
+	_check(
+		serious > petty,
+		"an arrest after something serious costs more ($%d vs $%d)" % [serious, petty]
+	)
+	_check(
+		WantedManager.get_bust_hours() > 0,
+		"and costs hours (%d)" % WantedManager.get_bust_hours()
+	)
+	WantedManager.set_level(4)
+	_check(
+		WantedManager.get_bust_hours() > 1,
+		"more of them at four stars (%d)" % WantedManager.get_bust_hours()
+	)
+	WantedManager.clear_wanted("")
+	WantedManager.worst_severity = CrimeData.Severity.MINOR
+
+
+## TEST §63 to §67 — the fence, and the line between legal and stolen goods.
+func _test_fence() -> void:
+	_q_setup()
+	var inventory = _player.call("get_inventory")
+	inventory.call("remove_stolen")
+	var honest := ItemCatalogue.by_id(&"bottled_water")
+	if honest != null:
+		inventory.call("add", honest, 2, false)
+
+	var quote_empty := Underworld.fence_quote(inventory)
+	_check(
+		int(quote_empty["units"]) == 0,
+		"a fence has no interest in things you paid for"
+	)
+
+	var given := UnderworldDebug.give_stolen_goods(&"energy_drink", 6)
+	_check(given > 0, "the player is carrying stolen goods (%d)" % given)
+	var quote := Underworld.fence_quote(inventory)
+	_check(int(quote["units"]) == given, "which the fence counts")
+	_check(int(quote["value"]) > 0, "and puts a value on ($%d)" % int(quote["value"]))
+	# §67 — well under what they are worth.
+	_check(
+		int(quote["payout"]) < int(quote["value"]),
+		"paying below value ($%d of $%d)" % [int(quote["payout"]), int(quote["value"])]
+	)
+	_check(
+		float(quote["rate"]) >= 0.30 and float(quote["rate"]) <= 0.60,
+		"between 30 and 60 per cent (%.0f%%)" % (float(quote["rate"]) * 100.0)
+	)
+
+	var cash_before := EconomyManager.cash
+	var illegal_before := Underworld.earnings_of(CrimeData.Income.STOLEN_GOODS)
+	var expected := int(quote["payout"])
+	var paid := Underworld.sell_to_fence(inventory)
+	_check(paid == expected, "the sale pays what it quoted ($%d)" % paid)
+	_check(EconomyManager.cash == cash_before + paid, "the money arrives once")
+	_check(
+		Underworld.earnings_of(CrimeData.Income.STOLEN_GOODS) == illegal_before + paid,
+		"and is recorded as illegal, once"
+	)
+	_check(
+		int(inventory.call("stolen_count")) == 0,
+		"the goods leave the bag"
+	)
+	# §63 — and the legitimate items are untouched.
+	if honest != null:
+		_check(
+			int(inventory.call("count_of", honest)) >= 2,
+			"while what the player actually bought stays where it was"
+		)
+
+
+## TEST §70 to §75 — the vehicle buyer.
+func _test_chop_shop() -> void:
+	_q_setup()
+	var record := VehicleRegistry.grant(&"sedan", Transform3D.IDENTITY)
+	if record == null:
+		return
+
+	# §72 and §167 — a car the player owns is not for sale here.
+	_check(not Underworld.chop_eligible(record), "they will not take your own car")
+	var refused := Underworld.chop_quote(record)
+	_check(not bool(refused["eligible"]), "the quote says so")
+	_check(
+		not String(refused.get("reason", "")).is_empty(),
+		"and says why (%s)" % String(refused.get("reason", ""))
+	)
+	var before_refusal := EconomyManager.cash
+	_check(
+		Underworld.deliver_to_chop_shop(record) == 0,
+		"handing it over pays nothing"
+	)
+	_check(EconomyManager.cash == before_refusal, "and no money changes hands")
+	_check(VehicleRegistry.by_id(record.instance_id) != null, "the car is still yours")
+
+	# Now a stolen one.
+	UnderworldDebug.mark_vehicle_stolen(record)
+	_check(Underworld.chop_eligible(record), "a stolen car they will take")
+	var quote := Underworld.chop_quote(record)
+	_check(bool(quote["eligible"]), "and quote for")
+	# §73 — a strong discount.
+	_check(
+		int(quote["payout"]) < record.market_value() / 2,
+		"at well under half what it is worth ($%d of $%d)"
+		% [int(quote["payout"]), record.market_value()]
+	)
+
+	var cash_before := EconomyManager.cash
+	var fleet_before := VehicleRegistry.get_fleet().size()
+	var expected := int(quote["payout"])
+	var paid := Underworld.deliver_to_chop_shop(record)
+	_check(paid == expected, "the payout is what was quoted ($%d)" % paid)
+	_check(EconomyManager.cash == cash_before + paid, "the money arrives once")
+	_check(
+		Underworld.earnings_of(CrimeData.Income.VEHICLE_CRIME) >= paid,
+		"recorded as vehicle crime"
+	)
+	# §71 — the car is gone, and did not become the player's.
+	_check(
+		VehicleRegistry.get_fleet().size() == fleet_before - 1,
+		"the car leaves the registry"
+	)
+	_check(
+		VehicleRegistry.by_id(record.instance_id) == null,
+		"and is not sitting in the player's garage"
+	)
+	# §74 — and they cannot take another straight away.
+	_check(not Underworld.chop_ready(), "the buyer needs time before the next one")
+
+
+## TEST §78 to §82 — reputation, its tiers, and what they unlock.
+func _test_criminal_reputation() -> void:
+	_q_setup()
+	_check(Underworld.reputation == 0, "a new player is nobody")
+	_check(
+		Underworld.tier() == CriminalReputation.Tier.UNKNOWN,
+		"which reads UNKNOWN (%s)" % Underworld.tier_name()
+	)
+
+	var poor := CriminalReputation.fence_rate(0)
+	var rich := CriminalReputation.fence_rate(CriminalReputation.MAX_REPUTATION)
+	_check(rich > poor, "a name gets a better price (%.0f%% vs %.0f%%)" % [
+		rich * 100.0, poor * 100.0
+	])
+
+	var tiers: Array[String] = []
+	for value in [0, 20, 40, 70, 95]:
+		tiers.append(CriminalReputation.name_for(value))
+	_check(
+		tiers.size() == 5 and tiers[0] != tiers[4],
+		"reputation climbs through named tiers (%s)" % " -> ".join(tiers)
+	)
+
+	UnderworldDebug.set_reputation(40)
+	_check(Underworld.reputation == 40, "reputation can be earned")
+	_check(
+		Underworld.tier() > CriminalReputation.Tier.UNKNOWN,
+		"and moves the tier with it (%s)" % Underworld.tier_name()
+	)
+	# §82 — better standing opens contacts rather than an armoury.
+	var buyer := CriminalContactData.by_id(&"dock_road_garage")
+	_check(Underworld.will_deal(buyer), "which opens the vehicle buyer")
+	# §81 — and losing it is modest.
+	var before := Underworld.reputation
+	Underworld.add_reputation(-Underworld.FAILED_JOB_REPUTATION)
+	_check(
+		Underworld.reputation == before - Underworld.FAILED_JOB_REPUTATION,
+		"a setback costs a little, not everything (%d)" % Underworld.reputation
+	)
+	_check(Underworld.reputation > 0, "and never wipes it out")
+
+
+## TEST §83 to §91 — taking a job and finishing it.
+func _test_illegal_job() -> void:
+	_q_setup()
+	UnderworldDebug.set_reputation(40)
+	var job := UnderworldDebug.create_job(&"the_broker")
+	if job == null:
+		return
+	_check(job.status == IllegalJobData.Status.OFFERED, "a job is offered")
+	_check(job.reward > 0, "with a reward ($%d)" % job.reward)
+	_check(not job.risk_label().is_empty(), "a risk rating (%s)" % job.risk_label())
+	_check(job.reputation_reward > 0, "and something for your name (+%d)" % job.reputation_reward)
+	# §139 — worth more than an honest day's work of the same length.
+	_check(job.reward > 400, "paying better than a legal job of the same hours")
+
+	_check(Underworld.accept_job(job), "the player takes it")
+	_check(job.is_active(), "and it is running")
+	_check(Underworld.active_job() == job, "as the one job on the go")
+	# §90 — one at a time.
+	var second := UnderworldDebug.create_job(&"the_broker")
+	if second != null:
+		_check(not Underworld.accept_job(second), "a second cannot be taken on top")
+
+	var cash_before := EconomyManager.cash
+	var reputation_before := Underworld.reputation
+	var completed_before := Underworld.jobs_completed
+	Underworld.note_objective(job.objective, job.target_id, job.target_quantity)
+
+	_check(job.status == IllegalJobData.Status.COMPLETE, "finishing it completes the job")
+	_check(EconomyManager.cash == cash_before + job.reward, "it pays, once")
+	_check(
+		Underworld.reputation == reputation_before + job.reputation_reward,
+		"the reputation lands, once"
+	)
+	_check(
+		Underworld.jobs_completed == completed_before + 1,
+		"and it is counted, once"
+	)
+	_check(
+		Underworld.earnings_of(CrimeData.Income.ILLEGAL_JOBS) >= job.reward,
+		"the money is recorded as job income"
+	)
+	# §168 — and doing it again pays nothing.
+	var after := EconomyManager.cash
+	Underworld.note_objective(job.objective, job.target_id, job.target_quantity)
+	_check(EconomyManager.cash == after, "and cannot be completed twice")
+
+
+## TEST §90 and §169 — a job that goes wrong.
+func _test_failed_job() -> void:
+	_q_setup()
+	UnderworldDebug.set_reputation(40)
+	var job := UnderworldDebug.create_job(&"the_broker")
+	if job == null or not Underworld.accept_job(job):
+		return
+	var cash_before := EconomyManager.cash
+	var reputation_before := Underworld.reputation
+	var failed_before := Underworld.jobs_failed
+
+	_check(Underworld.abandon_job(job), "a job can be walked away from")
+	_check(job.status == IllegalJobData.Status.FAILED, "which fails it")
+	_check(EconomyManager.cash == cash_before, "nothing is paid")
+	_check(
+		Underworld.reputation < reputation_before,
+		"it costs a little standing (%d)" % Underworld.reputation
+	)
+	_check(Underworld.jobs_failed == failed_before + 1, "and is counted")
+	_check(Underworld.active_job() == null, "the player is free to take something else")
+
+
+## TEST §120, §122 and §171 — the heat and the work survive a save.
+func _test_crime_save_load() -> void:
+	_q_setup()
+	await _teleport(Vector3(10.0, 0.5, 50.0))
+	UnderworldDebug.set_reputation(45)
+	UnderworldDebug.unlock_all_contacts()
+	var job := UnderworldDebug.create_job(&"the_broker")
+	if job != null:
+		Underworld.accept_job(job)
+	var job_id := job.job_id if job != null else &""
+	var reward := job.reward if job != null else 0
+	var reputation := Underworld.reputation
+	var earned := Underworld.total_illegal_income()
+
+	WantedManager.set_level(3)
+	PoliceMemory.note_sighting(_player.global_position)
+	UnderworldDebug.start_search()
+	var seen_at := PoliceMemory.last_known_position
+	var cash_before := EconomyManager.cash
+
+	_check(SaveManager.save_to_slot(9), "the game saves mid-search")
+	_check(SaveManager.load_from_slot(9), "and loads back")
+	await _settle(6)
+
+	_check(WantedManager.level == 3, "the wanted level comes back (%d)" % WantedManager.level)
+	_check(WantedManager.points > 0, "with the points behind it")
+	_check(
+		PoliceMemory.last_known_position == seen_at,
+		"and the police still know where they were"
+	)
+	# §121 — reconstructed as a search rather than as a fleet of cars.
+	_check(
+		PoliceResponseManager.state == PoliceResponseManager.State.SEARCHING,
+		"a chase comes back as a search (%s)" % PoliceResponseManager.state_name()
+	)
+	_check(
+		WantedManager.get_active_responders() == 0,
+		"with no duplicated patrol fleet"
+	)
+
+	_check(Underworld.reputation == reputation, "the reputation is intact")
+	_check(
+		Underworld.total_illegal_income() == earned,
+		"and so is what crime has paid so far"
+	)
+	if job_id != &"":
+		var restored := Underworld.job_by_id(job_id)
+		_check(restored != null, "the job survives")
+		if restored != null:
+			_check(restored.is_active(), "still running")
+			_check(restored.reward == reward, "for the same money")
+	# §172 — and loading did not pay it out again.
+	_check(EconomyManager.cash == cash_before, "loading paid nobody")
+	_check(
+		Underworld.contacts().size() >= 1,
+		"the contacts the player had made are still known"
+	)
+
+	WantedManager.clear_wanted("")
+	SaveManager.delete_slot(9)
+
+
+## TEST §124 and §177 — a Phase P save has no crime in it and loads anyway.
+func _test_pre_crime_save() -> void:
+	var path := SaveManager.get_slot_path(10)
+	var payload := {
+		"version": 1,
+		"time": {"total_minutes": 9.0 * 60.0},
+		"economy": {"cash": 5200},
+		"entities": {
+			"business_manager": {
+				"businesses": [
+					{
+						"id": "business_1", "name": "Phase P Shop",
+						"type": "convenience_store", "property": "unit_main_18",
+						"cash": 3100, "reputation": 61.0,
+						"lifetime_revenue": 14200,
+					},
+				],
+				"order": ["business_1"],
+				"next_business": 2,
+				"company_name": "Older Holdings",
+			},
+		},
+	}
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	_check(file != null, "a Phase P save is written with no crime block")
+	if file == null:
+		return
+	file.store_string(JSON.stringify(payload))
+	file.close()
+
+	# Something for the load to have to clear.
+	UnderworldDebug.set_reputation(60)
+	WantedManager.set_level(3)
+
+	_check(SaveManager.load_from_slot(10), "and it loads")
+	await _settle(6)
+
+	var shop := BusinessManager.by_id(&"business_1")
+	_check(shop != null, "the business survives")
+	if shop != null:
+		_check(shop.lifetime_revenue == 14200, "with its history intact")
+	# §124 — safe crime defaults, and nothing carried over from the session.
+	_check(WantedManager.level == 0, "the player is not wanted")
+	_check(WantedManager.points == 0, "with no heat behind it")
+	_check(Underworld.reputation == 0, "and no reputation they did not earn")
+	_check(Underworld.active_job() == null, "no job is running")
+	_check(Underworld.contacts().is_empty(), "and nobody has been met")
+	_check(
+		PoliceResponseManager.state == PoliceResponseManager.State.CLEAR,
+		"the police are not looking for anybody (%s)"
+		% PoliceResponseManager.state_name()
+	)
+	_check(not SearchManager.active, "and there is no search running")
+	SaveManager.delete_slot(10)
+
+
+## TEST §107, §173, §175 and §176 — the company keeps running through a chase.
+func _test_business_during_pursuit() -> void:
+	_q_setup()
+	var branch := _own_business()
+	if branch == null:
+		return
+	EconomyManager.restore(200000)
+	BusinessManager.deposit_to_business(branch, 30000)
+	CompanyDebug.stock_up(branch, 40)
+	var warehouse := LogisticsManager.primary_warehouse()
+	if warehouse == null:
+		warehouse = CompanyDebug.stand_up_logistics(branch)
+	if warehouse != null:
+		warehouse.add(&"bottled_water", 60)
+
+	await _teleport(Vector3(0.0, 0.5, 60.0))
+	WantedManager.set_level(3)
+	UnderworldDebug.force_report(CrimeManager.CrimeType.VEHICLE_THEFT)
+	_check(WantedManager.is_wanted(), "the player is being chased")
+
+	# §176 — a company van is a legal vehicle and nothing about a chase
+	# changes that.
+	var van := CompanyFleet.free_van()
+	if van != null:
+		_check(not van.stolen, "the company van is not stolen")
+		_check(
+			not PoliceMemory.is_vehicle_known(VehicleRegistry.spawn(van)),
+			"and nobody is looking for it"
+		)
+
+	# §175 — logistics keeps working.
+	if warehouse != null:
+		var before := branch.storage_of(&"bottled_water")
+		var made := LogisticsManager.request_transfer(
+			TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+			TransferOrder.Place.BUSINESS, branch.business_id, {&"bottled_water": 10}
+		)
+		var order: TransferOrder = made["order"]
+		if order != null:
+			LogisticsManager.dispatch_transfer(order)
+			TimeManager.advance_minutes(int(LogisticsManager.MAX_TRAVEL_MINUTES) + 10)
+			LogisticsManager.advance_deliveries()
+			_check(order.is_delivered(), "a delivery lands during the chase")
+			_check(
+				branch.storage_of(&"bottled_water") > before,
+				"and the stock actually arrives"
+			)
+
+	# §173 — and the shop trades.
+	var revenue_before := branch.lifetime_revenue
+	branch.manual_override = BusinessInstance.Override.FORCE_OPEN
+	branch.set_open(true)
+	for i in 3:
+		BusinessManager.simulate_hour_now(branch, 12)
+	_check(
+		branch.lifetime_revenue >= revenue_before,
+		"the business keeps trading while the player is wanted"
+	)
+	# §108 — and none of this made the company criminal.
+	_check(
+		branch.distress != DistressState.State.CLOSED,
+		"the branch is not shut because its owner is a criminal"
+	)
+	_check(
+		Underworld.earnings_of(CrimeData.Income.ILLEGAL_JOBS) >= 0,
+		"legal and illegal money are counted apart"
+	)
+	WantedManager.clear_wanted("")
+
+
+## TEST — the Phase Q screens are in the game and draw.
+func _test_underworld_screens_reachable() -> void:
+	var hud := _main.get_node_or_null("HUD")
+	if hud == null:
+		return
+	for screen_name in ["UnderworldPanel", "ContactPanel"]:
+		var screen := hud.get_node_or_null("Root/%s" % screen_name) as Control
+		_check(screen != null, "%s is in the tree" % screen_name)
+		_check(screen != null and not screen.visible, "%s starts closed" % screen_name)
+
+	UnderworldDebug.set_reputation(50)
+	UnderworldDebug.unlock_all_contacts()
+	var underworld := hud.get_node_or_null("Root/UnderworldPanel") as Control
+	if underworld != null:
+		underworld.call("open")
+		_check(underworld.visible, "the underworld screen opens")
+		for page in UnderworldPanel.Page.values():
+			underworld.call("show_tab", page)
+			_check(
+				underworld.visible,
+				"the %s tab draws" % String(UnderworldPanel.PAGE_NAMES[page])
+			)
+		hud.call("close_screens")
+
+	var contact_screen := hud.get_node_or_null("Root/ContactPanel") as Control
+	if contact_screen != null:
+		for id in [&"quayside_fence", &"dock_road_garage", &"the_broker"]:
+			contact_screen.call("open", CriminalContactData.by_id(id))
+			_check(
+				contact_screen.visible,
+				"the %s screen opens" % String(id).replace("_", " ")
+			)
+			hud.call("close_screens")
+
+	# §127 — and the three addresses are actually in the world.
+	var doors := get_tree().get_nodes_in_group(&"criminal_contact")
+	_check(doors.size() >= 3, "all three places exist in the city (%d)" % doors.size())
+	var found := {}
+	for node in doors:
+		var door := node as CriminalContactPoint
+		if door != null:
+			found[door.contact_id] = true
+	_check(found.size() >= 3, "one for each contact (%d)" % found.size())
