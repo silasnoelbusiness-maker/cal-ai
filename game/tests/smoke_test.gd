@@ -3037,10 +3037,30 @@ func _test_three_star_escalation() -> void:
 		% [WantedManager.get_active_responders(), WantedManager.get_response_budget()]
 	)
 
+	# Phase Q — the fine is the level's, surcharged by the worst thing done.
+	# A carjacking and a store robbery are both SEVERE, so this arrest costs
+	# well over the $500 three stars alone was worth before.
+	_check(
+		WantedManager.worst_severity == CrimeData.Severity.SEVERE,
+		"the worst of the three is what the fine is really for (%s)"
+		% CrimeData.severity_name(WantedManager.worst_severity)
+	)
+	var expected := WantedManager.get_bust_fine()
+	_check(
+		expected == int(round(500.0 * WantedManager.fine_by_severity[
+			int(CrimeData.Severity.SEVERE)
+		])),
+		"which is the three-star fine times the severity surcharge ($%d)" % expected
+	)
+	_check(expected > 500, "and so costs more than three stars for petty theft would")
+	EconomyManager.restore(expected + 400)
 	var cash_before := EconomyManager.cash
 	WantedManager.request_bust()
 	await _settle(int(WantedManager.bust_hold_seconds * 60.0) + 40)
-	_check(EconomyManager.cash == cash_before - 500, "a three-star arrest costs $500")
+	_check(
+		EconomyManager.cash == cash_before - expected,
+		"a three-star arrest after a robbery costs $%d" % expected
+	)
 	_check(WantedManager.level == 0, "and clears the wanted level")
 	_check(EconomyManager.cash >= 0, "money never goes negative")
 

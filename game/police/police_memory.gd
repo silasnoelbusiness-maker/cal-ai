@@ -50,10 +50,62 @@ func _ready() -> void:
 	add_to_group(&"saveable")
 
 
+## The car the player was in last tick, so a change can be noticed.
+var _player_vehicle_id: StringName = &""
+
+
 func _process(delta: float) -> void:
 	if not WantedManager.is_wanted():
+		_player_vehicle_id = _vehicle_id(_player_vehicle())
 		return
 	seconds_since_seen += delta
+	_watch_for_vehicle_change()
+
+
+## §30, §158 and §159 in one place: what happens when the player changes cars.
+##
+## Seen doing it, the description simply moves to the new car — there is no
+## exploit in swapping vehicles in front of the officer watching you. Unseen,
+## the police lose what they were looking for, and that is the single most
+## useful thing a player being chased can do.
+##
+## What it explicitly does not do is end the search. §30 is firm: the police
+## still know roughly where you were, and they are still looking there. What
+## they have lost is the description, not the address.
+func _watch_for_vehicle_change() -> void:
+	var car := _player_vehicle()
+	var id := _vehicle_id(car)
+	if id == _player_vehicle_id:
+		return
+	var previous := _player_vehicle_id
+	_player_vehicle_id = id
+
+	if has_fresh_sighting():
+		# Watched. Whatever they got into is what the police are looking for.
+		if car != null:
+			mark_vehicle_known(car)
+		else:
+			player_identified = true
+			clear_active_vehicle()
+		return
+
+	# Unseen. If the police were only ever looking for the car, they have
+	# nothing now. If a witness described the player themselves, getting out
+	# of one car and into another does not change what they look like — but
+	# the car they are watching for is no longer the right one.
+	if previous != &"" and active_vehicle_id == previous:
+		clear_active_vehicle()
+	if car != null and is_vehicle_known(car):
+		# Straight back into something they are already looking for.
+		mark_vehicle_known(car)
+
+
+func _player_vehicle() -> Node:
+	var player := GameManager.player
+	if player == null or not player.has_method("get_vehicle"):
+		return null
+	var car = player.call("get_vehicle")
+	return car if car != null and is_instance_valid(car) else null
 
 
 # --- Sightings -----------------------------------------------------------

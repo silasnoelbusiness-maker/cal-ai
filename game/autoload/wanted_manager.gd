@@ -65,6 +65,18 @@ const MAX_LEVEL := 5
 ## Anything the player was carrying that is flagged stolen is seized on arrest.
 ## Legitimately bought goods are never touched.
 @export var confiscate_stolen_goods: bool = true
+## Hours of the day the player loses being processed, per wanted level. §60 —
+## higher heat costs more time, and the city keeps running through it: shops
+## trade, wages accrue, vans deliver and rent falls due exactly as they would
+## have if the player had been awake for it.
+@export var bust_hours_by_level: Array[int] = [0, 1, 2, 3, 5, 7]
+## What the worst thing done this incident multiplies the fine by.
+##
+## Centred on the bottom rather than the middle: the level's fine is the
+## baseline and severity is a surcharge on top of it, so an arrest for nothing
+## worse than a trespass costs exactly what being at that level costs, and one
+## after a robbery costs nearly double. §59.
+@export var fine_by_severity: Array[float] = [1.0, 1.15, 1.4, 1.8, 2.2]
 
 var level: int = 0
 ## Where police think the player is. Never the player's live position.
@@ -83,6 +95,10 @@ var last_known_position: Vector3:
 ## yet; it exists so a later debt or court system has a figure to work from
 ## rather than the arrest silently forgiving the difference.
 var unpaid_penalty: int = 0
+
+## The worst thing the player did during this incident, which is what the fine
+## is really for. Reset with the wanted level.
+var worst_severity: CrimeData.Severity = CrimeData.Severity.MINOR
 
 ## Units currently out on the call. See the dispatch section below.
 var _responders: Array[Node] = []
@@ -175,6 +191,9 @@ func on_crime_reported(record: Dictionary) -> void:
 	var seen_vehicle: Variant = record.get("vehicle")
 	if seen_vehicle is Node and is_instance_valid(seen_vehicle):
 		PoliceMemory.mark_vehicle_known(seen_vehicle)
+	var band: CrimeData.Severity = CrimeData.severity_of(int(record.get("type", 0)))
+	if band > worst_severity:
+		worst_severity = band
 	add_points(int(record.get("wanted_points", 10)), position)
 
 
@@ -325,6 +344,7 @@ func clear_wanted(message: String = "") -> void:
 	var was_escaping := _escaping
 	_cancel_escaping()
 	points = 0
+	worst_severity = CrimeData.Severity.MINOR
 	_responders.clear()
 	_set_level(0)
 	# Everything the police thought they knew goes with the incident. §57 is
@@ -397,10 +417,24 @@ func can_arrest(distance: float, from_vehicle: bool) -> bool:
 
 
 ## What an arrest costs at the current level.
+## §59 — a game-friendly fine from two things: how wanted they were, and the
+## worst thing they actually did. Both matter, and neither alone is enough:
+## four stars for a string of thefts is not four stars for armed robbery.
 func get_bust_fine() -> int:
+	var base := 0
 	if level <= 0 or level >= bust_fine_by_level.size():
-		return int(bust_fine_by_level[1]) if bust_fine_by_level.size() > 1 else 0
-	return int(bust_fine_by_level[level])
+		base = int(bust_fine_by_level[1]) if bust_fine_by_level.size() > 1 else 0
+	else:
+		base = int(bust_fine_by_level[level])
+	var index := clampi(int(worst_severity), 0, fine_by_severity.size() - 1)
+	return maxi(int(round(float(base) * float(fine_by_severity[index]))), 0)
+
+
+## Hours the arrest costs. Businesses, logistics and property all simulate
+## through it — the clock moving is the whole point.
+func get_bust_hours() -> int:
+	var index := clampi(level, 0, bust_hours_by_level.size() - 1)
+	return int(bust_hours_by_level[index])
 
 
 func request_bust() -> void:
@@ -474,8 +508,19 @@ func _bust() -> void:
 
 	_move_to_release_point(player)
 	points = 0
+	worst_severity = CrimeData.Severity.MINOR
 	_set_level(0)
+	PoliceResponseManager.clear()
+	PursuitCoordinator.clear()
 	wanted_cleared.emit()
+
+	# §60 and §164 — the hours in a cell pass for the city too. Everything
+	# TimeManager drives runs: a shop opens and closes, a delivery lands, a
+	# manager reorders, rent comes due. Being arrested costs a day's trading,
+	# which is a consequence a business owner feels.
+	var hours := get_bust_hours()
+	if hours > 0:
+		TimeManager.advance_minutes(hours * 60)
 
 	_busting = false
 	GameManager.cutscene_active = false

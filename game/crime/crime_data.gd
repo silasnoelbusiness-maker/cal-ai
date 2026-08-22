@@ -157,12 +157,16 @@ static func _build() -> void:
 			Income.VEHICLE_CRIME, true, 20.0
 		),
 		# A shop rings the police itself, which is why this needs no witness.
+		# Left at Phase J's forty. Phase Q gets its escalation from the
+		# thresholds and the response profiles, not by quietly making every
+		# old crime worth more — the balance the earlier phases were tested
+		# against is still the balance.
 		CrimeManager.CrimeType.STORE_ROBBERY: make(
-			&"store_robbery", "Store robbery", Severity.SEVERE, 45, &"coordinated",
+			&"store_robbery", "Store robbery", Severity.SEVERE, 40, &"coordinated",
 			5, Income.ROBBERY, false, 30.0
 		),
 		CrimeManager.CrimeType.ROBBERY: make(
-			&"robbery", "Robbery", Severity.SEVERE, 45, &"coordinated", 5,
+			&"robbery", "Robbery", Severity.SEVERE, 40, &"coordinated", 5,
 			Income.ROBBERY, true, 30.0
 		),
 	}

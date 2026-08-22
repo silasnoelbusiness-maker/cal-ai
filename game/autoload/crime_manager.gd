@@ -49,17 +49,24 @@ enum Intent { INTENTIONAL, ACCIDENTAL, SELF_DEFENCE }
 ##
 ## severity and points are separate on purpose: a crime can be serious to have on
 ## the record and cheap to be chased for, or the reverse.
+## How identifiable each act is, 1-5. Reserved for CCTV, masks and disguises
+## later; witnesses currently identify the player outright.
+##
+## Severity and points used to live here too. Phase Q moved them into CrimeData
+## along with everything else a crime now needs to carry, and this keeps only
+## the column that has no home there yet — one table per fact, rather than two
+## tables that both claim to know how bad a robbery is.
 const PROFILES: Dictionary = {
-	CrimeType.TRESPASSING: {"severity": 1, "points": 5, "evidence": 1},
-	CrimeType.SHOPLIFTING: {"severity": 1, "points": 10, "evidence": 1},
-	CrimeType.VEHICLE_THEFT: {"severity": 2, "points": 20, "evidence": 2},
-	CrimeType.ASSAULT: {"severity": 3, "points": 25, "evidence": 3},
-	CrimeType.VEHICULAR_ASSAULT: {"severity": 3, "points": 25, "evidence": 3},
-	CrimeType.BURGLARY: {"severity": 3, "points": 30, "evidence": 2},
-	CrimeType.HIT_AND_RUN: {"severity": 3, "points": 30, "evidence": 2},
-	CrimeType.CARJACKING: {"severity": 3, "points": 35, "evidence": 3},
-	CrimeType.STORE_ROBBERY: {"severity": 4, "points": 40, "evidence": 4},
-	CrimeType.ROBBERY: {"severity": 4, "points": 40, "evidence": 3},
+	CrimeType.TRESPASSING: {"evidence": 1},
+	CrimeType.SHOPLIFTING: {"evidence": 1},
+	CrimeType.VEHICLE_THEFT: {"evidence": 2},
+	CrimeType.ASSAULT: {"evidence": 3},
+	CrimeType.VEHICULAR_ASSAULT: {"evidence": 3},
+	CrimeType.BURGLARY: {"evidence": 2},
+	CrimeType.HIT_AND_RUN: {"evidence": 2},
+	CrimeType.CARJACKING: {"evidence": 3},
+	CrimeType.STORE_ROBBERY: {"evidence": 4},
+	CrimeType.ROBBERY: {"evidence": 3},
 }
 
 ## Records kept in memory, so a long session stays flat.
@@ -202,12 +209,20 @@ static func get_type_name(type: CrimeType) -> String:
 	return String(CrimeType.keys()[type]).replace("_", " ")
 
 
+## 1-5, as Phase J has always reported it. The band itself now lives in
+## CrimeData — this is the same fact spelled the way the older screens read it,
+## rather than a second table that can drift out of step with the first.
 static func severity_of(type: CrimeType) -> int:
-	return int(_profile(type).get("severity", 1))
+	return int(CrimeData.severity_of(type)) + 1
+
+
+## The named band, for anything that would rather say SEVERE than 4.
+static func severity_band(type: CrimeType) -> CrimeData.Severity:
+	return CrimeData.severity_of(type)
 
 
 static func points_for(type: CrimeType) -> int:
-	return int(_profile(type).get("points", 10))
+	return CrimeData.points_for(type)
 
 
 static func evidence_for(type: CrimeType) -> int:
@@ -293,8 +308,17 @@ func _make_record(
 		"type": type,
 		"type_name": get_type_name(type),
 		"severity": severity_of(type),
+		"severity_name": CrimeData.severity_name(CrimeData.severity_of(type)),
 		"wanted_points": points_for(type),
 		"evidence_level": evidence_for(type),
+		# Whether whoever reported it could say who did it, as against only
+		# that it happened. Filled in properly by WitnessSystem; true by
+		# default because most crimes are witnessed by somebody looking at the
+		# person committing them.
+		"identified_player": true,
+		# The car the player was in, if they were in one. §28 — this is what
+		# makes an ordinary owned vehicle become one the police look for.
+		"vehicle": _vehicle_of(perpetrator),
 		"position": position,
 		"day": TimeManager.day_index,
 		"time": TimeManager.get_time_string(),
@@ -322,6 +346,14 @@ func _make_record(
 
 static func _profile(type: CrimeType) -> Dictionary:
 	return PROFILES.get(type, {})
+
+
+## The vehicle somebody was sitting in when they did it, or null.
+static func _vehicle_of(perpetrator: Node) -> Node:
+	if perpetrator == null or not perpetrator.has_method("get_vehicle"):
+		return null
+	var car = perpetrator.call("get_vehicle")
+	return car if car != null and is_instance_valid(car) else null
 
 
 func _describe(record: Dictionary) -> String:
