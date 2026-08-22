@@ -317,7 +317,7 @@ func location_rows() -> Array[Dictionary]:
 			"name": business.business_name,
 			"brand": brand.brand_name if brand != null else "Independent",
 			"type": business.type_data().display_name if business.type_data() != null else "",
-			"district": String(business.district_id()),
+			"district": _district_name(business.district_id()),
 			"revenue_today": business.revenue_today,
 			"profit_today": business.profit_today(),
 			"customers_today": business.customer_count_today,
@@ -763,3 +763,12 @@ func clear() -> void:
 	_milestones_reached.clear()
 	_alerts_sent.clear()
 	_next_brand_number = 1
+
+
+## A district's name as a person would write it. The rows used to carry the id
+## straight through, which put "harbour_row" on a screen the player reads.
+func _district_name(district_id: StringName) -> String:
+	var district := WorldManager.by_id(district_id)
+	if district != null:
+		return district.display_name
+	return String(district_id).capitalize()

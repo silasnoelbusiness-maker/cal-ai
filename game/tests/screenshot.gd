@@ -45,7 +45,16 @@ extends Node
 ##             gym_exterior, gym_furnished, gym_customers, gym_management,
 ##             club_exterior_night, club_interior, club_queue, club_operating,
 ##             brand_screen, company_dashboard, company_staff, multi_shift,
-##             manager_permissions, bottleneck_report, company_portfolio
+##             manager_permissions, bottleneck_report, company_portfolio,
+##             warehouse_exterior, warehouse_interior, warehouse_inventory,
+##             bulk_order, logistics_dashboard, branch_stock_request,
+##             shipment_queued, company_van, delivery_driver,
+##             warehouse_delivery, branch_transfer, company_vehicles,
+##             delivery_route, logistics_bottlenecks, backup_pool,
+##             manager_backup, finance_forecast, business_warning,
+##             wages_overdue, rent_overdue, business_critical, branch_closure,
+##             liquidation_screen, foreclosure_warning, foreclosure_cure,
+##             company_logistics
 ##   distance  camera distance override, for overview shots
 ##   yaw       camera yaw override
 ##   pitch     camera pitch override
@@ -351,6 +360,17 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"company_dashboard", "company_staff", "multi_shift", \
 		"manager_permissions", "bottleneck_report", "company_portfolio":
 			await _phase_o_scenario(main, scenario)
+
+		"warehouse_exterior", "warehouse_interior", "warehouse_inventory", \
+		"bulk_order", "logistics_dashboard", "branch_stock_request", \
+		"shipment_queued", "company_van", "delivery_driver", \
+		"warehouse_delivery", "branch_transfer", "company_vehicles", \
+		"delivery_route", "logistics_bottlenecks", "backup_pool", \
+		"manager_backup", "finance_forecast", "business_warning", \
+		"wages_overdue", "rent_overdue", "business_critical", "branch_closure", \
+		"liquidation_screen", "foreclosure_warning", "foreclosure_cure", \
+		"company_logistics":
+			await _phase_p_scenario(main, scenario)
 
 		"characters":
 			# The five people the game draws, lined up at reading distance:
@@ -2223,3 +2243,371 @@ func _fill_the_floor(unit: RetailUnit, count: int, settle_frames: int) -> void:
 		spawner.spawn_customer_now()
 		await _wait(14)
 	await _wait(settle_frames)
+
+
+# --- Phase P ---------------------------------------------------------------
+
+## The logistics and failure frames. Built on the same company the Phase O
+## shots use, because the whole point of Phase P is that these systems sit on
+## top of a business that already works rather than beside it.
+func _phase_p_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	EconomyManager.restore(500000)
+	await _wait(90)
+
+	if scenario == "warehouse_exterior":
+		# Long enough for the money popup from the restore above to fade, so
+		# the frame is the goods shed rather than a green number over it.
+		await _wait(150)
+		# Stood on the depot side of Dock Road rather than the park side: the
+		# door sits on the far pavement, and backing off from it puts the
+		# camera in a hedge with the building behind it.
+		var gate := PropertyManager.by_id(&"warehouse_dock_14")
+		if gate != null:
+			player.global_position = gate.global_position + Vector3(0.0, 0.6, -6.5)
+		await _wait(60)
+		return
+
+	# Everything else needs a company behind it.
+	var market := _open_shop_at(
+		main, &"unit_main_18", "Interiors/MainStreetUnit", "Silas Market"
+	)
+	BusinessManager.deposit_to_business(market, 90000)
+	var depot: RetailUnit = main.get_node("Interiors/DocksideDepot")
+
+	match scenario:
+		"warehouse_interior", "warehouse_inventory":
+			var warehouse := CompanyDebug.stand_up_logistics(market)
+			# The hire and the money popups both fire above, and both land in
+			# the middle of the frame if the shot is taken straight away.
+			await _wait(150)
+			await _stand_in(player, depot, Vector3(0.0, 0.0, 2.0))
+			if scenario == "warehouse_inventory":
+				var property_screen: Node = _hud_screen(hud, "PropertyPanel")
+				property_screen.call("open", PropertyManager.by_id(&"warehouse_dock_14"))
+				await _wait(12)
+			elif warehouse == null:
+				push_warning("No depot for the warehouse shot.")
+
+		"bulk_order", "logistics_dashboard", "branch_stock_request", \
+		"shipment_queued", "company_vehicles", "delivery_route", \
+		"logistics_bottlenecks":
+			await _logistics_screen(main, scenario)
+
+		"company_van", "delivery_driver", "warehouse_delivery":
+			await _delivery_in_the_street(main, scenario)
+
+		"branch_transfer":
+			await _branch_to_branch(main)
+
+		"backup_pool", "manager_backup":
+			await _backup_scenario(main, scenario)
+
+		"finance_forecast", "business_warning", "wages_overdue", \
+		"rent_overdue", "business_critical", "branch_closure", \
+		"liquidation_screen", "company_logistics":
+			await _distress_scenario(main, scenario)
+
+		"foreclosure_warning", "foreclosure_cure":
+			await _foreclosure_scenario(main, scenario)
+
+	await _wait(10)
+
+
+## The logistics screen, on whichever tab the frame is about, with enough
+## behind it that no tab reads empty.
+func _logistics_screen(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	var market := BusinessManager.get_businesses()[0]
+	var warehouse := CompanyDebug.stand_up_logistics(market)
+	if warehouse == null:
+		return
+	var branch := _second_branch(main)
+
+	# A little history, so the overview has numbers on it.
+	LogisticsManager.bulk_savings += 240
+	LogisticsManager.units_distributed += 480
+	LogisticsManager.shipments_completed += 6
+
+	var queued: TransferOrder = null
+	if branch != null:
+		var made := LogisticsManager.request_transfer(
+			TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+			TransferOrder.Place.BUSINESS, branch.business_id,
+			{&"bottled_water": 40, &"snack_bar": 24}
+		)
+		queued = made["order"]
+		var sent := LogisticsManager.request_transfer(
+			TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+			TransferOrder.Place.BUSINESS, branch.business_id, {&"soda_can": 30}
+		)
+		if sent["order"] != null:
+			LogisticsManager.dispatch_transfer(sent["order"])
+		var route := LogisticsManager.create_route(warehouse, "Morning Round")
+		if route != null and branch != null:
+			route.stop_business_ids.append(branch.business_id)
+			route.stop_business_ids.append(market.business_id)
+			route.departure_hour = 7
+
+	if scenario == "logistics_bottlenecks":
+		# A depot that cannot keep up: nearly empty, with branches asking.
+		for id: StringName in warehouse.stock.keys():
+			warehouse.take(id, warehouse.held(id) - 4)
+		if branch != null:
+			for id: StringName in branch.storage.keys():
+				branch.take_storage(id, branch.storage_of(id))
+
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	await _wait(30)
+
+	if scenario == "logistics_bottlenecks":
+		var company: Node = _hud_screen(hud, "CompanyDashboard")
+		company.call("open", CompanyDashboard.Page.OPERATIONS)
+		await _wait(12)
+		return
+
+	var screen: Node = _hud_screen(hud, "LogisticsPanel")
+	match scenario:
+		"bulk_order":
+			screen.call("open", LogisticsPanel.Page.STOCK)
+		"branch_stock_request", "shipment_queued":
+			screen.call("open", LogisticsPanel.Page.SHIPMENTS)
+		"delivery_route":
+			screen.call("open", LogisticsPanel.Page.ROUTES)
+		"company_vehicles":
+			screen.call("open", LogisticsPanel.Page.FLEET)
+		_:
+			screen.call("open", LogisticsPanel.Page.OVERVIEW)
+	await _wait(14)
+	if queued != null and scenario == "shipment_queued":
+		await _wait(6)
+
+
+## A van actually on the road between the depot and a shop, with the player
+## stood where they can see it. §107.
+func _delivery_in_the_street(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var market := BusinessManager.get_businesses()[0]
+	var warehouse := CompanyDebug.stand_up_logistics(market)
+	if warehouse == null:
+		return
+	var branch := _second_branch(main)
+	if branch == null:
+		return
+	# The hires above post notifications, which otherwise sit in the middle of
+	# a frame that is meant to be a van.
+	await _wait(150)
+
+	var made := LogisticsManager.request_transfer(
+		TransferOrder.Place.WAREHOUSE, warehouse.warehouse_id,
+		TransferOrder.Place.BUSINESS, branch.business_id, {&"bottled_water": 40}
+	)
+	var order: TransferOrder = made["order"]
+	if order == null:
+		return
+	LogisticsManager.dispatch_transfer(order)
+
+	# Stand at the depot gate. The traffic layer spawns the van because the
+	# player is near one end of the run; nothing here places it by hand.
+	var depot_door := PropertyManager.by_id(&"warehouse_dock_14")
+	if depot_door != null:
+		player.global_position = depot_door.global_position + Vector3(0.0, 0.6, -4.0)
+	await _wait(150)
+
+	if scenario == "warehouse_delivery":
+		# Let it get down the road, so the frame is a van in traffic rather
+		# than a van still at the kerb.
+		await _wait(240)
+
+	# Follow it. The van is the real one the logistics layer put on the road;
+	# all this does is stand the player where they can see it, which is what a
+	# player who wanted to watch their own delivery would do anyway.
+	var traffic := LogisticsManager.traffic
+	var van := traffic.van_for(order.transfer_id) if traffic != null else null
+	if van != null:
+		var behind := van.global_transform * Vector3(0.0, 0.0, 5.5)
+		player.global_position = Vector3(behind.x, van.global_position.y + 0.6, behind.z)
+		await _wait(45)
+
+
+## Two shops of the player's own, moving stock between them without the depot
+## in the middle. §57.
+func _branch_to_branch(main: Node) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	var market := BusinessManager.get_businesses()[0]
+	CompanyDebug.stand_up_logistics(market)
+	var branch := _second_branch(main)
+	if branch == null:
+		return
+	CompanyDebug.stock_up(market, 90)
+	for id: StringName in branch.storage.keys():
+		branch.take_storage(id, branch.storage_of(id))
+
+	var made := LogisticsManager.request_transfer(
+		TransferOrder.Place.BUSINESS, market.business_id,
+		TransferOrder.Place.BUSINESS, branch.business_id,
+		{&"bottled_water": 20, &"snack_bar": 12}
+	)
+	if made["order"] != null:
+		LogisticsManager.dispatch_transfer(made["order"])
+
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	await _wait(30)
+	var screen: Node = _hud_screen(hud, "LogisticsPanel")
+	screen.call("open", LogisticsPanel.Page.SHIPMENTS)
+	await _wait(14)
+
+
+## Somebody off shift covering for somebody who did not turn up. §96 to §100.
+func _backup_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	var market := BusinessManager.get_businesses()[0]
+	var branch := _second_branch(main)
+	if branch == null:
+		return
+
+	# Two people at the first shop, one of whom is free this afternoon, and a
+	# branch with a manager who is allowed to pick up the phone.
+	CompanyDebug.hire(market, EmployeeData.Role.CASHIER, 0.8)
+	var spare := CompanyDebug.hire(market, EmployeeData.Role.CASHIER, 0.7)
+	if spare != null:
+		spare.available_for_backup = true
+		spare.clear_shifts()
+		spare.set_weekly_shifts([
+			ShiftSlot.make(
+				7, 11, EmployeeData.Role.CASHIER, ShiftSlot.EVERY_DAY, market.business_id
+			),
+		])
+	if not branch.has_manager():
+		CompanyDebug.hire(branch, EmployeeData.Role.MANAGER, 0.85)
+	branch.set_permission(&"call_backup", true)
+
+	if scenario == "manager_backup":
+		# Nobody on the till at the branch, at an hour it should be open.
+		for worker in branch.employees.duplicate():
+			if worker.role == EmployeeData.Role.CASHIER:
+				branch.fire(worker.employee_id)
+		BusinessManager.call("_run_manager", branch, 14)
+
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	await _wait(30)
+	var company: Node = _hud_screen(hud, "CompanyDashboard")
+	company.call("open", CompanyDashboard.Page.EMPLOYEES)
+	await _wait(14)
+
+
+## Money trouble, at each of the stages the player is shown it.
+func _distress_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	var market := BusinessManager.get_businesses()[0]
+	CompanyDebug.stand_up_logistics(market)
+	var branch := _second_branch(main)
+	var patient: BusinessInstance = branch if branch != null else market
+
+	match scenario:
+		"business_warning", "wages_overdue":
+			CompanyDebug.set_cash(patient, 60)
+			for worker in patient.employees:
+				CompanyDebug.owe_wages(patient, worker, 180)
+
+		"rent_overdue":
+			CompanyDebug.set_cash(patient, 40)
+			var unit := patient.property()
+			if unit != null:
+				unit.arrears = unit.rent_amount * 2
+				unit.next_rent_due_day = TimeManager.day_index - 3
+			FinanceManager.review(patient)
+
+		"business_critical", "branch_closure", "liquidation_screen":
+			CompanyDebug.set_cash(patient, 0)
+			for worker in patient.employees:
+				CompanyDebug.owe_wages(patient, worker, 620)
+				CompanyDebug.owe_wages(patient, worker, 620)
+			var unit := patient.property()
+			if unit != null:
+				unit.arrears = unit.rent_amount * 3
+			FinanceManager.review(patient)
+
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	await _wait(30)
+
+	match scenario:
+		"finance_forecast", "company_logistics":
+			var company: Node = _hud_screen(hud, "CompanyDashboard")
+			company.call("open", CompanyDashboard.Page.FINANCE)
+		"branch_closure", "liquidation_screen":
+			var finance: Node = _hud_screen(hud, "BranchFinancePanel")
+			finance.call("open", patient)
+			await _wait(8)
+			finance.call(
+				"show_page",
+				BranchFinancePanel.Page.LIQUIDATE if scenario == "liquidation_screen"
+					else BranchFinancePanel.Page.CLOSE
+			)
+		_:
+			var company: Node = _hud_screen(hud, "CompanyDashboard")
+			company.call("open", CompanyDashboard.Page.LOCATIONS)
+	await _wait(14)
+
+
+## The lender coming for a building, and the way out of it. §88 and §174.
+func _foreclosure_scenario(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var hud: Node = main.get_node("HUD")
+	for listing in RealEstate.listings():
+		RealEstate.discover(listing.property_id)
+	var loan: MortgageData = null
+	for listing in RealEstate.listings():
+		if not listing.mortgage_available or RealEstate.owns(listing.property_id):
+			continue
+		if RealEstate.buy_with_mortgage(listing.property_id) == RealEstate.BuyResult.OK:
+			loan = RealEstate.mortgage_for(listing.property_id)
+			break
+	if loan == null:
+		return
+	CompanyDebug.miss_mortgage_payments(loan, MortgageData.FORECLOSURE_MISSES)
+
+	# The two frames are the same notice from either side of being able to
+	# afford it: the warning is what a player who cannot pay sees, the cure is
+	# the same screen with the money behind the button.
+	if scenario == "foreclosure_warning":
+		EconomyManager.restore(120)
+	else:
+		EconomyManager.restore(loan.arrears_amount() + 40000)
+
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	await _wait(30)
+	var company: Node = _hud_screen(hud, "CompanyDashboard")
+	company.call("open", CompanyDashboard.Page.FINANCE)
+	await _wait(14)
+
+
+## A second shop of the player's, so the transfer and cover frames have two
+## ends to them.
+func _second_branch(main: Node) -> BusinessInstance:
+	var door := PropertyManager.by_id(&"unit_central_88")
+	if door == null:
+		return null
+	if door.is_vacant():
+		PropertyManager.lease(door)
+	var existing := BusinessManager.business_for_property(&"unit_central_88")
+	if existing != null:
+		return existing
+	var branch := BusinessManager.create_business(
+		"Boulevard Market", &"convenience_store", door
+	)
+	if branch == null:
+		return null
+	BusinessManager.deposit_to_business(branch, 12000)
+	var unit: RetailUnit = main.get_node("Interiors/CentralBoulevardUnit")
+	unit.ensure_built()
+	CompanyDebug.fit_out(branch, unit)
+	CompanyDebug.stock_up(branch, 30)
+	CompanyDebug.hire(branch, EmployeeData.Role.CASHIER, 0.7)
+	branch.manual_override = BusinessInstance.Override.FORCE_OPEN
+	return branch

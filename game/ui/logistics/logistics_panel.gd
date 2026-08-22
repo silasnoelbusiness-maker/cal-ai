@@ -128,8 +128,11 @@ func _build_no_warehouse() -> void:
 func _build_overview(figures: Dictionary) -> void:
 	for warehouse in LogisticsManager.warehouses():
 		_body.add_child(ScreenKit.heading(warehouse.display_name.to_upper()))
+		# "Capacity 31" reads as thirty-one units of something. It is a
+		# percentage, and the label has to say so.
 		_body.add_child(ScreenKit.stat_bar(
-			"Capacity", roundi(warehouse.fullness() * 100.0), warehouse.fullness() > 0.9
+			"Capacity used %", roundi(warehouse.fullness() * 100.0),
+			warehouse.fullness() > 0.9
 		))
 		_body.add_child(ScreenKit.row(
 			"Held", "%d of %d units" % [warehouse.used(), warehouse.capacity()]
@@ -320,12 +323,28 @@ func _on_route_changed() -> void:
 # --- Shipments -----------------------------------------------------------
 
 func _build_shipments() -> void:
-	_body.add_child(ScreenKit.heading("ON THE ROAD"))
 	var now := TimeManager.total_minutes
-	var live := LogisticsManager.open_transfers()
-	if live.is_empty():
+	# Two headings, because a shipment waiting on the dock is not on the road
+	# and the buttons under it are different ones.
+	var waiting: Array[TransferOrder] = []
+	var moving: Array[TransferOrder] = []
+	for order in LogisticsManager.open_transfers():
+		if order.is_moving():
+			moving.append(order)
+		else:
+			waiting.append(order)
+
+	_body.add_child(ScreenKit.heading("WAITING TO GO"))
+	if waiting.is_empty():
+		_body.add_child(BusinessUIKit.label("Nothing booked.", 14, ScreenKit.MUTED))
+	for order in waiting:
+		_body.add_child(_shipment_card(order, now))
+
+	_body.add_child(ScreenKit.spacer(8))
+	_body.add_child(ScreenKit.heading("ON THE ROAD"))
+	if moving.is_empty():
 		_body.add_child(BusinessUIKit.label("Nothing moving.", 14, ScreenKit.MUTED))
-	for order in live:
+	for order in moving:
 		_body.add_child(_shipment_card(order, now))
 
 	_body.add_child(ScreenKit.spacer(10))

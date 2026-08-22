@@ -702,6 +702,88 @@ changing what you charge is not automation. Everything they spend comes out of
 one daily allowance, and they never spend past what the branch actually holds,
 whichever of the two is smaller.
 
+## Getting the goods there
+
+Phase P is the plumbing under the company: where stock actually lives, how it
+gets from one place to another, and what happens when a business runs out of
+money.
+
+### One depot, and where stock is allowed to be
+
+A warehouse is an ordinary commercial unit with `LogisticsManager` holding a
+`WarehouseInstance` against it. Capacity is racking the player buys, and the
+racks are a number rather than a hundred placed pallets — the stock they hold
+is a line on a screen, and a placement puzzle nobody asked for is not a
+warehouse.
+
+The rule the whole system is built on is that a unit of stock is in exactly one
+of three places: a warehouse, a branch, or a shipment that owns it. Every
+transition is one move. Goods leave the source at dispatch and arrive at the
+destination on completion, and there is no moment in between when they are in
+both places or neither. Reservation covers the gap between "the player asked
+for it" and "a van is free": stock is spoken for at the source, so it cannot be
+sold out from under a shipment that is already promised.
+
+Money works the same way. There is no company treasury. The warehouse's rent
+and its stock are paid by a branch the player nominates, through the same
+`debit` every other cost goes through.
+
+### Shipments
+
+`TransferOrder` is one record for the whole journey — REQUESTED to DELIVERED,
+with FAILED and CANCELLED as the ways out. It deliberately is not split into an
+order and a separate shipment: two records for one journey is two places for
+the cargo to be, which is the bug this design exists to make impossible.
+
+A shipment can be cancelled while the cargo is still on the shelf and not once
+the van has gone. Cancelling mid-journey would mean deciding where the cargo
+lands, and there is no honest answer to that.
+
+### Vans you can see, and vans you cannot
+
+A shipment in transit has an arrival time from the distance between its two
+ends. If the player is near either end, `DeliveryTraffic` puts a real van on
+the road, driven by a `DeliveryDriver` — a `TrafficDriver` that walks an A\*
+route from `RoadNetwork.path_between` instead of turning at random. Reaching
+the kerb is what finishes that shipment. Drive away and the van is despawned
+and the clock finishes it instead.
+
+Both paths call the same `complete_transfer`. The van is a view of the
+shipment, never a second copy of it, which is why watching a delivery and
+ignoring one produce the same stock in the same place.
+
+The player can also take a run themselves. It uses no van, no driver and no
+delivery budget, it is marked on the map, and it arrives when they get there —
+time passing will not do it for them. Turning back puts every unit back where
+it came from.
+
+### Cover
+
+`BackupPool` is the people who are not on shift right now. A manager with the
+`call_backup` permission will pull somebody in when a branch is short-handed,
+at a wage premium, after however long it takes them to travel across the city.
+Anybody can cover their own role; covering somebody else's takes skill.
+
+### Running out of money
+
+`Obligation` is a view, never a ledger. It is built on demand from the systems
+that already take money — payroll, the landlord, the lenders — so the forecast
+cannot drift out of step with what actually gets charged, because there is
+nothing to drift.
+
+`DistressState` reads arrears, missed payments, cash and what is due, and puts
+a business in one of HEALTHY, WARNING, DISTRESSED, CRITICAL, CLOSED or
+LIQUIDATING. Nothing about it is sudden. Wages go into arrears before anybody
+walks out; three missed pay runs is when somebody stops turning up. A branch
+sits at CRITICAL for four days before the doors shut, and closing is not
+deletion — the lease, the stock and the fittings are all still there, and it
+can be reopened. Liquidation is the separate, explicit act of winding it up,
+and it pays out at eighty per cent for stock and half for second-hand fittings.
+
+A mortgage warns at three missed payments and a notice arrives at six, with ten
+days to find the arrears. Curing it costs the arrears and not the whole debt.
+Losing the property never leaves the player with nowhere to sleep.
+
 ## Layout
 
 ```
@@ -715,8 +797,8 @@ shops/        shop.gd
 player/       player.tscn, player.gd, player_stats.gd
 ui/           hud, inventory_panel, shop_panel
 npc/          nav_graph, npc_walker, pedestrian, police_officer, police_driver
-traffic/      road_network, traffic_light, traffic_driver, traffic_manager,
-              traffic_debug
+traffic/      road_network, traffic_light, traffic_driver, delivery_driver,
+              traffic_manager, traffic_debug
 art/          palette, character_look, character_kit, character_animator,
               building_kit, prop_kit
 ui/theme/     ui_theme
@@ -742,10 +824,18 @@ business/     business_manager, business_instance, business_type_data,
 business/models/  operating_model, counter_service_model, table_service_model,
               membership_model, venue_model, operating_models, service_result,
               lost_reason
+logistics/    logistics_manager, warehouse_data, warehouse_instance,
+              transfer_order, delivery_route, warehouse_terminal,
+              delivery_traffic, dropoff_point
+finance/      finance_manager, obligation, distress_state, liquidation
+staff/        backup_pool
+vehicles/company/  company_fleet
 employees/    employee_data, employee_ai, shift_slot
 customers/    customer_ai, customer_spawner, customer_demand,
               customer_archetype, service_queue
-ui/company/   company_dashboard, staff_schedule_panel, manager_panel
+ui/company/   company_dashboard, staff_schedule_panel, manager_panel,
+              branch_finance_panel
+ui/logistics/ logistics_panel
 tests/        smoke_test, screenshot
 main.tscn     entry scene
 ```

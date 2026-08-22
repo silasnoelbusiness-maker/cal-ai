@@ -50,6 +50,22 @@ func visible_count() -> int:
 	return _vans.size()
 
 
+## The van drawn for a shipment, if there is one. For the screenshot tool and
+## for anything that wants to point at the vehicle rather than the record.
+func van_for(transfer_id: StringName) -> Vehicle:
+	var van: Vehicle = _vans.get(transfer_id)
+	return van if van != null and is_instance_valid(van) else null
+
+
+func vans() -> Array[Vehicle]:
+	var found: Array[Vehicle] = []
+	for id: StringName in _vans:
+		var van: Vehicle = _vans[id]
+		if van != null and is_instance_valid(van):
+			found.append(van)
+	return found
+
+
 ## Drops every van without touching a single order. Used on load and on a
 ## district change, where the world under the vans is about to be rebuilt.
 func clear() -> void:
@@ -124,6 +140,11 @@ func _spawn(order: TransferOrder) -> void:
 	van.driver_type = Vehicle.DriverType.CIVILIAN
 	van.driver_state = Vehicle.DriverState.SEATED
 	van.driver_id = order.assigned_driver_id
+	# In the company's colours. A player watching their own delivery go past
+	# should be able to tell it from the six other white vans on Dock Road.
+	var livery: VehicleData = van.data.duplicate()
+	livery.body_color = _livery_colour(order)
+	van.data = livery
 	van.position = network.node_position(start_node)
 	var facing := network.node_direction(start_node)
 	van.rotation = Vector3(0.0, atan2(-facing.x, -facing.z), 0.0)
@@ -137,6 +158,25 @@ func _spawn(order: TransferOrder) -> void:
 	driver.arrived.connect(_on_arrived.bind(order.transfer_id))
 
 	_vans[order.transfer_id] = van
+
+
+## The brand colour of whichever end of the run is the player's shop, so a
+## chain's vans match its shopfronts. A depot-to-depot run falls back to the
+## company's own colour rather than picking one at random.
+func _livery_colour(order: TransferOrder) -> Color:
+	for entry in [
+		[order.destination_kind, order.destination_id],
+		[order.source_kind, order.source_id],
+	]:
+		if entry[0] != TransferOrder.Place.BUSINESS:
+			continue
+		var business := BusinessManager.by_id(entry[1])
+		if business == null:
+			continue
+		var brand := CompanyManager.brand_for_business(business)
+		if brand != null:
+			return brand.brand_color
+	return Color(0.290, 0.408, 0.588)
 
 
 ## How far through the journey the order is, by its own clock. The van is a

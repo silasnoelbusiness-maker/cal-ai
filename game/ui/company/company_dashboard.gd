@@ -336,6 +336,7 @@ func _location_row(row: Dictionary) -> PanelContainer:
 
 func _build_employees() -> void:
 	_build_staff_filters()
+	_build_backup_pool()
 	var rows := CompanyManager.staff_rows()
 	var shown := 0
 	for row in rows:
@@ -349,6 +350,43 @@ func _build_employees() -> void:
 		_body.add_child(_staff_row(row))
 	if shown == 0:
 		_body.add_child(BusinessUIKit.label("Nobody matches that.", 14, ScreenKit.MUTED))
+
+
+## §100 — who can cover a shift that goes wrong, and who is already covering
+## one. BackupPool has known this since it was written; until now nothing
+## showed it, which made calling backup a thing that happened to the player
+## rather than something they could plan around.
+func _build_backup_pool() -> void:
+	var roster := BackupPool.roster()
+	if roster.is_empty():
+		return
+	var covering: Array[Dictionary] = []
+	var standing_by: Array[Dictionary] = []
+	for row in roster:
+		if String(row["assignment"]) != "":
+			covering.append(row)
+		elif bool(row["available"]):
+			standing_by.append(row)
+
+	_body.add_child(ScreenKit.heading("COVER"))
+	for row in covering:
+		_body.add_child(ScreenKit.row(
+			String(row["name"]),
+			"covering %s" % String(row["assignment"]), true
+		))
+	for row in standing_by:
+		var roles: Array = row["roles"]
+		_body.add_child(ScreenKit.row(
+			String(row["name"]),
+			"free  ·  %s" % (
+				", ".join(roles) if not roles.is_empty() else "own role only"
+			)
+		))
+	if covering.is_empty() and standing_by.is_empty():
+		_body.add_child(BusinessUIKit.label(
+			"Everybody is on a shift. Nobody is free to cover.", 13, ScreenKit.MUTED
+		))
+	_body.add_child(ScreenKit.spacer(8))
 
 
 func _build_staff_filters() -> void:

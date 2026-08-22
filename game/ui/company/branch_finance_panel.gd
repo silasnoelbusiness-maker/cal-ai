@@ -41,6 +41,16 @@ func open(business: BusinessInstance) -> void:
 	opened.emit()
 
 
+## Jumps straight to one of the pages. Used by the screenshot tool, which has
+## no hands to press the buttons with, and by nothing else — the pages are
+## reached by the buttons in normal play.
+func show_page(page: Page) -> void:
+	if _business == null:
+		return
+	_page = page
+	_rebuild()
+
+
 func close() -> void:
 	if not visible:
 		return
@@ -239,9 +249,11 @@ func _build_liquidate() -> void:
 			"It owes more than it is worth. Winding it up clears what it can "
 			+ "and the rest simply goes unpaid.", 12, ScreenKit.BAD
 		))
+	var released := int(quote["employees"])
 	_body.add_child(BusinessUIKit.label(
-		"%d people would be released to the company pool rather than dismissed."
-			% int(quote["employees"]),
+		"%d %s would be released to the company pool rather than dismissed." % [
+			released, "person" if released == 1 else "people",
+		],
 		12, ScreenKit.MUTED
 	))
 

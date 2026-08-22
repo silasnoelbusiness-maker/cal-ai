@@ -195,6 +195,9 @@ func _build_create() -> void:
 ## to choose: the depot exists, and the logistics screen is where the work is.
 func _build_warehouse_page() -> void:
 	var warehouse := LogisticsManager.warehouse_for_property(_property.property_id)
+	# Not "create business": nothing is founded here, and a screen that says
+	# so is a screen the player reads as the wrong screen.
+	_title.text = "DISTRIBUTION DEPOT" if warehouse == null else warehouse.display_name.to_upper()
 	_rows.add_child(BusinessUIKit.heading("Distribution depot"))
 	_rows.add_child(BusinessUIKit.label(
 		"Somewhere to buy in bulk and hold stock for every branch at once. It "

@@ -497,6 +497,7 @@ func _build_palette() -> void:
 	var floor_mat := Palette.of(&"tile_floor")
 	var wall_mat := Palette.of(&"wall_paint")
 	var trim_mat := Palette.of(&"metal_mid")
+	var back_floor_mat := Palette.of(&"concrete")
 	match style:
 		&"coffee_shop":
 			floor_mat = Palette.of(&"wood_floor")
@@ -522,9 +523,16 @@ func _build_palette() -> void:
 		&"warehouse":
 			# Sealed concrete and painted block. A working building rather than
 			# a shop: nothing here is meant to look inviting.
-			floor_mat = Palette.of(&"concrete")
-			wall_mat = CityKit.make_material(Color(0.478, 0.494, 0.522))
+			# Darker than the mid grey concrete looks on a swatch. The depot is
+			# the one interior wide enough that nothing shades its floor, so
+			# midday sun falls on all of it at once; a shop-grey floor here
+			# renders as a snowfield at ten in the morning.
+			floor_mat = CityKit.make_material(Color(0.259, 0.271, 0.290))
+			wall_mat = CityKit.make_material(Color(0.353, 0.369, 0.396))
 			trim_mat = Palette.of(&"metal_mid")
+			# Most of a depot *is* the back room, and the shared pale concrete
+			# used for one behind a shop counter turned the whole shed white.
+			back_floor_mat = floor_mat
 		&"office":
 			floor_mat = Palette.of(&"wood_floor")
 			wall_mat = CityKit.make_material(Color(0.808, 0.796, 0.769))
@@ -546,7 +554,7 @@ func _build_palette() -> void:
 	_palette = {
 		"surround": CityKit.make_material(Color(0.075, 0.082, 0.098)),
 		"floor": floor_mat,
-		"back_floor": Palette.of(&"concrete"),
+		"back_floor": back_floor_mat,
 		"wall": wall_mat,
 		"trim": trim_mat,
 		"door": Palette.of(&"wood_dark"),
@@ -1063,6 +1071,10 @@ func _build_lighting() -> void:
 	var style := _style_id()
 	var warm := style == &"coffee_shop" or style == &"restaurant"
 	var venue := style == &"nightclub"
+	# A depot is a big room full of pale concrete, and pale concrete under shop
+	# lighting reads as snow. Fewer lumens on more surface is what makes it
+	# look like a working building rather than an overexposed one.
+	var depot := style == &"warehouse"
 	var tone := Color(0.996, 0.925, 0.808) if warm else Color(0.945, 0.965, 0.988)
 	if venue:
 		# Coloured rather than white, because a venue lit like a shop is a shop
@@ -1106,8 +1118,18 @@ func _build_lighting() -> void:
 		# A venue is dim, not invisible. Dark surfaces reflect little, so the
 		# fittings need to throw *more* at them rather than less — the first
 		# pass turned the energy down and rendered a black rectangle.
-		light.light_energy = 1.35 if venue else (0.8 if warm else 0.95)
-		light.omni_range = maxf(room.size.x, room.size.y) * 0.9
+		if venue:
+			light.light_energy = 1.35
+		elif depot:
+			light.light_energy = 0.34
+		elif warm:
+			light.light_energy = 0.8
+		else:
+			light.light_energy = 0.95
+		# A depot's lights are hung over the aisle rather than washing the whole
+		# shed: five overlapping shop-sized pools on 260 square metres of pale
+		# concrete is what made the first pass look like a snowfield.
+		light.omni_range = maxf(room.size.x, room.size.y) * (0.5 if depot else 0.9)
 		light.shadow_enabled = false
 		holder.add_child(light)
 
