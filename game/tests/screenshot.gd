@@ -2933,7 +2933,7 @@ const EVADE_LEASH := 16.0
 ## stars is doing anyway; the tool just supplies the moving. The step is always
 ## directly away from whoever is closest, and a leash keeps it from wandering
 ## out of the streets the camera is framing.
-func _keep_ahead(frames: int, start: Vector3) -> void:
+func _keep_ahead(frames: int, start: Vector3, range_override: float = -1.0) -> void:
 	var player: Node3D = GameManager.player
 	if player == null:
 		await _wait(frames)
@@ -2952,7 +2952,8 @@ func _keep_ahead(frames: int, start: Vector3) -> void:
 			if away < nearest:
 				nearest = away
 				closest = unit
-		if closest == null or nearest > EVADE_RANGE:
+		var reach := EVADE_RANGE if range_override < 0.0 else range_override
+		if closest == null or nearest > reach:
 			continue
 		# Straight-away is the obvious step and the wrong one, because the leash
 		# can clamp it back past the officer it was running from. Eight
@@ -3136,11 +3137,13 @@ func _foot_pursuit(main: Node) -> void:
 	await _keep_ahead(420, start)
 	UnderworldDebug.force_pursuit()
 	# Let the officers actually get moving before the shutter.
-	# Shorter, then a longer hold: a foot chase frame wants the officers close
-	# enough to read as a chase, and stepping away right up to the shutter left
-	# the street with nobody on it but the player.
+	# Shorter, then a long hold at arm's length. A foot chase frame wants the
+	# officers close enough to read as a chase; backing away from twelve metres
+	# right up to the shutter left the street with nobody on it but the player,
+	# and standing still ends in an arrest. Five metres is inside arresting
+	# distance plus a margin, so they close right up and never quite get there.
 	await _keep_ahead(200, start)
-	await _regain_sight(100)
+	await _keep_ahead(260, start, 5.0)
 
 
 ## The three addresses, from outside and from the back room.
@@ -3189,6 +3192,11 @@ func _underworld_location(main: Node, scenario: String) -> void:
 	# The three exteriors. "criminal_contact" is the broker's own doorway —
 	# opening the panel there made it a second copy of the job-offer frame.
 	if scenario in ["fence_exterior", "chop_shop", "criminal_contact"]:
+		# Face the place. Standing outside it with the camera pointed along the
+		# street put the lit doorway at the edge of the frame and the dock in
+		# the middle of it.
+		_look_towards(main, player.global_position, door.global_position)
+		await _wait(10)
 		return
 
 	var screen: Node = _hud_screen(hud, "ContactPanel")
