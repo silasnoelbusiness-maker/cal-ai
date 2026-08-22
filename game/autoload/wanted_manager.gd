@@ -68,7 +68,16 @@ const MAX_LEVEL := 5
 
 var level: int = 0
 ## Where police think the player is. Never the player's live position.
-var last_known_position: Vector3 = Vector3.ZERO
+##
+## Phase Q moved the actual value into PoliceMemory, which now holds everything
+## the police know rather than only this one number. This stays as the name the
+## rest of the game has used since Phase J, reading through — one truth, two
+## spellings, rather than two numbers that have to be kept in step.
+var last_known_position: Vector3:
+	get:
+		return PoliceMemory.last_known_position
+	set(value):
+		PoliceMemory.last_known_position = value
 
 ## Fine the player could not cover at the moment of arrest. Nothing collects it
 ## yet; it exists so a later debt or court system has a figure to work from
@@ -154,8 +163,18 @@ func get_response_radius() -> float:
 ## any crime needing to know what the others were worth.
 func on_crime_reported(record: Dictionary) -> void:
 	var position: Vector3 = record.get("position", last_known_position)
-	last_known_position = position
+	# The police have been told where. Whether they know *who* is a separate
+	# question, and PoliceMemory answers it — a report gives an address, a
+	# witness who watched gives a description. §22.
+	PoliceResponseManager.report(position, int(record.get("type", 0)))
+	if bool(record.get("identified_player", true)):
+		PoliceMemory.note_sighting(position)
 	_note_sighting()
+	# §28 — if the player did it from a car and anybody saw the car, that car
+	# is what the police are now looking for.
+	var seen_vehicle: Variant = record.get("vehicle")
+	if seen_vehicle is Node and is_instance_valid(seen_vehicle):
+		PoliceMemory.mark_vehicle_known(seen_vehicle)
 	add_points(int(record.get("wanted_points", 10)), position)
 
 
@@ -167,6 +186,8 @@ func add_points(amount: int, origin: Vector3 = Vector3.INF) -> void:
 	if origin != Vector3.INF:
 		last_known_position = origin
 	points += amount
+	# Somebody told the police something, or the level would not be moving.
+	PoliceMemory.assume_description()
 	var reached := level_for_points(points)
 	if reached > level:
 		_set_level(reached)
@@ -234,6 +255,14 @@ func get_active_responders() -> int:
 	return _responders.size()
 
 
+## The units currently out on the call. PursuitCoordinator hands them roles;
+## dispatch and the budget stay here, because one place enforcing a cap is the
+## only way a cap means anything.
+func get_responders() -> Array[Node]:
+	get_active_responders()
+	return _responders.duplicate()
+
+
 ## Asks to join the response. `already_engaged` is for a unit that can see the
 ## player right now: it is past the point of being told to stay at its post, so
 ## it joins over budget and is counted rather than being turned away.
@@ -278,7 +307,12 @@ func set_level(new_level: int) -> void:
 		clear_wanted("")
 		return
 	if GameManager.player != null:
-		last_known_position = GameManager.player.global_position
+		PoliceMemory.assume_description(GameManager.player.global_position)
+		PoliceResponseManager.note_seen(
+			GameManager.player.global_position, _player_velocity(GameManager.player)
+		)
+	else:
+		PoliceMemory.assume_description()
 	points = points_for_level(new_level)
 	_set_level(new_level)
 	_cancel_escaping()
@@ -293,6 +327,12 @@ func clear_wanted(message: String = "") -> void:
 	points = 0
 	_responders.clear()
 	_set_level(0)
+	# Everything the police thought they knew goes with the incident. §57 is
+	# deliberate about this: Phase Q builds no permanent record, so the heat on
+	# a car ends when the chase that created it does.
+	PoliceResponseManager.clear()
+	PursuitCoordinator.clear()
+	RoadblockManager.clear()
 	if was_escaping:
 		CrimeManager.add_statistic(&"times_escaped")
 	wanted_cleared.emit()
@@ -307,12 +347,34 @@ func clear_wanted(message: String = "") -> void:
 func notify_player_seen(position: Vector3) -> void:
 	if level <= 0:
 		return
-	last_known_position = position
+	var heading := Vector3.ZERO
+	var player := GameManager.player
+	if player != null:
+		heading = _player_velocity(player)
+	PoliceResponseManager.note_seen(position, heading)
+	# §28 — seeing the player in a car is seeing the car. This is how an
+	# ordinary owned vehicle becomes one the police are looking for.
+	if player != null and player.has_method("get_vehicle"):
+		var car = player.call("get_vehicle")
+		if car != null and is_instance_valid(car):
+			PoliceMemory.mark_vehicle_known(car)
 	_note_sighting()
 	if _escaping:
 		_cancel_escaping()
 		escaping_cancelled.emit()
 		GameManager.notify("SPOTTED", GameManager.Tone.BAD)
+
+
+## Which way the player is going, for the units told to cut them off. The car's
+## velocity when driving, their own when on foot.
+func _player_velocity(player: Node3D) -> Vector3:
+	if player.has_method("get_vehicle"):
+		var car = player.call("get_vehicle")
+		if car is Vehicle:
+			return (car as Vehicle).velocity
+	if player is CharacterBody3D:
+		return (player as CharacterBody3D).velocity
+	return Vector3.ZERO
 
 
 ## Police ask; the manager decides. Keeps the "can they actually grab me" rule
@@ -364,11 +426,15 @@ func _note_sighting() -> void:
 func _begin_escaping() -> void:
 	_escaping = true
 	_escape_time_left = _lookup(escape_seconds_by_level, level, 20.0)
+	# The police start looking around wherever they last had eyes on them.
+	SearchManager.begin(PoliceMemory.search_origin(), level)
 	escaping_started.emit(_escape_time_left)
 	GameManager.notify("ESCAPING...", GameManager.Tone.INFO)
 
 
 func _cancel_escaping() -> void:
+	if _escaping:
+		SearchManager.end(false)
 	_escaping = false
 	_escape_time_left = 0.0
 
@@ -379,6 +445,10 @@ func _cancel_escaping() -> void:
 func _bust() -> void:
 	_busting = true
 	_cancel_escaping()
+	# §119 — the chase resolves cleanly. Roadblocks come down and the search
+	# state goes with them rather than outliving the arrest.
+	PoliceResponseManager.note_busted()
+	RoadblockManager.clear()
 	GameManager.cutscene_active = true
 	bust_started.emit()
 

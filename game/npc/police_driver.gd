@@ -189,6 +189,14 @@ func _perceive() -> void:
 			_repath_timer = 0.0
 		return
 
+	# §26 and §27 — seeing somebody is not the same as knowing it is them. A
+	# crew with a description recognises the player on sight; a crew that has
+	# only been told a car is looking for the car, and a player who has got out
+	# of it walks past. Without any description at all there is nobody to
+	# recognise, which is what makes an unwitnessed crime free.
+	if not _identifies(player):
+		return
+
 	WantedManager.notify_player_seen(player.global_position)
 
 	var distance := _car.global_position.distance_to(player.global_position)
@@ -203,16 +211,41 @@ func _perceive() -> void:
 		_repath_timer = 0.0
 
 
+## Whether this crew can tell that the person they are looking at is the one
+## they want. Deliberately generous while a chase is live and strict once it
+## is not: police who watched the player pull away know them, police handed a
+## registration know a car.
+func _identifies(player: Node3D) -> bool:
+	if PoliceMemory.player_identified:
+		return true
+	if PoliceMemory.active_vehicle_id == &"":
+		return false
+	var car = player.call("get_vehicle") if player.has_method("get_vehicle") else null
+	return car != null and PoliceMemory.is_vehicle_known(car)
+
+
 # --- Routing -------------------------------------------------------------
 
 func _target_position() -> Vector3:
 	match state:
 		State.PURSUING:
+			# §39 and §42 — the crew is told where to be rather than each
+			# deciding, which is what stops four cars queueing behind one
+			# player while nothing covers the next junction. A car with no
+			# assignment falls back to chasing, which is what it did before
+			# the coordinator existed and is still a reasonable answer.
+			var role := PursuitCoordinator.role_of(self)
+			if role != PursuitCoordinator.Role.NONE:
+				return PursuitCoordinator.target_for(self)
 			var player := GameManager.player
 			if player == null:
 				return WantedManager.last_known_position
 			return predict_intercept(player)
 		State.RESPONDING, State.SEARCHING:
+			# During a search the coordinator spreads the shift around the
+			# circle rather than sending everybody to the same kerb. §53.
+			if PursuitCoordinator.role_of(self) == PursuitCoordinator.Role.SEARCH:
+				return PursuitCoordinator.target_for(self)
 			return WantedManager.last_known_position
 		State.RETURNING:
 			return _home.origin

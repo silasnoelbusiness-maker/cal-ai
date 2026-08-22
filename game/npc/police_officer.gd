@@ -107,6 +107,10 @@ func _perceive() -> void:
 			_repath_timer = 0.0
 		return
 
+	# §26 — seeing somebody is not recognising them. See PoliceDriver.
+	if not _identifies(player):
+		return
+
 	WantedManager.notify_player_seen(player.global_position)
 
 	var distance := global_position.distance_to(player.global_position)
@@ -122,6 +126,19 @@ func _perceive() -> void:
 		WantedManager.request_dispatch(self, true)
 		_set_state(State.PURSUING)
 		_repath_timer = 0.0
+
+
+## Whether this officer can tell the person in front of them is the one the
+## shift is looking for. An officer on foot is the case §31 cares about: the
+## player who left a known car two streets back and walked away is somebody
+## nobody has a description of.
+func _identifies(player: Node3D) -> bool:
+	if PoliceMemory.player_identified:
+		return true
+	if PoliceMemory.active_vehicle_id == &"":
+		return false
+	var car = player.call("get_vehicle") if player.has_method("get_vehicle") else null
+	return car != null and PoliceMemory.is_vehicle_known(car)
 
 
 # --- State handlers ------------------------------------------------------
@@ -161,7 +178,13 @@ func _tick_search() -> void:
 	if has_path() and _state_timer > 0.0:
 		return
 	_state_timer = _rng.randf_range(2.5, 4.5)
-	var target := _random_point_near(WantedManager.last_known_position, search_point_radius)
+	# §53 — spread out. The coordinator gives each officer a different corner
+	# of the search circle; without one they check around the last sighting,
+	# which is what they did before and is still the right instinct.
+	var centre := WantedManager.last_known_position
+	if PursuitCoordinator.role_of(self) == PursuitCoordinator.Role.SEARCH:
+		centre = PursuitCoordinator.target_for(self)
+	var target := _random_point_near(centre, search_point_radius)
 	if not walk_to(target):
 		_state_timer = 1.0
 
