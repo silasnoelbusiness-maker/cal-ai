@@ -2413,6 +2413,10 @@ func _logistics_screen(main: Node, scenario: String) -> void:
 		# The discount is the whole point of this frame and it sits below the
 		# fold, so scroll the screen the way a player reading it would.
 		await _scroll_to_bottom(screen)
+	elif scenario == "branch_stock_request":
+		# This frame is about a branch asking, which is the section under the
+		# shipments rather than the shipments themselves.
+		await _scroll_to_bottom(screen)
 
 
 ## A van actually on the road between the depot and a shop, with the player

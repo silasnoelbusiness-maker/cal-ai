@@ -374,11 +374,19 @@ func _shipment_card(order: TransferOrder, now: float) -> PanelContainer:
 	]))
 	var driver := BusinessManager.employee_by_id(order.assigned_driver_id)
 	var van := CompanyFleet.vehicle_by_id(order.assigned_vehicle_id)
+	# Who is driving it, but only once it has gone. "No driver" against a
+	# shipment still on the dock reads as a fault; it has not been sent yet,
+	# which is a different thing and the buttons underneath already say so.
+	var crew := ""
+	if order.player_driven:
+		crew = "  ·  you"
+	elif driver != null:
+		crew = "  ·  %s" % driver.employee_name
+	elif order.is_moving():
+		crew = "  ·  no driver"
 	column.add_child(BusinessUIKit.label(
-		"%s  ·  %s  ·  %s%s" % [
-			order.cargo_text(), order.status_name(),
-			"you" if order.player_driven
-				else (driver.employee_name if driver != null else "no driver"),
+		"%s  ·  %s%s%s" % [
+			order.cargo_text(), order.status_name(), crew,
 			"  ·  %s" % van.display_name() if van != null else "",
 		], 12, ScreenKit.MUTED
 	))
