@@ -287,6 +287,7 @@ func _run() -> void:
 	_test_wage_arrears()
 	_test_unpaid_staff_stop_working()
 	_test_distress_states()
+	_test_loan_default()
 	_test_capital_injection()
 	_test_financial_forecast()
 	_test_voluntary_closure()
@@ -11527,3 +11528,56 @@ func _test_hq_terminals() -> void:
 			"the company desk says what it is (%s)" % terminal.prompt_subtitle
 		)
 		break
+
+
+## TEST §168 — a loan the business stops paying is called in, and that is a
+## distress event rather than a line in a table nobody reads.
+func _test_loan_default() -> void:
+	var branch := _own_business()
+	if branch == null:
+		return
+	BusinessManager.deposit_to_business(branch, 30000)
+	branch.loans.clear()
+	if BusinessManager.take_loan(branch, &"starter") != BusinessManager.LoanResult.OK:
+		return
+	var loan: Loan = branch.loans[0]
+	var defaults_before := FinanceManager.loan_defaults
+	var owed_before := loan.remaining_balance
+	_check(not loan.is_defaulted(), "a new loan is not in default")
+	_check(loan.is_active(), "and is owed")
+
+	CompanyDebug.default_business_loan(branch, loan)
+	_check(
+		loan.is_defaulted(),
+		"missing it enough times has the loan called in (%s)" % loan.status_text()
+	)
+	_check(
+		loan.missed_payments >= Loan.DEFAULT_MISSES,
+		"after %d misses, not one" % Loan.DEFAULT_MISSES
+	)
+	_check(loan.is_active(), "the debt does not disappear with the default")
+	_check(loan.remaining_balance > owed_before, "it has grown, if anything")
+	_check(
+		FinanceManager.loan_defaults == defaults_before + 1,
+		"the company counts it, once"
+	)
+	_check(
+		branch.missed_payment_count() >= Loan.DEFAULT_MISSES,
+		"and it counts towards the branch being in trouble"
+	)
+	_check(branch.total_arrears() > 0, "with the missed payment owed (%d)" % branch.total_arrears())
+	_check(
+		DistressState.is_alarming(branch.distress),
+		"which shows on the branch as trouble (%s)" % branch.distress_label()
+	)
+	_check(_said("DEFAULT") or _said("CALLED IN"), "and the player is told")
+
+	# Catching up puts it right. A business that can never recover is a dead
+	# end, not a difficulty setting.
+	BusinessManager.deposit_to_business(branch, loan.remaining_balance + 5000)
+	var paid := BusinessManager.repay_loan(branch, loan.loan_id, loan.due_amount())
+	_check(paid > 0, "the arrears can be paid")
+	_check(not loan.is_defaulted(), "which brings the loan back into good standing")
+	_check(loan.missed_payments == 0, "with a clean record")
+	BusinessManager.repay_loan(branch, loan.loan_id, loan.remaining_balance)
+	FinanceManager.review(branch)

@@ -9,6 +9,13 @@ extends RefCounted
 
 enum Status { ACTIVE, PAID, DEFAULTED }
 
+## Missed payments before the lender calls the loan in default. Phase M
+## counted the misses and stopped there; Phase P is where the count starts to
+## mean something. Four is deliberately more than the three that puts a
+## mortgage at risk: a business loan is smaller and a shop having a bad
+## fortnight should not be the same event as losing a building.
+const DEFAULT_MISSES := 4
+
 var loan_id: StringName = &""
 var business_id: StringName = &""
 var display_name: String = "Business Loan"
@@ -47,8 +54,15 @@ func total_interest() -> int:
 	return roundi(float(principal) * interest_rate)
 
 
+## Whether the loan is still owed. A defaulted loan very much is: defaulting
+## is the lender's opinion of the borrower, not a discharge of the debt, and
+## treating it as inactive would quietly cancel money the player borrowed.
 func is_active() -> bool:
-	return status == Status.ACTIVE and remaining_balance > 0
+	return status != Status.PAID and remaining_balance > 0
+
+
+func is_defaulted() -> bool:
+	return status == Status.DEFAULTED
 
 
 func is_due(day_index: int) -> bool:
@@ -66,6 +80,13 @@ func due_amount() -> int:
 func apply_payment(amount: int) -> int:
 	var paid := clampi(amount, 0, remaining_balance)
 	remaining_balance -= paid
+	if paid > 0:
+		# Paying brings the loan current. A borrower who catches up is a
+		# borrower in good standing again — the alternative is a business that
+		# can never climb out of one bad month.
+		missed_payments = 0
+		if status == Status.DEFAULTED:
+			status = Status.ACTIVE
 	if remaining_balance <= 0:
 		remaining_balance = 0
 		status = Status.PAID
@@ -81,12 +102,16 @@ func advance_schedule() -> void:
 func miss_payment() -> void:
 	missed_payments += 1
 	remaining_balance += maxi(roundi(float(payment_amount) * 0.05), 5)
+	if missed_payments >= DEFAULT_MISSES and status == Status.ACTIVE:
+		status = Status.DEFAULTED
 	advance_schedule()
 
 
 func status_text() -> String:
 	if status == Status.PAID:
 		return "PAID"
+	if status == Status.DEFAULTED:
+		return "IN DEFAULT (%d missed)" % missed_payments
 	if missed_payments > 0:
 		return "OVERDUE (%d missed)" % missed_payments
 	return "ACTIVE"

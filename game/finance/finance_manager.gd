@@ -41,6 +41,7 @@ func _ready() -> void:
 	add_to_group(&"saveable")
 	TimeManager.day_passed.connect(_on_day_passed)
 	PropertyManager.rent_missed.connect(_on_rent_missed)
+	BusinessManager.loan_defaulted.connect(_on_loan_defaulted)
 
 
 # --- Obligations ---------------------------------------------------------
@@ -354,6 +355,24 @@ func lease_default_stage(business: BusinessInstance) -> String:
 	if missed == 2:
 		return "DEFAULT NOTICE"
 	return "RENT OVERDUE"
+
+
+## A lender calling a loan in is a distress event in its own right, not just
+## a number on the loan. It is counted for the company statistics and the
+## business is re-read straight away rather than at the next midnight, because
+## the player wants the card to change colour when the message arrives.
+func _on_loan_defaulted(business: BusinessInstance, loan: Loan) -> void:
+	loan_defaults += 1
+	if business == null:
+		return
+	_notify_once(
+		business, &"loan_default",
+		"LOAN CALLED IN\n%s  ·  $%s outstanding" % [
+			loan.display_name.to_upper(),
+			EconomyManager.with_thousands_separator(loan.remaining_balance),
+		]
+	)
+	review(business)
 
 
 func _notify_once(business: BusinessInstance, key: StringName, message: String) -> void:

@@ -315,6 +315,20 @@ static func miss_mortgage_payments(loan: MortgageData, count: int) -> void:
 		loan.status = MortgageData.Status.AT_RISK
 
 
+## Drains a business and runs the loan collection until the lender calls the
+## loan in. Uses the real collection path rather than setting the flag, so the
+## test exercises what the game actually does.
+static func default_business_loan(business: BusinessInstance, loan: Loan) -> void:
+	if business == null or loan == null:
+		return
+	business.debit(business.cash_balance, "Test drain", &"other")
+	for run in Loan.DEFAULT_MISSES:
+		if loan.is_defaulted():
+			break
+		loan.next_payment_day = TimeManager.day_index
+		BusinessManager.call("_collect_loan_payments")
+
+
 # --- Single-purpose pokes -------------------------------------------------
 
 ## Forces a rush, or clears one. §132 asks for this; nothing else sets it.

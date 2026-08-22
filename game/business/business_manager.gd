@@ -21,6 +21,9 @@ signal order_placed(order: PurchaseOrder)
 signal order_delivered(order: PurchaseOrder)
 signal loan_taken(business: BusinessInstance, loan: Loan)
 signal loan_payment_made(business: BusinessInstance, loan: Loan, amount: int)
+## The lender has called a loan in. Emitted once, on the miss that crosses
+## the line, not every day afterwards.
+signal loan_defaulted(business: BusinessInstance, loan: Loan)
 signal business_sold(business_name: String, proceeds: int)
 signal milestone_reached(milestone: StringName, description: String)
 
@@ -621,6 +624,7 @@ func _collect_loan_payments() -> void:
 				)
 				loan_payment_made.emit(business, loan, paid)
 			else:
+				var was_defaulted := loan.is_defaulted()
 				loan.miss_payment()
 				GameManager.notify(
 					"PAYMENT MISSED\n%s  %s" % [
@@ -628,6 +632,14 @@ func _collect_loan_payments() -> void:
 					],
 					GameManager.Tone.BAD
 				)
+				if loan.is_defaulted() and not was_defaulted:
+					GameManager.notify(
+						"LOAN IN DEFAULT\n%s  ·  %s" % [
+							business.business_name.to_upper(), loan.display_name
+						],
+						GameManager.Tone.BAD
+					)
+					loan_defaulted.emit(business, loan)
 		business_changed.emit(business)
 
 
