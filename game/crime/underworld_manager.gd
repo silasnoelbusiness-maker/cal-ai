@@ -829,6 +829,15 @@ func _on_crime(record: Dictionary) -> void:
 			note_objective(IllegalJobData.Objective.ROBBERY_CONTRACT, id)
 
 
+## Getting away with something. §122 — worth a little standing, scaled by what
+## it was they got away with, and §121 — deliberately far less than doing the
+## work. Being arrested must never be the efficient way to become known.
+func note_escape(band: CrimeData.Severity) -> void:
+	if int(band) < int(CrimeData.Severity.MODERATE):
+		return
+	add_reputation(1 + int(band) / 2)
+
+
 func _on_busted(_fine: int) -> void:
 	# §90 — being caught loses whatever was running.
 	var job := active_job()

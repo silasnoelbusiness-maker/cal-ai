@@ -357,6 +357,8 @@ func _run() -> void:
 	_test_vehicle_request()
 	_test_broker_board()
 	_test_criminal_career()
+	_test_arrest_is_not_optimal()
+	await _test_job_lost_to_arrest()
 	_test_income_statistics()
 	await _test_legal_save_load()
 	await _test_pre_legal_save()
@@ -13701,6 +13703,69 @@ func _test_criminal_career() -> void:
 	_check(
 		career.speciality() == CriminalCareer.Path.NONE,
 		"somebody who has done one of everything specialises in nothing"
+	)
+
+
+## TEST §121 and §122 — getting away is worth something, getting caught is not
+## worth more.
+func _test_arrest_is_not_optimal() -> void:
+	_r_setup()
+	UnderworldDebug.unlock_all_contacts()
+	UnderworldDebug.set_reputation(20)
+	var before := Underworld.reputation
+	Underworld.note_escape(CrimeData.Severity.SEVERE)
+	var escaped := Underworld.reputation - before
+	_check(escaped > 0, "getting away with something is worth a little (+%d)" % escaped)
+
+	UnderworldDebug.set_reputation(20)
+	before = Underworld.reputation
+	Underworld._on_busted(0)
+	var busted := Underworld.reputation - before
+	_check(busted < 0, "being caught costs standing (%d)" % busted)
+
+	# A finished job is worth several times an escape, so the fastest way to a
+	# name is the work rather than the chase.
+	UnderworldDebug.set_reputation(20)
+	before = Underworld.reputation
+	var job := IllegalJobData.make(
+		&"r_pay", &"the_broker", IllegalJobData.Objective.VEHICLE_DELIVERY,
+		&"sedan", "a car", 3000, IllegalJobData.Risk.HIGH, 6, 5
+	)
+	job.status = IllegalJobData.Status.ACTIVE
+	Underworld._jobs.append(job)
+	Underworld._complete(job)
+	var worked := Underworld.reputation - before
+	_check(
+		worked > escaped,
+		"and doing the work is worth more than escaping (+%d against +%d)"
+		% [worked, escaped]
+	)
+
+
+## TEST §95 — an arrest ends whatever was running rather than leaving it
+## hanging as a job that can never finish.
+func _test_job_lost_to_arrest() -> void:
+	_r_setup()
+	UnderworldDebug.unlock_all_contacts()
+	var job := IllegalJobData.make(
+		&"r_lost", &"the_broker", IllegalJobData.Objective.ROBBERY_CONTRACT,
+		&"", "a till somewhere", 2000, IllegalJobData.Risk.HIGH, 6, 5
+	)
+	job.status = IllegalJobData.Status.ACTIVE
+	Underworld._jobs.append(job)
+	_check(Underworld.active_job() == job, "a job is running")
+	await _r_arrest(CrimeManager.CrimeType.ROBBERY, 3)
+	_check(
+		Underworld.active_job() == null,
+		"and does not survive the arrest as a ghost"
+	)
+	_check(
+		job.status == IllegalJobData.Status.FAILED,
+		"it is marked failed (%s)" % job.status_label()
+	)
+	_check(
+		Underworld.career.jobs_failed > 0,
+		"and counted as a failure rather than as walking away"
 	)
 
 

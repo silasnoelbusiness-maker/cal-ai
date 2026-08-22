@@ -88,6 +88,7 @@ func _rebuild() -> void:
 func _build_fence() -> void:
 	var inventory := _inventory()
 	var quote := Underworld.fence_quote(inventory)
+	_build_request_block()
 	_body.add_child(ScreenKit.heading("WHAT YOU ARE CARRYING"))
 	if int(quote["units"]) <= 0:
 		_body.add_child(BusinessUIKit.label(
@@ -119,6 +120,37 @@ func _build_fence() -> void:
 	_parts["actions"].add_child(sell)
 
 
+## What this contact has asked for, if anything, and how close the player is to
+## having it. §62 and §65 — an order is a reason to go and get one thing rather
+## than to bring in whatever is lying about.
+func _build_request_block() -> void:
+	var request := Underworld.request_from(_contact.contact_id)
+	if request == null:
+		# Asking is what posts one. A contact with nothing outstanding will
+		# name something the next time the player walks in.
+		request = Underworld.post_request(_contact)
+	if request == null:
+		return
+	_body.add_child(ScreenKit.heading("WHAT THEY WANT"))
+	_body.add_child(ScreenKit.row("Asking for", request.headline(), true))
+	_body.add_child(ScreenKit.row(
+		"Pays", "+%d%% over the usual" % roundi(request.bonus * 100.0)
+	))
+	if request.minimum_condition > 0.0:
+		_body.add_child(ScreenKit.row("Condition", request.condition_label()))
+	_body.add_child(ScreenKit.row("Their trust", "+%d" % request.trust_reward))
+	var days := request.days_left(TimeManager.day_index)
+	_body.add_child(ScreenKit.row(
+		"Stands for", "%d day%s" % [days, "" if days == 1 else "s"]
+	))
+	if request.kind == ContactRequest.Kind.GOODS:
+		var carried := Underworld._count_stolen(_inventory(), request.target_id)
+		_body.add_child(ScreenKit.row(
+			"You have", "%d of %d" % [carried, request.quantity],
+			carried >= request.quantity
+		))
+
+
 func _inventory() -> Node:
 	var player := GameManager.player
 	if player == null or not player.has_method("get_inventory"):
@@ -129,6 +161,7 @@ func _inventory() -> Node:
 # --- Vehicle buyer -------------------------------------------------------
 
 func _build_buyer() -> void:
+	_build_request_block()
 	_body.add_child(ScreenKit.heading("THE CAR OUTSIDE"))
 	var record := _current_vehicle_record()
 	if record == null:
@@ -214,31 +247,67 @@ func _build_broker() -> void:
 		))
 		_body.add_child(ScreenKit.row(running.objective_label(), running.target_name))
 		return
-	var job := Underworld.offer_job(_contact)
-	if job == null:
+	# §69 — a small rotating board rather than one job at a time. What is on it
+	# comes off the rung of this contact's ladder the player has earned, so
+	# better standing shows different work rather than the same work priced up.
+	var chain := Underworld.chain_for(_contact.contact_id)
+	if chain != null:
+		_body.add_child(ScreenKit.row("They put you on", chain.display_name))
+		_body.add_child(BusinessUIKit.label(chain.blurb, 12, ScreenKit.MUTED))
+	var board := Underworld.refresh_board(_contact)
+	if board.is_empty():
 		_body.add_child(BusinessUIKit.label(
 			"Nothing today. Try again later." if Underworld.contact_ready(_contact)
 				else "They have nothing new yet.",
 			14, ScreenKit.MUTED
 		))
 		return
+	for job in board:
+		_body.add_child(_offer_card(job))
+	var next_rung := Underworld.next_chain_for(_contact.contact_id)
+	if next_rung != null:
+		_body.add_child(BusinessUIKit.label(
+			"Better work — %s — wants %d reputation and %d trust. You have %d and %d."
+			% [
+				next_rung.display_name, next_rung.reputation_required,
+				next_rung.trust_required, Underworld.reputation,
+				Underworld.trust_in(_contact.contact_id),
+			], 12, ScreenKit.MUTED
+		))
 
-	_body.add_child(ScreenKit.row("Job", job.objective_label(), true))
-	_body.add_child(ScreenKit.row("Target", job.target_name))
-	_body.add_child(ScreenKit.row("Reward", ScreenKit.money(job.reward), true))
-	_body.add_child(ScreenKit.row("Risk", job.risk_label()))
-	_body.add_child(ScreenKit.row("Time", "%dh" % job.time_limit_hours))
-	_body.add_child(ScreenKit.row("Reputation", "+%d" % job.reputation_reward))
 
-	var accept := BusinessUIKit.button("ACCEPT", 150.0)
+## One offer on the board, with its own accept and decline.
+func _offer_card(job: IllegalJobData) -> PanelContainer:
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", BusinessUIKit.row_style())
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 2)
+	card.add_child(column)
+	column.add_child(BusinessUIKit.row([
+		BusinessUIKit.stretch_label(job.objective_label(), 15, ScreenKit.TEXT),
+		BusinessUIKit.value_label(job.risk_label(), 13, ScreenKit.BAD),
+	]))
+	column.add_child(BusinessUIKit.label(job.target_name, 13, ScreenKit.MUTED))
+	column.add_child(ScreenKit.row("Reward", ScreenKit.money(job.reward), true))
+	column.add_child(ScreenKit.row("Time", "%dh" % job.time_limit_hours))
+	column.add_child(ScreenKit.row("Reputation", "+%d" % job.reputation_reward))
+	var chain := Underworld.chain_for(job.contact_id)
+	column.add_child(ScreenKit.row(
+		"Their trust", "+%d" % (chain.trust_reward if chain != null else 5)
+	))
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 6)
+	var accept := BusinessUIKit.button("ACCEPT", 140.0)
 	accept.pressed.connect(func() -> void:
 		Underworld.accept_job(job)
 		_rebuild()
 	)
-	var decline := BusinessUIKit.button("DECLINE", 150.0)
+	var decline := BusinessUIKit.button("PASS", 110.0)
 	decline.pressed.connect(func() -> void:
 		Underworld.decline_job(job)
 		_rebuild()
 	)
-	_parts["actions"].add_child(accept)
-	_parts["actions"].add_child(decline)
+	buttons.add_child(accept)
+	buttons.add_child(decline)
+	column.add_child(buttons)
+	return card
