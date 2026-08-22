@@ -344,7 +344,7 @@ func _run() -> void:
 	await _test_court_outcome()
 	await _test_missed_court()
 	_test_lawyer()
-	_test_legal_debt()
+	await _test_legal_debt()
 	_test_legal_job_check()
 	_test_landlord_checks()
 	_test_financing_checks()
@@ -13770,9 +13770,13 @@ func _test_arrest_is_not_optimal() -> void:
 func _test_job_lost_to_arrest() -> void:
 	_r_setup()
 	UnderworldDebug.unlock_all_contacts()
+	# Deliberately not a robbery contract: the robbery committed below to get
+	# arrested would legitimately finish one, which is the systems working
+	# rather than a fault. This is a car job, which being picked up cannot
+	# possibly complete.
 	var job := IllegalJobData.make(
-		&"r_lost", &"the_broker", IllegalJobData.Objective.ROBBERY_CONTRACT,
-		&"", "a till somewhere", 2000, IllegalJobData.Risk.HIGH, 6, 5
+		&"r_lost", &"the_broker", IllegalJobData.Objective.VEHICLE_DELIVERY,
+		&"suv", "a particular car", 2000, IllegalJobData.Risk.HIGH, 6, 5
 	)
 	job.status = IllegalJobData.Status.ACTIVE
 	Underworld._jobs.append(job)
