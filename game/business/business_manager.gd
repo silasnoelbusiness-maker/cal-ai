@@ -445,7 +445,7 @@ func _advance_deliveries() -> void:
 			"DELIVERY ARRIVED\n%s  ·  %d items received" % [
 				business.business_name.to_upper(), delivered
 			],
-			GameManager.Tone.GOOD
+			GameManager.Tone.GOOD, GameManager.Priority.LOW
 		)
 		order_delivered.emit(order)
 		business_changed.emit(business)
@@ -1733,7 +1733,7 @@ func _on_business_changed(business: BusinessInstance) -> void:
 func _on_stock_low(item: ItemData, business: BusinessInstance) -> void:
 	GameManager.notify(
 		"LOW STOCK\n%s — %s" % [business.business_name.to_upper(), item.display_name],
-		GameManager.Tone.BAD
+		GameManager.Tone.BAD, GameManager.Priority.LOW
 	)
 
 

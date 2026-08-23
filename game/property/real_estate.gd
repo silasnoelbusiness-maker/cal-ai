@@ -860,7 +860,7 @@ func _seek_one(record: PropertyRecord, unit_index: int, asking_rent: int) -> voi
 	_candidates[key] = waiting
 	GameManager.notify(
 		"RENTAL ENQUIRY\n%s  ·  %s" % [record.address.to_upper(), applicant.tenant_name],
-		GameManager.Tone.INFO
+		GameManager.Tone.INFO, GameManager.Priority.LOW
 	)
 	portfolio_changed.emit()
 
@@ -1079,7 +1079,7 @@ func _begin_foreclosure(loan: MortgageData) -> void:
 			EconomyManager.with_thousands_separator(loan.arrears_amount()),
 			MortgageData.CURE_DAYS,
 		],
-		GameManager.Tone.BAD
+		GameManager.Tone.BAD, GameManager.Priority.HIGH
 	)
 	AudioManager.play_ui(&"ui_error")
 	foreclosure_started.emit(loan)
@@ -1166,7 +1166,7 @@ func _complete_foreclosure(loan: MortgageData) -> void:
 			"  ·  $%s returned" % EconomyManager.with_thousands_separator(recovered)
 				if recovered > 0 else "",
 		],
-		GameManager.Tone.BAD
+		GameManager.Tone.BAD, GameManager.Priority.HIGH
 	)
 	AudioManager.play_ui(&"ui_error")
 	foreclosure_completed.emit(loan, recovered)
@@ -1361,7 +1361,7 @@ func _on_day_passed(_day_index: int) -> void:
 		# One line and one quiet cue for the day's rent, however many units paid.
 		GameManager.notify(
 			"RENT RECEIVED\n+$%s" % EconomyManager.with_thousands_separator(_rent_today),
-			GameManager.Tone.GOOD
+			GameManager.Tone.GOOD, GameManager.Priority.LOW
 		)
 		AudioManager.play(&"money", AudioBuses.SFX, -10.0)
 	_expire_leases()

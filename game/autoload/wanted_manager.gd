@@ -221,12 +221,17 @@ func add_points(amount: int, origin: Vector3 = Vector3.INF) -> void:
 	var reached := level_for_points(points)
 	if reached > level:
 		_set_level(reached)
-		GameManager.notify("POLICE ALERTED\n%s" % _stars_text(), GameManager.Tone.BAD)
+		GameManager.notify(
+			"POLICE ALERTED\n%s" % _stars_text(), GameManager.Tone.BAD,
+			GameManager.Priority.HIGH
+		)
 	elif is_wanted():
 		# Already wanted and still under the next threshold: the player should
 		# still know the heat went up, and the police should re-anchor on the
 		# fresh crime rather than keep searching the old scene.
-		GameManager.notify("WANTED LEVEL RISING", GameManager.Tone.BAD)
+		GameManager.notify(
+			"WANTED LEVEL RISING", GameManager.Tone.BAD, GameManager.Priority.HIGH
+		)
 	_cancel_escaping()
 
 
@@ -400,7 +405,7 @@ func notify_player_seen(position: Vector3) -> void:
 	if _escaping:
 		_cancel_escaping()
 		escaping_cancelled.emit()
-		GameManager.notify("SPOTTED", GameManager.Tone.BAD)
+		GameManager.notify("SPOTTED", GameManager.Tone.BAD, GameManager.Priority.HIGH)
 
 
 ## Which way the player is going, for the units told to cut them off. The car's

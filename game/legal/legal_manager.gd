@@ -223,7 +223,7 @@ func _open_case(arrest: ArrestRecord) -> void:
 	record.cases.append(case)
 	GameManager.notify(
 		"CASE OPENED\n%s  ·  court in %d days" % [case.title.to_upper(), COURT_DELAY_DAYS],
-		GameManager.Tone.BAD
+		GameManager.Tone.BAD, GameManager.Priority.HIGH
 	)
 	AudioManager.play(&"case_opened", AudioBuses.SFX, -10.0)
 	case_opened.emit(case)
@@ -356,7 +356,7 @@ func _miss_case(case: LegalCase) -> void:
 		"COURT MISSED\n%s  ·  -$%s  ·  relisted" % [
 			case.title.to_upper(), EconomyManager.with_thousands_separator(penalty)
 		],
-		GameManager.Tone.BAD
+		GameManager.Tone.BAD, GameManager.Priority.HIGH
 	)
 	case_missed.emit(case)
 	_review_tier()
@@ -377,7 +377,7 @@ func _on_hour_passed(hour: int) -> void:
 					"TODAY" if case.days_until(today) <= 0 else "TOMORROW",
 					case.title.to_upper(), case.court_time_label()
 				],
-				GameManager.Tone.INFO
+				GameManager.Tone.INFO, GameManager.Priority.HIGH
 			)
 			AudioManager.play(&"court_reminder", AudioBuses.SFX, -12.0)
 			court_reminder.emit(case)

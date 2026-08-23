@@ -20,6 +20,28 @@ signal player_teleported(destination: Transform3D)
 enum State { PLAYING, PAUSED }
 enum Tone { INFO, GOOD, BAD }
 
+## How much a message deserves the player's attention.
+##
+## Before this existed every notification simply replaced the one before it, so
+## a busy moment — a shop closing, a wage run, a delivery landing and the
+## police arriving, all in the same second — showed the player whichever
+## happened to be last. Now the police arriving wins, and the wage run waits
+## its turn rather than being lost.
+##
+##   LOW    — pleasant to know. Dropped when there is a queue.
+##   NORMAL — the default. Queued in order.
+##   HIGH   — the player must see this: arrests, court, foreclosure, death.
+enum Priority { LOW, NORMAL, HIGH }
+
+## Seconds a message holds the corner before the next one is allowed up. Just
+## under the toast's own hold, so the queue never runs dry mid-fade.
+const NOTIFY_DWELL := 2.2
+## The same message inside this many seconds is the same message. Stops a
+## per-frame condition shouting the same line forty times.
+const NOTIFY_DEDUPE := 6.0
+## Beyond this many waiting, LOW messages are dropped rather than queued.
+const NOTIFY_BACKLOG := 3
+
 var state: State = State.PLAYING:
 	set(value):
 		if state == value:
@@ -57,11 +79,21 @@ var placement_active: bool = false
 ## nothing has to hard-code a scene path to it.
 var player: Node3D = null
 
+## Messages waiting for the corner, and when each was last said.
+var _notify_queue: Array[Dictionary] = []
+var _notify_recent: Dictionary = {}
+var _notify_shown_at: float = 0.0
+
 
 func _ready() -> void:
 	# The manager has to keep running while the tree is paused, otherwise it
 	# could never unpause itself.
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	set_process(true)
+
+
+func _process(_delta: float) -> void:
+	_drain_notifications()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -126,5 +158,74 @@ func unregister_player(old_player: Node3D) -> void:
 
 
 ## Push a transient message to the HUD ("SHIFT COMPLETE", "CRIME REPORTED", ...).
-func notify(message: String, tone: Tone = Tone.INFO) -> void:
-	notification_posted.emit(message, tone)
+## Posts a message to the corner of the screen.
+##
+## The signal is emitted when the message is actually due to be shown, not when
+## it is posted, so everything downstream — the toast, the sound — stays as
+## simple as it was and the ordering lives in one place.
+func notify(
+	message: String, tone: Tone = Tone.INFO, priority: Priority = Priority.NORMAL
+) -> void:
+	if message.is_empty():
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if _recently_said(message, now):
+		return
+	var entry := {"message": message, "tone": int(tone), "priority": int(priority), "at": now}
+
+	# Nothing showing: straight up, whatever it is.
+	if now - _notify_shown_at >= NOTIFY_DWELL and _notify_queue.is_empty():
+		_say(entry, now)
+		return
+
+	if priority == Priority.HIGH:
+		# Something the player must see does not wait behind a wage run.
+		_notify_queue.push_front(entry)
+		_say(_notify_queue.pop_front(), now)
+		return
+	if priority == Priority.LOW and _notify_queue.size() >= NOTIFY_BACKLOG:
+		return
+	_notify_queue.append(entry)
+
+
+func _say(entry: Dictionary, now: float) -> void:
+	_notify_shown_at = now
+	_notify_recent[String(entry["message"])] = now
+	notification_posted.emit(String(entry["message"]), int(entry["tone"]))
+
+
+func _recently_said(message: String, now: float) -> bool:
+	if _notify_recent.has(message) and now - float(_notify_recent[message]) < NOTIFY_DEDUPE:
+		return true
+	for entry in _notify_queue:
+		if String(entry["message"]) == message:
+			return true
+	return false
+
+
+## Drains the queue. Runs on the always-process clock, so messages keep coming
+## through while a screen is up.
+func _drain_notifications() -> void:
+	if _notify_queue.is_empty():
+		return
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - _notify_shown_at < NOTIFY_DWELL:
+		return
+	# Highest priority first, oldest first within a priority.
+	var best := 0
+	for i in _notify_queue.size():
+		var entry: Dictionary = _notify_queue[i]
+		if int(entry["priority"]) > int(_notify_queue[best]["priority"]):
+			best = i
+	_say(_notify_queue.pop_at(best), now)
+
+
+## How many messages are waiting. For the debug overlay and the tests.
+func pending_notifications() -> int:
+	return _notify_queue.size()
+
+
+func clear_notifications() -> void:
+	_notify_queue.clear()
+	_notify_recent.clear()
+	_notify_shown_at = 0.0

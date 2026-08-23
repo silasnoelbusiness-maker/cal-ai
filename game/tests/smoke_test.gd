@@ -380,6 +380,7 @@ func _run() -> void:
 	await _test_owner_eats_in_their_own_shop()
 	_test_vending_machines_are_open_all_night()
 	_test_venues_exist_in_the_city()
+	_test_notification_priority()
 	_test_no_two_actions_share_a_key()
 	await _test_progression_save_load()
 	await _test_pre_progression_save()
@@ -3021,6 +3022,40 @@ func _test_venues_exist_in_the_city() -> void:
 
 ## Two screens on one key is a bug that hides until somebody presses it. The
 ## legal and logistics screens both sat on L for a whole phase.
+## A busy second used to show the player whichever message happened to be last.
+func _test_notification_priority() -> void:
+	GameManager.clear_notifications()
+	_notifications.clear()
+	GameManager.notify("FIRST", GameManager.Tone.INFO)
+	_check(_notifications.size() == 1, "the first message goes straight up")
+	GameManager.notify("SECOND", GameManager.Tone.INFO)
+	_check(
+		_notifications.size() == 1,
+		"the next one waits its turn rather than replacing it"
+	)
+	_check(GameManager.pending_notifications() == 1, "and is held (%d waiting)" % GameManager.pending_notifications())
+	GameManager.notify("FIRST", GameManager.Tone.INFO)
+	_check(
+		GameManager.pending_notifications() == 1,
+		"the same line twice is the same line"
+	)
+	GameManager.notify("URGENT", GameManager.Tone.BAD, GameManager.Priority.HIGH)
+	_check(
+		_notifications.back() == "URGENT",
+		"something the player must see does not queue behind a wage run"
+	)
+	for i in 8:
+		GameManager.notify("CHATTER %d" % i, GameManager.Tone.INFO, GameManager.Priority.LOW)
+	_check(
+		GameManager.pending_notifications() <= GameManager.NOTIFY_BACKLOG + 1,
+		"and a flood of pleasantries is dropped rather than queued (%d)" % (
+			GameManager.pending_notifications()
+		)
+	)
+	GameManager.clear_notifications()
+	_notifications.clear()
+
+
 func _test_no_two_actions_share_a_key() -> void:
 	var seen := {}
 	var clashes := PackedStringArray()
