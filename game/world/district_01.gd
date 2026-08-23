@@ -964,11 +964,14 @@ func _add_fountain(parent: Node3D, spot: Vector2) -> void:
 	)
 
 
+## A bench. Joins the bench group, which is where routines send anybody whose
+## hour says "park" and what Phase S's sit-down rest interaction attaches to.
 func _add_bench(parent: Node3D, node_name: String, spot: Vector2, yaw_degrees: float) -> void:
 	var holder := Node3D.new()
 	holder.name = node_name
 	holder.position = Vector3(spot.x, 0.0, spot.y)
 	holder.rotation_degrees.y = yaw_degrees
+	holder.add_to_group(&"bench")
 	parent.add_child(holder)
 
 	CityKit.add_box(holder, "Seat", Vector3(0.0, 0.46, 0.0), Vector3(2.2, 0.12, 0.6), _mat("wood"))
@@ -1523,6 +1526,10 @@ func _build_venue_doors() -> void:
 
 		door.name = node_name
 		door.prompt_action = prompt
+		# Phase S — every façade door is somewhere a routine can send somebody,
+		# which is what makes §13's "enter a building" and §14's "leave by the
+		# same door" possible without tagging each venue by hand.
+		door.add_to_group(&"building_entrance")
 		CityKit.attach_interactable(_interactables, door, point, 2.6)
 
 		_add_door_panel(node_name, point, facing)
@@ -2121,6 +2128,11 @@ func _build_pedestrians() -> void:
 	# Anything that creates a civilian mid-game — a carjacking victim, for now —
 	# looks this group up rather than parenting people to whatever spawned them.
 	container.add_to_group(&"crowd")
+	# Phase S — how many of the pool are on the street is the hour's business.
+	var director := CrowdDirector.new()
+	director.name = "CrowdDirector"
+	director.district_id = &"harbour_row"
+	container.add_child(director)
 	# Seeded so a run is reproducible and a failing test can be re-run.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("HarbourRowCrowd")
@@ -2133,12 +2145,17 @@ func _build_pedestrians() -> void:
 
 	for i in PEDESTRIAN_COUNT:
 		var walker: Pedestrian = PEDESTRIAN_SCENE.instantiate()
+		# Phase S — everybody belongs to a district, which decides which
+		# archetypes they can be. A harbour worker does not commute to the
+		# Central plaza to stand about (§23, §26).
+		walker.routine_district = &"harbour_row"
 		walker.name = "Pedestrian%d" % i
 		walker.body_color = palette[i % palette.size()]
 		walker.walk_speed = rng.randf_range(2.0, 2.9)
 		var spot := _nav.random_point(NavGraph.Layer.WALK, rng)
 		walker.position = spot + Vector3.UP * 0.4
 		container.add_child(walker)
+		director.register(walker)
 
 
 ## Officers on foot at the three places a player is most likely to be seen, and

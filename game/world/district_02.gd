@@ -771,6 +771,11 @@ func _build_traffic_signals() -> void:
 func _build_pedestrians() -> void:
 	var container := _make_container("Pedestrians")
 	container.add_to_group(&"crowd")
+	# Phase S — how many of the pool are on the street is the hour's business.
+	var director := CrowdDirector.new()
+	director.name = "CrowdDirector"
+	director.district_id = &"central"
+	container.add_child(director)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("CentralDistrictCrowd")
 
@@ -785,6 +790,10 @@ func _build_pedestrians() -> void:
 
 	for i in PEDESTRIAN_COUNT:
 		var walker: Pedestrian = PEDESTRIAN_SCENE.instantiate()
+		# Phase S — everybody belongs to a district, which decides which
+		# archetypes they can be. A harbour worker does not commute to the
+		# Central plaza to stand about (§23, §26).
+		walker.routine_district = &"central"
 		walker.name = "CentralPedestrian%d" % i
 		walker.body_color = palette[i % palette.size()]
 		walker.walk_speed = rng.randf_range(2.1, 3.0)
@@ -792,6 +801,7 @@ func _build_pedestrians() -> void:
 		# city, so Central starts busy and Harbour Row stays as it was.
 		walker.position = _random_local_walk_point(nav, rng)
 		container.add_child(walker)
+		director.register(walker)
 
 
 ## A pavement node inside this district. The graph covers the whole city, so the
@@ -924,6 +934,10 @@ func _build_venue_doors() -> void:
 
 		door.name = node_name
 		door.prompt_action = prompt
+		# Phase S — every façade door is somewhere a routine can send somebody,
+		# which is what makes §13's "enter a building" and §14's "leave by the
+		# same door" possible without tagging each venue by hand.
+		door.add_to_group(&"building_entrance")
 		CityKit.attach_interactable(_interactables, door, point, 2.6)
 		_add_door_panel(node_name, point, facing)
 

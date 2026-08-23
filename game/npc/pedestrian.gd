@@ -19,6 +19,22 @@ enum State { IDLE, WALKING, WITNESSING, FLEEING, DODGING, KNOCKED_DOWN, FEAR }
 ## body on the pavement tells the player the same thing.
 enum Condition { ACTIVE, INCAPACITATED }
 
+## How near a venue counts as being there. The walker stops short of a door by
+## its own margin, so this is deliberately generous.
+const ARRIVED_WITHIN := 4.5
+
+@export_group("Routine")
+## Whether this civilian has somewhere to be. Phase S: a pedestrian with a
+## routine walks to wherever somebody of their archetype would be at this hour
+## rather than to a random point on the pavement, which is the whole difference
+## between a crowd and a city (§11).
+##
+## Off for anybody with a post — a cashier, a witness placed by a test — and for
+## anybody spawned to be somewhere specific.
+@export var follows_routine: bool = true
+## Which district this person belongs to, for the archetype mix (§23, §26).
+@export var routine_district: StringName = &"harbour_row"
+
 @export_group("Wandering")
 ## Cleared for civilians with a post to stand at — a shop cashier is a
 ## pedestrian in every other respect, and this is the only difference.
@@ -104,6 +120,16 @@ var _danger_timer: float = 0.0
 var _activation_timer: float = 0.0
 var _active: bool = true
 var _threat_position: Vector3 = Vector3.ZERO
+## This person's day. Fetched once from RoutineManager and then kept, so they
+## remain the same person rather than being reinvented every time they finish a
+## walk.
+var _schedule: RoutineSchedule = null
+## What they were doing when they last chose a destination, so a change of
+## activity is what sends them somewhere new.
+var _last_activity: int = -1
+## Set while they are inside a building, which is what makes §13's "enter" and
+## §14's "leave" visible rather than a vanishing act on the pavement.
+var _indoors: bool = false
 
 
 func _ready() -> void:
@@ -153,6 +179,11 @@ func _process(delta: float) -> void:
 	if _state_timer > 0.0:
 		return
 
+	# Their time inside is up: back out of the door they went in by (§14).
+	if _indoors:
+		_leave_building()
+		return
+
 	if condition == Condition.INCAPACITATED:
 		_state_timer = 4.0
 		return
@@ -191,7 +222,9 @@ func _refresh_activation() -> void:
 	if active == _active:
 		return
 	_active = active
-	set_physics_process(active)
+	# Somebody inside a building stays inside it. Walking away and back must not
+	# turn them out onto the pavement.
+	set_physics_process(active and not _indoors)
 	if not active:
 		velocity = Vector3.ZERO
 
@@ -465,12 +498,82 @@ func _choose_wander() -> void:
 	if nav == null:
 		_state_timer = 2.0
 		return
+	# Somewhere to be, if this person has a life. Falls through to the old
+	# random walk when their activity has nowhere to happen, so a district
+	# missing a gym does not strand everybody who wanted one.
+	if follows_routine and _route_to_activity():
+		return
 	var destination := nav.random_point_away_from(
 		NavGraph.Layer.WALK, global_position, min_wander_distance, _rng
 	)
 	if not send_to(destination):
 		# Nowhere to go from here; wait and try again rather than spin.
 		_state_timer = 1.5
+
+
+## The routine half of choosing where to go.
+##
+## Returns false when there is nothing to do about it, which is the caller's cue
+## to fall back on wandering. §11 — the visible result is people walking towards
+## workplaces, shops and doorways rather than to arbitrary pavement.
+func _route_to_activity() -> bool:
+	if _schedule == null:
+		_schedule = RoutineManager.schedule_for(
+			StringName(get_path()), routine_district
+		)
+	var activity := RoutineManager.activity_for(_schedule)
+	var destination := RoutineManager.destination_for(_schedule, global_position)
+	if destination == Vector3.INF:
+		return false
+	# Already there, and it is somewhere with a door: go in rather than stand
+	# outside it looking at it (§13).
+	if global_position.distance_to(destination) < ARRIVED_WITHIN:
+		if RoutineActivity.is_indoors(activity):
+			_enter_building()
+			return true
+		_enter_idle(_rng.randf_range(4.0, 12.0))
+		return true
+	_last_activity = int(activity)
+	return send_to(destination)
+
+
+## Steps inside. Nothing is loaded and no interior is entered — the person is
+## hidden and parked for a while, which is what an onlooker sees and costs
+## nothing. §14 brings them back out of the same door.
+func _enter_building() -> void:
+	if _indoors:
+		return
+	_indoors = true
+	visible = false
+	set_physics_process(false)
+	_set_state(State.IDLE)
+	# Long enough to read as "they went in", short enough that a street does not
+	# quietly empty itself over an afternoon.
+	_state_timer = _rng.randf_range(20.0, 70.0)
+
+
+func _leave_building() -> void:
+	if not _indoors:
+		return
+	_indoors = false
+	visible = true
+	set_physics_process(_active)
+	_state_timer = 0.5
+
+
+## What this person is doing, for the tests and the debug overlay.
+func routine_activity() -> int:
+	if _schedule == null:
+		return -1
+	return int(RoutineManager.activity_for(_schedule))
+
+
+func routine_archetype_name() -> String:
+	return _schedule.archetype_name() if _schedule != null else ""
+
+
+func is_indoors() -> bool:
+	return _indoors
 
 
 ## Sends this civilian somewhere and puts them in the state that keeps them
