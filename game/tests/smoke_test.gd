@@ -2776,21 +2776,22 @@ func _test_progression_journal() -> void:
 	_check(Progression.journal().is_empty(), "a new life has no history")
 	LifeStats.add(&"shifts_worked")
 	Progression.evaluate()
-	var entries := Progression.recent(5)
+	# One sweep can complete several goals at once — by this point in the suite
+	# the player has a criminal record and a company as well — so the check is
+	# that the shift is in there, not that it is on top.
+	var entries := Progression.recent(20)
 	_check(not entries.is_empty(), "reaching a goal writes a line")
-	if not entries.is_empty():
+	var found := {}
+	for entry in entries:
+		found[String(entry["title"])] = entry
+	_check(found.has("Work a shift"), "naming what was reached (%d lines)" % entries.size())
+	if found.has("Work a shift"):
+		var line: Dictionary = found["Work a shift"]
 		_check(
-			int(entries[0]["kind"]) == Progression.Kind.GOAL,
+			int(line["kind"]) == Progression.Kind.GOAL,
 			"marked as a goal rather than as anything else"
 		)
-		_check(
-			String(entries[0]["title"]) == "Work a shift",
-			"naming what was reached (%s)" % entries[0]["title"]
-		)
-		_check(
-			int(entries[0]["day"]) == TimeManager.day_index,
-			"and when"
-		)
+		_check(int(line["day"]) == TimeManager.day_index, "and when")
 
 
 func _test_onboarding_chain() -> void:

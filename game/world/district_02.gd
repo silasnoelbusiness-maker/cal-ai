@@ -1610,8 +1610,10 @@ func _make_service_point(payload: String) -> ServicePoint:
 func _build_vending_machines() -> void:
 	var stock := DistrictProps.machine_stock()
 	var table := [
-		["PlazaMachine", Vector3(-71.0, CityKit.CURB_HEIGHT, -167.2), 0.0, "Plaza"],
-		["DepotMachine", Vector3(33.5, CityKit.CURB_HEIGHT, -222.2), 0.0, "Kingston Road"],
+		# Mid-block, both of them. A machine parked in front of a letting board
+		# hides the board and answers for it, which is worse than useless.
+		["PlazaMachine", Vector3(-56.0, CityKit.CURB_HEIGHT, -167.2), 0.0, "Market Street"],
+		["DepotMachine", Vector3(48.0, CityKit.CURB_HEIGHT, -222.2), 0.0, "Kingston Road"],
 	]
 	for entry in table:
 		var machine := DistrictProps.vending_machine(

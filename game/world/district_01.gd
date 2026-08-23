@@ -2337,8 +2337,10 @@ func _make_service_point(payload: String) -> ServicePoint:
 func _build_vending_machines() -> void:
 	var stock := DistrictProps.machine_stock()
 	var table := [
+		# Both mid-block and clear of every doorway: a machine standing in front
+		# of a letting board would hide it and answer for it.
 		["MainStreetMachine", Vector3(2.0, CURB_HEIGHT, -10.6), 0.0],
-		["DinerMachine", Vector3(23.6, CURB_HEIGHT, -24.2), 0.0],
+		["DinerMachine", Vector3(27.0, CURB_HEIGHT, -24.0), 0.0],
 	]
 	for entry in table:
 		var machine := DistrictProps.vending_machine(
