@@ -61,6 +61,7 @@ var _property_sale_panel: PropertySalePanel = null
 var _real_estate_panel: RealEstatePanel = null
 var _progress_panel: ProgressPanel = null
 var _objective_banner: ObjectiveBanner = null
+var _venue_panel: VenuePanel = null
 @onready var _store_panel: PanelContainer = %StorePanel
 @onready var _store_name: Label = %StoreName
 @onready var _store_status: Label = %StoreStatus
@@ -570,6 +571,8 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 			_logistics_panel.open()
 		&"progress":
 			_progress_panel.open()
+		&"venue":
+			_venue_panel.open(context as ServicePoint, requester)
 		&"underworld":
 			_underworld_panel.open()
 		&"legal":
@@ -846,6 +849,8 @@ func _build_phase_m_screens() -> void:
 	_real_estate_panel.name = "RealEstatePanel"
 	_progress_panel = ProgressPanel.new()
 	_progress_panel.name = "ProgressPanel"
+	_venue_panel = VenuePanel.new()
+	_venue_panel.name = "VenuePanel"
 	_objective_banner = ObjectiveBanner.new()
 
 	for screen in _phase_m_screens():
@@ -885,7 +890,7 @@ func _phase_m_screens() -> Array:
 		_property_sale_panel, _real_estate_panel,
 		_company_dashboard, _staff_schedule_panel, _manager_panel, _logistics_panel,
 		_branch_finance_panel, _underworld_panel, _contact_panel, _legal_panel,
-		_progress_panel,
+		_progress_panel, _venue_panel,
 	]
 
 

@@ -193,6 +193,61 @@ func _bind_business() -> void:
 	_redress_if_style_changed()
 	rebuild_equipment()
 	_refresh_signage()
+	_refresh_owner_counter()
+
+
+## The counter the owner can order from in their own venue.
+##
+## A gym you own is somewhere you can train; a bar you own is somewhere you can
+## drink. The money goes into the till rather than out of the world, which the
+## service point handles — all this decides is whether there is a counter at
+## all, and what kind.
+##
+## Rebuilt on every bind rather than created once, because the business behind
+## this room can be sold, replaced or loaded from a save.
+func _refresh_owner_counter() -> void:
+	var wanted := _counter_kind()
+	var existing := get_node_or_null("OwnerCounter") as ServicePoint
+	if wanted < 0:
+		if existing != null:
+			existing.queue_free()
+		return
+	if existing == null:
+		existing = ServicePoint.new()
+		existing.name = "OwnerCounter"
+		# Beside the shopfront, where a counter would be, and out of the way of
+		# the equipment the player places themselves.
+		existing.position = Vector3(0.0, 1.0, 2.0)
+		var shape := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = Vector3(2.6, 2.2, 2.6)
+		shape.shape = box
+		existing.add_child(shape)
+		add_child(existing)
+	existing.venue_kind = wanted
+	existing.venue_name = _business.business_name
+	existing.business_id = _business.business_id
+	existing.opens_hour = _business.opening_hour
+	existing.closes_hour = _business.closing_hour
+	existing.prompt_subtitle = existing.venue_name
+
+
+## Which counter a business type deserves, or -1 for one that sells over a till
+## rather than across a counter. A convenience store is shopping, not an
+## outing, so it gets nothing here.
+func _counter_kind() -> int:
+	if _business == null:
+		return -1
+	match _business.type_id:
+		&"coffee_shop":
+			return ServiceCatalogue.Kind.CAFE
+		&"restaurant":
+			return ServiceCatalogue.Kind.DINER
+		&"gym":
+			return ServiceCatalogue.Kind.GYM
+		&"nightclub":
+			return ServiceCatalogue.Kind.BAR
+	return -1
 
 
 func _redress_if_style_changed() -> void:

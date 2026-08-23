@@ -107,6 +107,7 @@ func _ready() -> void:
 	_build_street_props()
 	_build_broker_alley()
 	_build_venue_doors()
+	_build_vending_machines()
 	_extend_navigation()
 	_build_traffic_signals()
 	_build_pedestrians()
@@ -866,8 +867,8 @@ func _venue_table() -> Array:
 		# NPC-run places, so the district reads as occupied rather than as a set
 		# of empty units waiting for the player.
 		[
-			"ExchangeLobby", Vector3(30.0, 1.2, -279.6), Vector3.BACK, "Enter Lobby",
-			"message", "EXCHANGE HOUSE\nOffices. Nothing in here for you yet.",
+			"ExchangeLobby", Vector3(30.0, 1.2, -279.6), Vector3.BACK, "Enter Cafe",
+			"service", "Exchange Coffee House|CAFE|6|19",
 		],
 		[
 			"PlazaCoffee", Vector3(74.0, 1.2, -169.6), Vector3.BACK, "Buy a drink",
@@ -919,6 +920,8 @@ func _build_venue_doors() -> void:
 				door = _make_commercial_property(point, facing, StringName(payload))
 			"shop":
 				door = _make_npc_shop(payload)
+			"service":
+				door = _make_service_point(payload)
 			"courier":
 				door = _make_courier_depot()
 			"residence":
@@ -1574,3 +1577,46 @@ func _refresh_night_lighting() -> void:
 		material.emission_energy_multiplier = energy
 	for material in _lamp_materials:
 		material.emission_energy_multiplier = 2.6 if night or dusk else 0.0
+
+
+## A counter built from one table line: "Name|KIND|opens|closes". Same shape as
+## the harbour's, deliberately — the two districts share the venue table format
+## and this is the half of it that reads a service.
+func _make_service_point(payload: String) -> ServicePoint:
+	var parts := payload.split("|")
+	var point := ServicePoint.new()
+	if parts.size() > 0:
+		point.venue_name = parts[0]
+	if parts.size() > 1:
+		point.venue_kind = DistrictProps.service_kind(parts[1])
+	if parts.size() > 2:
+		point.opens_hour = int(parts[2])
+	if parts.size() > 3:
+		point.closes_hour = int(parts[3])
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(3.0, 2.4, 3.0)
+	shape.shape = box
+	point.add_child(shape)
+	return point
+
+
+## Two machines in Central: one on the plaza, one outside the depot.
+##
+## Central charges Central prices for everything else, and the machines are no
+## different — the markup is the machine's, not the district's, so the two
+## districts sell the same tin for the same money. That is deliberate: the
+## thing that is expensive about Central is the rent, not the drink.
+func _build_vending_machines() -> void:
+	var stock := DistrictProps.machine_stock()
+	var table := [
+		["PlazaMachine", Vector3(-71.0, CityKit.CURB_HEIGHT, -167.2), 0.0, "Plaza"],
+		["DepotMachine", Vector3(33.5, CityKit.CURB_HEIGHT, -222.2), 0.0, "Kingston Road"],
+	]
+	for entry in table:
+		var machine := DistrictProps.vending_machine(
+			stock, entry[1], entry[2], Color(0.36, 0.38, 0.42)
+		)
+		machine.name = entry[0]
+		machine.shop_name = "Machine — %s" % entry[3]
+		_interactables.add_child(machine)

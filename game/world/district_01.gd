@@ -906,6 +906,7 @@ func _build_park() -> void:
 		)
 
 	_add_fountain(container, Vector2(-25.5, 37.5))
+	_build_vending_machines()
 
 	var bench_spots := [
 		[Vector2(-29.5, 24.0), 0.0],
@@ -1455,8 +1456,10 @@ func _venue_table() -> Array:
 			"market", "",
 		],
 		[
+			# Real from Phase S: a counter, three plates and half an hour of the
+			# clock. It stood as a promise for six phases.
 			"DinerDoor", Vector3(20.5, 1.2, -26.4), Vector3.BACK, "Enter Diner",
-			"message", "THE GALLEY DINER\nSit-down meals arrive with the restaurant system.",
+			"service", "The Galley Diner|DINER|6|22",
 		],
 		[
 			# On the north face, so the gate is visible from Main Street rather
@@ -1514,6 +1517,8 @@ func _build_venue_doors() -> void:
 				door = _make_market_portal(point, facing)
 			"job":
 				door = _make_warehouse_station()
+			"service":
+				door = _make_service_point(message)
 			"property":
 				door = _make_commercial_property(point, facing, StringName(message))
 				(door as CommercialProperty).sign_yaw = rad_to_deg(
@@ -2298,3 +2303,47 @@ func _build_notice_board() -> void:
 	CityKit.attach_interactable(
 		_interactables, notice, holder.position + Vector3(0.0, 1.1, 0.9), 2.2
 	)
+
+
+## A counter built from one table line: "Name|KIND|opens|closes".
+##
+## Packed into a string because the venue table's payload column is a string
+## and adding a seventh column for the sake of two rows would touch every line
+## in it. Split here, in one place, and never parsed anywhere else.
+func _make_service_point(payload: String) -> ServicePoint:
+	var parts := payload.split("|")
+	var point := ServicePoint.new()
+	if parts.size() > 0:
+		point.venue_name = parts[0]
+	if parts.size() > 1:
+		point.venue_kind = DistrictProps.service_kind(parts[1])
+	if parts.size() > 2:
+		point.opens_hour = int(parts[2])
+	if parts.size() > 3:
+		point.closes_hour = int(parts[3])
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(3.0, 2.4, 3.0)
+	shape.shape = box
+	point.add_child(shape)
+	return point
+
+
+## Two drinks machines: one on Main Street, one outside the diner.
+##
+## The point of them is the hour rather than the goods. Every shop in the
+## harbour shuts, and a courier run at four in the morning had nowhere to buy
+## a coffee.
+func _build_vending_machines() -> void:
+	var stock := DistrictProps.machine_stock()
+	var table := [
+		["MainStreetMachine", Vector3(2.0, CURB_HEIGHT, -10.6), 0.0],
+		["DinerMachine", Vector3(23.6, CURB_HEIGHT, -24.2), 0.0],
+	]
+	for entry in table:
+		var machine := DistrictProps.vending_machine(
+			stock, entry[1], entry[2], _mat("metal").albedo_color
+		)
+		machine.name = entry[0]
+		machine.shop_name = "Machine — %s" % ("Main Street" if entry[0].begins_with("Main") else "Harbour Avenue")
+		_interactables.add_child(machine)
