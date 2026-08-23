@@ -59,6 +59,8 @@ var _arrest_summary: ArrestSummary = null
 var _contact_panel: ContactPanel = null
 var _property_sale_panel: PropertySalePanel = null
 var _real_estate_panel: RealEstatePanel = null
+var _progress_panel: ProgressPanel = null
+var _objective_banner: ObjectiveBanner = null
 @onready var _store_panel: PanelContainer = %StorePanel
 @onready var _store_name: Label = %StoreName
 @onready var _store_status: Label = %StoreStatus
@@ -404,6 +406,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			_profile_panel.open()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("progress"):
+		if _progress_panel.is_open():
+			close_screens()
+		else:
+			close_screens()
+			_progress_panel.open()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("real_estate"):
 		if _real_estate_panel.is_open():
 			close_screens()
@@ -558,6 +568,8 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 			_company_dashboard.open()
 		&"logistics":
 			_logistics_panel.open()
+		&"progress":
+			_progress_panel.open()
 		&"underworld":
 			_underworld_panel.open()
 		&"legal":
@@ -832,6 +844,9 @@ func _build_phase_m_screens() -> void:
 	_property_sale_panel.name = "PropertySalePanel"
 	_real_estate_panel = RealEstatePanel.new()
 	_real_estate_panel.name = "RealEstatePanel"
+	_progress_panel = ProgressPanel.new()
+	_progress_panel.name = "ProgressPanel"
+	_objective_banner = ObjectiveBanner.new()
 
 	for screen in _phase_m_screens():
 		host.add_child(screen)
@@ -846,6 +861,12 @@ func _build_phase_m_screens() -> void:
 	# that would be arguing with itself. So it is an overlay the player
 	# dismisses when they have read it, and the world runs behind it.
 	host.add_child(_arrest_summary)
+
+	# The corner list goes under the cash and the destination, in the column
+	# that already holds everything the player glances at rather than reads.
+	var corner := get_node_or_null("Root/TopRight")
+	if corner != null:
+		corner.add_child(_objective_banner)
 
 	# The stand beside a car offers COMPARE, and comparing is something the
 	# sales desk screen does, so the two hand off rather than stacking.
@@ -864,6 +885,7 @@ func _phase_m_screens() -> Array:
 		_property_sale_panel, _real_estate_panel,
 		_company_dashboard, _staff_schedule_panel, _manager_panel, _logistics_panel,
 		_branch_finance_panel, _underworld_panel, _contact_panel, _legal_panel,
+		_progress_panel,
 	]
 
 
