@@ -16,14 +16,37 @@ signal died()
 const MAX_VALUE := 100.0
 
 @export_group("Drain")
-## Hunger lost per in-game minute. 0.035 => roughly one full day per meal.
-@export var hunger_per_minute: float = 0.035
-## Energy lost per in-game minute while awake.
-@export var energy_per_minute: float = 0.02
+## Hunger lost per in-game minute. A day is 1440 of them, so 0.055 empties a
+## full bar in a little over a day and a 35-point meal buys about ten hours:
+## breakfast and something in the evening. Needs are meant to be a rhythm, not
+## an alarm.
+@export var hunger_per_minute: float = 0.055
+## Energy lost per in-game minute while awake. Slower than hunger, because
+## sleep comes round once a day and meals do not.
+@export var energy_per_minute: float = 0.042
 ## Extra energy lost per real second of sprinting.
 @export var sprint_energy_per_second: float = 3.0
 ## Energy recovered per real second while standing still.
 @export var idle_energy_per_second: float = 0.4
+@export_group("Hunger")
+## Hunger at or below this is felt: energy goes faster and the player is slower
+## on their feet. Above it, being a little peckish costs nothing at all.
+@export var hungry_below: float = 25.0
+## How much faster energy goes while hungry.
+@export var hungry_energy_multiplier: float = 1.8
+@export_group("Tiredness")
+## Energy at or below this and the player is dragging.
+@export var tired_below: float = 20.0
+## Movement multiplier when dragging. Noticeable, never crippling: a tired
+## player must always still be able to get themselves home.
+@export var tired_speed_multiplier: float = 0.78
+@export_group("Recovery")
+## Health regained per in-game minute while fed and rested, so a beating heals
+## on its own over a day or so and one bad night cannot end a save. Nothing
+## comes back while hungry.
+@export var recovery_health_per_minute: float = 0.02
+## Both hunger and energy must be above this fraction of full to recover.
+@export var recovery_needs_fraction: float = 0.5
 @export_group("Starvation")
 ## Health lost per in-game minute once hunger hits zero.
 @export var starving_health_per_minute: float = 0.08
@@ -135,7 +158,40 @@ func _charge_drain() -> void:
 		return
 	_drained_to_minutes = now
 
+	# Hunger is charged first so a player who goes hungry during this stretch
+	# pays the faster energy rate for it rather than the following one.
+	var was_hungry := is_hungry()
 	add_hunger(-hunger_per_minute * elapsed)
-	add_energy(-energy_per_minute * elapsed)
+	var energy_rate := energy_per_minute
+	if was_hungry or is_hungry():
+		energy_rate *= hungry_energy_multiplier
+	add_energy(-energy_rate * elapsed)
 	if hunger <= 0.0:
 		add_health(-starving_health_per_minute * elapsed)
+	elif can_recover():
+		add_health(recovery_health_per_minute * elapsed)
+
+
+## Hungry enough for it to cost them something.
+func is_hungry() -> bool:
+	return hunger <= hungry_below
+
+
+func is_tired() -> bool:
+	return energy <= tired_below
+
+
+## What the player's legs are worth right now. One multiplier applied to both
+## walking and sprinting, so tiredness reads the same whatever they are doing.
+func movement_multiplier() -> float:
+	return tired_speed_multiplier if is_tired() else 1.0
+
+
+## Health only comes back to somebody both fed and rested. That is the whole
+## recovery path: eat, sleep, wait. No medical system, and nothing you can buy
+## that undoes a hospital trip.
+func can_recover() -> bool:
+	if health >= MAX_VALUE:
+		return false
+	var threshold := MAX_VALUE * recovery_needs_fraction
+	return hunger >= threshold and energy >= threshold

@@ -213,7 +213,9 @@ func _physics_process(delta: float) -> void:
 	var input_dir := _get_camera_relative_input()
 	_update_sprint(input_dir, delta)
 
-	var target_speed := sprint_speed if _is_sprinting else walk_speed
+	# Tiredness is felt in the legs rather than announced in a message.
+	var target_speed := (sprint_speed if _is_sprinting else walk_speed) \
+		* stats.movement_multiplier()
 	var target_velocity := input_dir * target_speed
 
 	var rate := acceleration if input_dir.length_squared() > 0.0 else deceleration
