@@ -692,7 +692,16 @@ func _test_life_loop() -> void:
 	var energy_before_shift := stats.energy
 	await _press_action("interact")
 	await _settle(6)
-	_check(EconomyManager.cash == cash_before + 120, "a shift pays $120 (got $%d)" % (EconomyManager.cash - cash_before))
+	# Read from the job rather than restated, so a balance pass moves the check
+	# with the game instead of breaking it. What is being pinned is that a
+	# shift pays exactly what it advertises, not that it pays a particular sum.
+	var advertised: int = (station as JobStation).job.pay
+	_check(
+		EconomyManager.cash == cash_before + advertised,
+		"a shift pays what it says it does ($%d of $%d)" % [
+			EconomyManager.cash - cash_before, advertised
+		]
+	)
 	# The clock also ticks in real time while the test awaits frames, so allow
 	# a couple of minutes of slack around the four-hour skip.
 	var shift_minutes := TimeManager.total_minutes - clock_before
