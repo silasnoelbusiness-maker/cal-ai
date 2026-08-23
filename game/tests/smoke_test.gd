@@ -366,6 +366,24 @@ func _run() -> void:
 	_test_court_location()
 	_test_legal_screens_reachable()
 
+	# --- Phase S ---------------------------------------------------------
+	_test_life_stats_counters()
+	_test_goal_metrics_are_answerable()
+	_test_goal_progress_and_completion()
+	_test_goal_pinning()
+	_test_progression_journal()
+	_test_onboarding_chain()
+	_test_onboarding_settles_for_an_established_player()
+	_test_needs_have_consequences()
+	_test_service_catalogue()
+	await _test_venue_ordering()
+	await _test_owner_eats_in_their_own_shop()
+	_test_vending_machines_are_open_all_night()
+	_test_venues_exist_in_the_city()
+	_test_no_two_actions_share_a_key()
+	await _test_progression_save_load()
+	await _test_pre_progression_save()
+
 	_report()
 
 
@@ -2635,6 +2653,516 @@ func _press_action(action: String) -> void:
 	release.pressed = false
 	Input.parse_input_event(release)
 	await get_tree().process_frame
+
+
+# --- Phase S -------------------------------------------------------------
+
+## The counters nobody else owned.
+func _test_life_stats_counters() -> void:
+	LifeStats.clear()
+	_check(LifeStats.get_counter(&"shifts_worked") == 0, "a fresh life has worked no shifts")
+	LifeStats.add(&"shifts_worked", 3)
+	_check(LifeStats.get_counter(&"shifts_worked") == 3, "and three shifts are three shifts")
+	LifeStats.add(&"not_a_counter", 5)
+	_check(
+		not LifeStats.all_counters().has(&"not_a_counter"),
+		"a typo at a call site cannot invent a statistic"
+	)
+	# Distance arrives in metres and is kept in kilometres, remainder and all.
+	LifeStats.add_distance(600.0)
+	_check(
+		LifeStats.get_counter(&"kilometres_driven") == 0,
+		"six hundred metres is not yet a kilometre"
+	)
+	LifeStats.add_distance(600.0)
+	_check(
+		LifeStats.get_counter(&"kilometres_driven") == 1,
+		"but two of them are (%d)" % LifeStats.get_counter(&"kilometres_driven")
+	)
+	_check(
+		LifeStats.label_for(&"nights_slept") == "Nights slept",
+		"and every counter has a name the screen can print"
+	)
+
+
+## Every goal must name a metric the progression manager can actually answer.
+## A goal pointing at a metric nobody implemented would simply never complete,
+## silently, which is the sort of thing that survives a whole phase.
+func _test_goal_metrics_are_answerable() -> void:
+	var unknown := PackedStringArray()
+	for goal in Progression.all_goals():
+		if not Progression.METRICS.has(goal.metric):
+			unknown.append(String(goal.metric))
+	_check(
+		unknown.is_empty(),
+		"every goal asks a question the game can answer (%s)" % (
+			"none outstanding" if unknown.is_empty() else ", ".join(unknown)
+		)
+	)
+	_check(Progression.all_goals().size() >= 30, "and there are enough of them to be a ladder")
+	var legal := 0
+	var criminal := 0
+	for goal in Progression.all_goals():
+		if goal.track == Goal.Track.CRIMINAL:
+			criminal += 1
+		else:
+			legal += 1
+	_check(legal > 0 and criminal > 0, "on both tracks (%d legal, %d criminal)" % [legal, criminal])
+	# Nothing may be answered by accident: an unimplemented key returns zero
+	# rather than erroring, and that must stay true.
+	_check(is_zero_approx(Progression.value_for(&"nonsense")), "and an unknown metric is simply zero")
+
+
+func _test_goal_progress_and_completion() -> void:
+	Progression.clear()
+	LifeStats.clear()
+	var goal := Progression.goal_by_id(&"first_shift")
+	_check(goal != null, "the first goal is to work a shift")
+	if goal == null:
+		return
+	_check(not Progression.is_complete(goal.goal_id), "which has not been done")
+	_check(is_zero_approx(Progression.progress_of(goal)), "and stands at nothing")
+	LifeStats.add(&"shifts_worked")
+	var newly := Progression.evaluate()
+	_check(newly >= 1, "one shift completes it")
+	_check(Progression.is_complete(&"first_shift"), "and it is marked done")
+	_check(
+		Progression.completed_on(&"first_shift") == TimeManager.day_index,
+		"on the day it happened"
+	)
+	# The whole point of reading metrics live rather than storing them.
+	var again := Progression.evaluate()
+	_check(again == 0, "and a second sweep awards it no second time")
+	_check(
+		is_equal_approx(Progression.progress_of(goal), 1.0),
+		"a finished goal reads as finished"
+	)
+
+
+func _test_goal_pinning() -> void:
+	Progression.clear()
+	_check(not Progression.pinned().is_empty(), "an unpinned player is still shown what is next")
+	_check(
+		Progression.pinned().size() <= Progression.MAX_PINNED,
+		"and never more than three at once (%d)" % Progression.pinned().size()
+	)
+	var first := Progression.suggestions()[0]
+	_check(Progression.pin(first.goal_id), "a goal can be pinned")
+	_check(Progression.is_pinned(first.goal_id), "and it stays pinned")
+	var ids: Array[StringName] = []
+	for goal in Progression.suggestions():
+		if not Progression.is_pinned(goal.goal_id) and ids.size() < 3:
+			ids.append(goal.goal_id)
+	Progression.pin(ids[0])
+	Progression.pin(ids[1])
+	_check(not Progression.pin(ids[2]), "a fourth will not go on")
+	_check(Progression.pinned().size() == 3, "the list holds at three")
+	Progression.unpin(first.goal_id)
+	_check(not Progression.is_pinned(first.goal_id), "unpinning takes one off")
+	_check(
+		Progression.pinned().size() == 2,
+		"and the game does not quietly refill the space (%d)" % Progression.pinned().size()
+	)
+	Progression.clear_pins()
+	_check(
+		Progression.pinned().size() == Progression.MAX_PINNED,
+		"until the player hands the choice back"
+	)
+
+
+func _test_progression_journal() -> void:
+	Progression.clear()
+	LifeStats.clear()
+	_check(Progression.journal().is_empty(), "a new life has no history")
+	LifeStats.add(&"shifts_worked")
+	Progression.evaluate()
+	var entries := Progression.recent(5)
+	_check(not entries.is_empty(), "reaching a goal writes a line")
+	if not entries.is_empty():
+		_check(
+			int(entries[0]["kind"]) == Progression.Kind.GOAL,
+			"marked as a goal rather than as anything else"
+		)
+		_check(
+			String(entries[0]["title"]) == "Work a shift",
+			"naming what was reached (%s)" % entries[0]["title"]
+		)
+		_check(
+			int(entries[0]["day"]) == TimeManager.day_index,
+			"and when"
+		)
+
+
+func _test_onboarding_chain() -> void:
+	Onboarding.clear()
+	LifeStats.clear()
+	Progression.clear()
+	_check(Onboarding.is_running(), "a new player is shown the guide")
+	_check(Onboarding.step_number() == 1, "starting at the first step")
+	var first := Onboarding.current()
+	_check(first != null and first.step_id == &"open_map", "which is to open the map")
+	Onboarding.report(&"something_else")
+	_check(Onboarding.step_number() == 1, "an unrelated event advances nothing")
+	Onboarding.report(&"map_opened")
+	_check(Onboarding.step_number() == 2, "opening it moves the guide on")
+	_check(
+		Onboarding.current().step_id == &"work_shift",
+		"to finding work (%s)" % Onboarding.current().step_id
+	)
+	# A metric step: no flag to report, it simply becomes true.
+	LifeStats.add(&"shifts_worked")
+	await_free_evaluate()
+	_check(
+		Onboarding.step_number() >= 3,
+		"and working a shift satisfies it without being told (%d)" % Onboarding.step_number()
+	)
+	Onboarding.skip()
+	_check(not Onboarding.is_running(), "the guide can be dismissed")
+	_check(Onboarding.was_skipped(), "and knows it was")
+	Onboarding.resume()
+	_check(Onboarding.is_running(), "and brought back where it stopped")
+	Onboarding.skip()
+
+
+## A flag step only counts from the moment it is asked for. Somebody who bought
+## a sandwich on day one must not have step four already behind them.
+func _test_onboarding_settles_for_an_established_player() -> void:
+	Onboarding.clear()
+	LifeStats.clear()
+	_check(Onboarding.is_running(), "the guide is up for a new player")
+	LifeStats.add(&"shifts_worked", 12)
+	Onboarding.settle()
+	_check(
+		not Onboarding.is_running() and Onboarding.is_finished(),
+		"but somebody who has already worked a dozen shifts is not tutorialised"
+	)
+	Onboarding.clear()
+	LifeStats.clear()
+
+
+func _test_needs_have_consequences() -> void:
+	var stats: PlayerStats = _player.get_stats()
+	var health := stats.health
+	var energy := stats.energy
+	var hunger := stats.hunger
+
+	stats.restore_values(100.0, 100.0, 100.0)
+	_check(is_equal_approx(stats.movement_multiplier(), 1.0), "a rested player walks at full speed")
+	_check(not stats.is_tired() and not stats.is_hungry(), "and is neither tired nor hungry")
+	_check(not stats.can_recover(), "with nothing to recover from")
+
+	stats.restore_values(60.0, 5.0, 100.0)
+	_check(stats.is_tired(), "an exhausted player is tired")
+	_check(
+		stats.movement_multiplier() < 1.0,
+		"and slower on their feet (x%.2f)" % stats.movement_multiplier()
+	)
+	_check(
+		stats.movement_multiplier() > 0.5,
+		"but never so slow they cannot get home"
+	)
+
+	stats.restore_values(60.0, 100.0, 100.0)
+	_check(stats.can_recover(), "a fed and rested player heals")
+	stats.restore_values(60.0, 100.0, 10.0)
+	_check(not stats.can_recover(), "a hungry one does not")
+	_check(stats.is_hungry(), "and knows it is hungry")
+
+	stats.restore_values(health, energy, hunger)
+
+
+func _test_service_catalogue() -> void:
+	for kind: int in [
+		ServiceCatalogue.Kind.CAFE, ServiceCatalogue.Kind.DINER,
+		ServiceCatalogue.Kind.GYM, ServiceCatalogue.Kind.BAR,
+	]:
+		var services := ServiceCatalogue.for_kind(kind)
+		_check(
+			services.size() >= 2,
+			"%s sells more than one thing (%d)" % [
+				ServiceCatalogue.kind_name(kind), services.size()
+			]
+		)
+		for service in services:
+			_check(
+				service.price > 0 and service.minutes > 0,
+				"%s costs money and time" % service.label
+			)
+	# A gym is worth going to without a strength stat: it buys back health at
+	# the price of the energy to earn it.
+	var session := ServiceCatalogue.by_id(ServiceCatalogue.Kind.GYM, &"full_session")
+	_check(session != null, "a proper gym session exists")
+	if session != null:
+		_check(session.health > 0.0, "and it is good for you")
+		_check(session.energy < 0.0, "at the cost of the energy to do it")
+	var meal := ServiceCatalogue.by_id(ServiceCatalogue.Kind.DINER, &"plate_of_the_day")
+	_check(meal != null and meal.hunger > 35.0, "a plate at the diner beats a tin from a shop")
+
+
+func _test_venue_ordering() -> void:
+	var diner: ServicePoint = _find_service_point("DinerDoor")
+	_check(diner != null, "the diner is a counter")
+	if diner == null:
+		return
+	var stats: PlayerStats = _player.get_stats()
+	EconomyManager.restore(500)
+	stats.restore_values(100.0, 100.0, 20.0)
+	_set_hour(12)
+	await _settle(4)
+
+	_check(diner.is_open(), "and it is open at midday")
+	var service := ServiceCatalogue.by_id(ServiceCatalogue.Kind.DINER, &"plate_of_the_day")
+	var before_cash := EconomyManager.cash
+	var before_minutes := TimeManager.total_minutes
+	var result := diner.order(service, _player)
+	await _settle(4)
+	_check(result == ServicePoint.Result.OK, "an order goes through")
+	_check(
+		EconomyManager.cash == before_cash - diner.price_of(service),
+		"and is paid for ($%d)" % diner.price_of(service)
+	)
+	_check(stats.hunger > 20.0, "the player is fed (%.0f)" % stats.hunger)
+	_check(
+		TimeManager.total_minutes >= before_minutes + service.minutes,
+		"and half an hour of the day has gone"
+	)
+	_check(
+		_player.get_inventory().count_of(&"basic_meal") == 0,
+		"eating out puts nothing in the bag"
+	)
+
+	# Closed means closed, whatever the player can afford.
+	_set_hour(3)
+	await _settle(4)
+	_check(not diner.is_open(), "the diner shuts overnight")
+	_check(
+		diner.order(service, _player) == ServicePoint.Result.CLOSED,
+		"and will not serve at three in the morning"
+	)
+
+	_set_hour(12)
+	EconomyManager.restore(2)
+	_check(
+		diner.order(service, _player) == ServicePoint.Result.NOT_ENOUGH_CASH,
+		"nor to somebody with two dollars"
+	)
+	await _settle(4)
+
+
+## Buying lunch in your own restaurant moves money across, never into revenue.
+func _test_owner_eats_in_their_own_shop() -> void:
+	var business := BusinessManager.primary_business()
+	_check(business != null, "the player has a business to eat in")
+	if business == null:
+		return
+	var counter := ServicePoint.new()
+	counter.venue_name = business.business_name
+	counter.venue_kind = ServiceCatalogue.Kind.DINER
+	counter.opens_hour = 0
+	counter.closes_hour = 24
+	counter.business_id = business.business_id
+	add_child(counter)
+	await _settle(2)
+
+	EconomyManager.restore(400)
+	var service := ServiceCatalogue.by_id(ServiceCatalogue.Kind.DINER, &"breakfast")
+	var price := counter.price_of(service)
+	var till_before := business.cash_balance
+	var revenue_before := business.revenue_today
+	var pocket_before := EconomyManager.cash
+
+	_check(counter.order(service, _player) == ServicePoint.Result.OK, "the owner orders breakfast")
+	_check(
+		EconomyManager.cash == pocket_before - price,
+		"it comes out of their pocket"
+	)
+	_check(
+		business.cash_balance == till_before + price,
+		"and lands in the till (%d -> %d)" % [till_before, business.cash_balance]
+	)
+	_check(
+		business.revenue_today == revenue_before,
+		"but the day's takings are unchanged — feeding yourself is not trade"
+	)
+	counter.queue_free()
+	await _settle(2)
+
+
+func _test_vending_machines_are_open_all_night() -> void:
+	var machines: Array = _main.find_children("*", "VendingMachine", true, false)
+	_check(machines.size() >= 2, "there are machines on the street (%d)" % machines.size())
+	if machines.is_empty():
+		return
+	var machine: VendingMachine = machines[0]
+	_set_hour(4)
+	_check(machine.is_open(), "and one of them is open at four in the morning")
+	_check(not machine.robbable, "a machine has no till worth robbing")
+	_check(machine.stock.size() >= 2, "it sells more than one thing")
+	var item: ItemData = machine.stock[0]
+	_check(
+		machine.get_price(item) > item.price,
+		"at a markup ($%d against $%d)" % [machine.get_price(item), item.price]
+	)
+	_set_hour(12)
+
+
+func _test_venues_exist_in_the_city() -> void:
+	var points: Array = _main.find_children("*", "ServicePoint", true, false)
+	_check(points.size() >= 2, "the city has counters to order at (%d)" % points.size())
+	var names := PackedStringArray()
+	for point in points:
+		names.append(point.venue_name)
+	_check(
+		"The Galley Diner" in names,
+		"including the diner that was promised six phases ago (%s)" % ", ".join(names)
+	)
+
+
+## Two screens on one key is a bug that hides until somebody presses it. The
+## legal and logistics screens both sat on L for a whole phase.
+func _test_no_two_actions_share_a_key() -> void:
+	var seen := {}
+	var clashes := PackedStringArray()
+	# Placement mode is modal and deliberately reuses R while it is up, so the
+	# pair it forms is the one known exception rather than a hole in the check.
+	var allowed := [["camera_reset", "rotate_placement"]]
+	for action in InputMap.get_actions():
+		var name := String(action)
+		if name.begins_with("ui_") or name.begins_with("debug_"):
+			continue
+		for event in InputMap.action_get_events(action):
+			var key := event as InputEventKey
+			if key == null or key.physical_keycode == 0:
+				continue
+			var code := key.physical_keycode
+			if seen.has(code):
+				var pair := [String(seen[code]), name]
+				pair.sort()
+				var known := false
+				for entry: Array in allowed:
+					var sorted := entry.duplicate()
+					sorted.sort()
+					if sorted == pair:
+						known = true
+				if not known:
+					clashes.append("%s/%s on %s" % [seen[code], name, OS.get_keycode_string(code)])
+			else:
+				seen[code] = name
+	_check(clashes.is_empty(), "no two screens answer the same key (%s)" % (
+		"clear" if clashes.is_empty() else ", ".join(clashes)
+	))
+	_check(
+		InputMap.has_action("progress"),
+		"and the progress screen has one of its own"
+	)
+
+
+func _test_progression_save_load() -> void:
+	Progression.clear()
+	Onboarding.clear()
+	LifeStats.clear()
+	LifeStats.add(&"shifts_worked", 4)
+	LifeStats.add(&"meals_eaten", 2)
+	Progression.evaluate()
+	var pinnable := Progression.suggestions()[0].goal_id
+	Progression.pin(pinnable)
+	var completed := Progression.completed_count()
+	var journal := Progression.journal().size()
+	_check(completed > 0, "there is progress worth saving (%d goals)" % completed)
+
+	SaveManager.save_to_slot(3)
+	await _settle(10)
+	Progression.clear()
+	LifeStats.clear()
+	_check(Progression.completed_count() == 0, "and it can be thrown away")
+
+	SaveManager.load_from_slot(3)
+	await _settle(10)
+	_check(
+		LifeStats.get_counter(&"shifts_worked") == 4,
+		"loading brings the counters back (%d)" % LifeStats.get_counter(&"shifts_worked")
+	)
+	_check(
+		LifeStats.get_counter(&"meals_eaten") == 2, "all of them"
+	)
+	_check(
+		Progression.completed_count() == completed,
+		"and the goals already reached (%d)" % Progression.completed_count()
+	)
+	_check(Progression.is_pinned(pinnable), "with the pinned one still pinned")
+	_check(
+		Progression.journal().size() == journal,
+		"and the journey intact (%d lines)" % Progression.journal().size()
+	)
+
+
+## A save written before any of this existed. It must catch up silently: the
+## goals its player has plainly already met are marked, and they are not made
+## to sit through a tutorial or read thirty notifications.
+func _test_pre_progression_save() -> void:
+	Progression.clear()
+	Onboarding.clear()
+	LifeStats.clear()
+	LifeStats.add(&"shifts_worked", 9)
+	SaveManager.save_to_slot(3)
+	await _settle(10)
+
+	var path := SaveManager.get_slot_path(3)
+	var file := FileAccess.open(path, FileAccess.READ)
+	var raw: Dictionary = JSON.parse_string(file.get_as_text())
+	file.close()
+	var entities: Dictionary = raw["entities"]
+	_check(entities.has("progression"), "the save carries a progression block")
+	_check(entities.has("onboarding"), "and an onboarding one")
+	entities.erase("progression")
+	entities.erase("onboarding")
+	raw["entities"] = entities
+	var out := FileAccess.open(path, FileAccess.WRITE)
+	out.store_string(JSON.stringify(raw))
+	out.close()
+
+	_notifications.clear()
+	SaveManager.load_from_slot(3)
+	await _settle(20)
+	_check(
+		Progression.is_complete(&"first_shift"),
+		"an old save catches up on the goals it had already earned"
+	)
+	var shouted := 0
+	for message in _notifications:
+		if "GOAL REACHED" in message:
+			shouted += 1
+	_check(shouted == 0, "without shouting about any of them (%d notifications)" % shouted)
+	_check(
+		not Onboarding.is_running(),
+		"and its player is not sat down and taught to walk"
+	)
+	Progression.clear()
+	Onboarding.clear()
+	LifeStats.clear()
+
+
+## Puts the clock on a given hour of the current day. The clock only ever runs
+## forwards, so this rolls into tomorrow rather than winding back — which is
+## also what the rest of the game would do.
+func _set_hour(hour: int) -> void:
+	var target := float(TimeManager.day_index * TimeManager.MINUTES_PER_DAY + hour * 60)
+	if target < TimeManager.total_minutes:
+		target += float(TimeManager.MINUTES_PER_DAY)
+	TimeManager.set_total_minutes(target)
+
+
+func _find_service_point(node_name: String) -> ServicePoint:
+	for point in _main.find_children("*", "ServicePoint", true, false):
+		if point.name == node_name:
+			return point
+	return null
+
+
+## The onboarding sweep runs on its own timer; this pokes it directly so a test
+## does not have to wait half a second for it.
+func await_free_evaluate() -> void:
+	Onboarding.report(&"_tick")
 
 
 func _report() -> void:
