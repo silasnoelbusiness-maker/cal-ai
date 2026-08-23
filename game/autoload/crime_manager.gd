@@ -83,6 +83,7 @@ const STATISTIC_KEYS: Array[StringName] = [
 	&"times_busted",
 	&"times_escaped",
 	&"highest_wanted_level",
+	&"highest_escape_level",
 	&"illegal_income",
 	&"fines_paid",
 ]

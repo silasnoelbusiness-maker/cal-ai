@@ -45,6 +45,7 @@ enum PurchaseResult { OK, NO_BUSINESS, NOT_ENOUGH_FUNDS, NO_SUCH_ITEM, NO_ROOM, 
 const STATISTIC_KEYS: Array[StringName] = [
 	&"businesses_founded", &"businesses_sold", &"employees_hired", &"employees_fired",
 	&"products_sold", &"drinks_sold", &"business_revenue", &"business_profit",
+	&"customers_served",
 	&"highest_daily_profit", &"highest_business_value", &"highest_net_worth",
 	&"loan_interest_paid",
 ]
@@ -1715,6 +1716,7 @@ func _raise_statistic(key: StringName, value: int) -> void:
 func _tally_report(report: Dictionary) -> void:
 	_add_statistic(&"business_revenue", int(report.get("revenue", 0)))
 	_add_statistic(&"business_profit", int(report.get("profit", 0)))
+	_add_statistic(&"customers_served", int(report.get("customers", 0)))
 	_raise_statistic(&"highest_daily_profit", int(report.get("profit", 0)))
 
 

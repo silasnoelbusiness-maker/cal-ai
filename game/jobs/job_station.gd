@@ -79,6 +79,8 @@ func _perform(interactor: Node3D) -> void:
 		EconomyManager.Source.LEGAL, EconomyManager.Stream.EMPLOYMENT
 	)
 	_shifts_worked_today += 1
+	LifeStats.add(&"shifts_worked")
+	LifeStats.add(&"shift_income", job.pay)
 	_refresh_prompt()
 
 	shift_completed.emit(job.pay)

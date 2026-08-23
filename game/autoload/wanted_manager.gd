@@ -353,6 +353,7 @@ func clear_wanted(message: String = "") -> void:
 	if level == 0 and not _escaping and points == 0:
 		return
 	var was_escaping := _escaping
+	var was_level := level
 	var worst := worst_severity
 	_cancel_escaping()
 	points = 0
@@ -367,6 +368,7 @@ func clear_wanted(message: String = "") -> void:
 	RoadblockManager.clear()
 	if was_escaping:
 		CrimeManager.add_statistic(&"times_escaped")
+		CrimeManager.raise_statistic(&"highest_escape_level", was_level)
 		# §122 — getting away is worth a little on the street, and §121 is why
 		# it is only a little: being caught must never be the faster way to
 		# build a name. A finished job pays several times this.
