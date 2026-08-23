@@ -3442,8 +3442,21 @@ func _r_financing_refused(main: Node) -> void:
 	var hud: Node = main.get_node("HUD")
 	LegalDebug.set_record_tier(CriminalRecord.Tier.HIGH_RISK)
 	await _wait(20)
-	var screen: Node = _hud_screen(hud, "RealEstatePanel")
-	screen.call("open")
+	# The refusal is on the mortgage offer, not on the portfolio: it is what a
+	# lender says when the player asks, so the frame has to be the asking.
+	var listing: PropertyListing = null
+	for candidate in RealEstate.listings():
+		if candidate.mortgage_available and not RealEstate.owns(candidate.property_id):
+			candidate.discovered = true
+			listing = candidate
+			break
+	if listing == null:
+		return
+	var screen: Node = _hud_screen(hud, "PropertySalePanel")
+	screen.call("open", listing.property_id)
+	await _wait(10)
+	screen.set("_showing_mortgage", true)
+	screen.call("_rebuild")
 	await _wait(14)
 
 

@@ -137,6 +137,30 @@ func _build_overview(summary: Dictionary) -> void:
 	]))
 	_body.add_child(ScreenKit.row("Brands", str(int(summary["brands"]))))
 	_body.add_child(ScreenKit.row("Employees", str(int(summary["employees"]))))
+
+	# §46 — a scandal is a notification when it lands and a standing state
+	# afterwards. A toast fades; this is what the player sees when they come
+	# back to the company and wonder why the brand is sliding.
+	if CompanyManager.has_scandal():
+		_body.add_child(ScreenKit.spacer(6))
+		_body.add_child(ScreenKit.heading("OWNER SCANDAL"))
+		_body.add_child(BusinessUIKit.row([
+			BusinessUIKit.stretch_label(
+				CompanyManager.scandal_reason if CompanyManager.scandal_reason != ""
+				else "A case in the owner's name", 14, ScreenKit.MUTED
+			),
+			BusinessUIKit.value_label(
+				"-%d reputation" % roundi(CompanyManager.scandal_penalty), 15, ScreenKit.BAD
+			),
+		]))
+		_body.add_child(BusinessUIKit.label(
+			"Fades over %d more day%s. Your locations, staff and books are "
+			% [
+				CompanyManager.scandal_days_left(),
+				"" if CompanyManager.scandal_days_left() == 1 else "s"
+			] + "untouched by it.",
+			12, ScreenKit.MUTED
+		))
 	_body.add_child(ScreenKit.spacer(8))
 
 	_body.add_child(ScreenKit.heading("TODAY"))
