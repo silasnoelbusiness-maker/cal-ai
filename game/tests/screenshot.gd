@@ -400,6 +400,13 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"career_progress", "income_split", "business_with_court_pending":
 			await _phase_r_scenario(main, scenario)
 
+		"goals_legal", "goals_criminal", "journey", "statistics", "guide_screen", \
+		"objective_banner", "onboarding_step", "venue_diner", "venue_cafe", \
+		"venue_gym", "vending_machine", "diner_street", "plaza_life", \
+		"park_life", "rush_hour", "quiet_hour", "night_machine", \
+		"map_goal_filters", "tired_player":
+			await _phase_s_scenario(main, scenario)
+
 		"characters":
 			# The five people the game draws, lined up at reading distance:
 			# player, civilian, office worker, retail worker, officer.
@@ -1141,6 +1148,187 @@ func _give_fleet() -> void:
 func _hud_screen(hud: Node, screen_name: String) -> Node:
 	var root := hud.get_node_or_null("Root/%s" % screen_name)
 	return root if root != null else hud.get_node_or_null(screen_name)
+
+
+## Phase S: the city as somewhere to live in, and the progress screens.
+func _phase_s_scenario(main: Node, scenario: String) -> void:
+	var hud: Node = main.get_node("HUD")
+	var player: Node3D = GameManager.player
+	EconomyManager.restore(48000)
+	await _wait(60)
+
+	match scenario:
+		"goals_legal", "goals_criminal", "journey", "statistics", "guide_screen":
+			await _s_progress(main, scenario)
+		"objective_banner":
+			await _s_banner(main, false)
+		"onboarding_step":
+			await _s_banner(main, true)
+		"venue_diner", "venue_cafe", "venue_gym":
+			await _s_venue(main, scenario)
+		"vending_machine", "night_machine":
+			await _s_machine(main, scenario)
+		"diner_street":
+			# The Galley Diner from the pavement, at lunchtime.
+			await _s_crowd_at(Vector3(20.5, 0.5, -21.0), 13)
+		"plaza_life":
+			await _s_crowd_at(Vector3(-30.0, 0.5, -181.0), 15)
+		"park_life":
+			await _s_crowd_at(Vector3(-25.0, 0.5, 38.0), 15)
+		"rush_hour":
+			await _s_traffic_at(8)
+		"quiet_hour":
+			await _s_traffic_at(3)
+		"map_goal_filters":
+			await _s_map_goals(main)
+		"tired_player":
+			await _s_tired(main)
+
+	await _wait(10)
+
+
+## A player with a life behind them, so the progress screens have something on
+## them. Everything here goes through the real path.
+func _s_history() -> void:
+	Progression.clear()
+	LifeStats.clear()
+	Onboarding.clear()
+	Onboarding.skip()
+	LifeStats.add(&"shifts_worked", 21)
+	LifeStats.add(&"shift_income", 3255)
+	LifeStats.add(&"deliveries_made", 46)
+	LifeStats.add(&"meals_eaten", 38)
+	LifeStats.add(&"coffees_drunk", 22)
+	LifeStats.add(&"nights_slept", 17)
+	LifeStats.add(&"gym_sessions", 6)
+	LifeStats.add(&"days_lived", 17)
+	LifeStats.add(&"vehicles_bought", 2)
+	LifeStats.add_distance(214000.0)
+	UnderworldDebug.set_reputation(48)
+	UnderworldDebug.unlock_all_contacts()
+	for i in 4:
+		Underworld.career.credit(IllegalJobData.Objective.VEHICLE_DELIVERY)
+	Progression.evaluate()
+
+
+func _s_progress(main: Node, scenario: String) -> void:
+	var hud: Node = main.get_node("HUD")
+	await _s_history()
+	var screen: Node = _hud_screen(hud, "ProgressPanel")
+	var page := ProgressPanel.Page.GOALS
+	match scenario:
+		"journey":
+			page = ProgressPanel.Page.JOURNAL
+		"statistics":
+			page = ProgressPanel.Page.STATISTICS
+		"guide_screen":
+			page = ProgressPanel.Page.GUIDE
+	screen.call("open", page)
+	if scenario == "goals_criminal":
+		# The criminal ladder is the same screen with the other track showing.
+		screen.set("_track", Goal.Track.CRIMINAL)
+		screen.call("show_tab", ProgressPanel.Page.GOALS)
+	await _wait(16)
+
+
+## The corner list: the guide while it is running, the goals after.
+func _s_banner(main: Node, guide: bool) -> void:
+	var player: Node3D = GameManager.player
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	if guide:
+		Progression.clear()
+		LifeStats.clear()
+		Onboarding.clear()
+	else:
+		await _s_history()
+		Progression.clear_pins()
+		Progression.pin(&"first_vehicle")
+	await _wait(40)
+
+
+## Ordering at a counter, at the counter itself.
+func _s_venue(main: Node, scenario: String) -> void:
+	var hud: Node = main.get_node("HUD")
+	var player: Node3D = GameManager.player
+	var stats = player.call("get_stats")
+	stats.restore_values(72.0, 44.0, 28.0)
+	var point: ServicePoint = null
+	for node in main.find_children("*", "ServicePoint", true, false):
+		if scenario == "venue_cafe" and node.venue_kind == ServiceCatalogue.Kind.CAFE:
+			point = node
+		elif scenario == "venue_diner" and node.venue_kind == ServiceCatalogue.Kind.DINER:
+			point = node
+	if scenario == "venue_gym":
+		# No gym stands on the street yet; the one the player can use is their
+		# own, so this is the counter a gym owner sees.
+		point = ServicePoint.new()
+		point.venue_name = "Ironworks Gym"
+		point.venue_kind = ServiceCatalogue.Kind.GYM
+		point.opens_hour = 6
+		point.closes_hour = 22
+		main.add_child(point)
+	if point == null:
+		return
+	player.global_position = point.global_position + Vector3(0.0, -0.7, 2.5)
+	await _wait(30)
+	_hud_screen(hud, "VenuePanel").call("open", point, player)
+	await _wait(14)
+
+
+func _s_machine(main: Node, scenario: String) -> void:
+	var hud: Node = main.get_node("HUD")
+	var player: Node3D = GameManager.player
+	var machines: Array = main.find_children("*", "VendingMachine", true, false)
+	if machines.is_empty():
+		return
+	var machine: Node3D = machines[0]
+	player.global_position = machine.global_position + Vector3(0.0, 0.4, 2.6)
+	await _wait(40)
+	if scenario == "vending_machine":
+		_hud_screen(hud, "ShopPanel").call("open", machine, player)
+		await _wait(14)
+
+
+## Somewhere the routines send people, with the player looking at it.
+func _s_crowd_at(where: Vector3, wait_hours: int) -> void:
+	var player: Node3D = GameManager.player
+	player.global_position = where
+	# Wind to the hour the place is busiest rather than waiting for it.
+	var target := float(TimeManager.day_index * 1440 + wait_hours * 60)
+	if target > TimeManager.total_minutes:
+		TimeManager.set_total_minutes(target)
+	await _wait(150)
+
+
+func _s_traffic_at(hour: int) -> void:
+	var player: Node3D = GameManager.player
+	player.global_position = Vector3(-6.0, 0.5, District01.MAIN_ST_Z + 2.0)
+	var target := float(TimeManager.day_index * 1440 + hour * 60)
+	if target < TimeManager.total_minutes:
+		target += 1440.0
+	TimeManager.set_total_minutes(target)
+	await _wait(180)
+
+
+func _s_map_goals(main: Node) -> void:
+	var hud: Node = main.get_node("HUD")
+	await _s_history()
+	Progression.clear_pins()
+	Progression.pin(&"first_vehicle")
+	for goal in Progression.suggestions():
+		if goal.metric == &"contacts_known" and Progression.pin(goal.goal_id):
+			break
+	_hud_screen(hud, "CityMap").call("open")
+	await _wait(16)
+
+
+## Hunger and tiredness where they are actually read: the bars on the HUD.
+func _s_tired(main: Node) -> void:
+	var player: Node3D = GameManager.player
+	var stats = player.call("get_stats")
+	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
+	stats.restore_values(58.0, 11.0, 14.0)
+	await _wait(40)
 
 
 ## Phase L: the front end seen from inside a running game.
