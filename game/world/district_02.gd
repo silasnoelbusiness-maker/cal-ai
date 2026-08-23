@@ -496,6 +496,31 @@ func _add_shopfronts(parent: Node3D, block_name: String, rect: Rect2) -> void:
 
 # --- Central Plaza -------------------------------------------------------
 
+## Benches round the monument and room to stand between them.
+##
+## Central had a plaza that nobody used: the routines send people to a park in
+## the afternoon and there was nothing here for them to be sent to, so everyone
+## in the district went and stood in a doorway instead.
+func _build_plaza_life(container: Node3D) -> void:
+	var wood := _mat("wood") if _palette.has("wood") else _mat("stone")
+	var metal := _mat("metal")
+	var benches := [
+		["PlazaBenchN", Vector3(MONUMENT.x, PLAZA_BASE, MONUMENT.z + 8.5), 180.0],
+		["PlazaBenchS", Vector3(MONUMENT.x, PLAZA_BASE, MONUMENT.z - 8.5), 0.0],
+		["PlazaBenchE", Vector3(MONUMENT.x + 9.5, PLAZA_BASE, MONUMENT.z), 270.0],
+		["PlazaBenchW", Vector3(MONUMENT.x - 9.5, PLAZA_BASE, MONUMENT.z), 90.0],
+	]
+	for entry in benches:
+		container.add_child(DistrictProps.bench(entry[0], entry[1], entry[2], wood, metal))
+	var spots := [
+		Vector3(MONUMENT.x + 6.0, PLAZA_BASE, MONUMENT.z + 5.0),
+		Vector3(MONUMENT.x - 6.0, PLAZA_BASE, MONUMENT.z - 5.0),
+		Vector3(MONUMENT.x + 12.0, PLAZA_BASE, MONUMENT.z - 9.0),
+		Vector3(MONUMENT.x - 12.0, PLAZA_BASE, MONUMENT.z + 9.0),
+	]
+	for i in spots.size():
+		container.add_child(DistrictProps.park_spot("PlazaSpot%d" % i, spots[i]))
+
 ## The landmark, and the one place in the city a car cannot go.
 func _build_plaza() -> void:
 	var container := _make_container("Plaza")
@@ -524,6 +549,8 @@ func _build_plaza() -> void:
 			)
 		at += step
 		index += 1
+
+	_build_plaza_life(container)
 
 	# The monument: a stepped plinth and a column, tall enough to see down the
 	# boulevard and act as the thing people navigate by.

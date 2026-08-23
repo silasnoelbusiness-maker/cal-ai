@@ -53,3 +53,35 @@ static func machine_stock() -> Array[ItemData]:
 		if item != null:
 			stock.append(item)
 	return stock
+
+
+## A public bench: seat, back, two legs, and the group that makes it somewhere
+## a routine can send somebody.
+##
+## Both parks build theirs from here. Before this the harbour had its own copy
+## and Central had none at all, which is why nobody in Central ever went to sit
+## anywhere.
+static func bench(
+	node_name: String, at: Vector3, yaw_degrees: float, wood: Material, metal: Material
+) -> Node3D:
+	var holder := Node3D.new()
+	holder.name = node_name
+	holder.position = at
+	holder.rotation_degrees.y = yaw_degrees
+	holder.add_to_group(&"bench")
+	CityKit.add_box(holder, "Seat", Vector3(0.0, 0.46, 0.0), Vector3(2.2, 0.12, 0.6), wood)
+	CityKit.add_box(holder, "Back", Vector3(0.0, 0.78, -0.26), Vector3(2.2, 0.5, 0.1), wood)
+	CityKit.add_box(holder, "LegL", Vector3(-0.9, 0.23, 0.0), Vector3(0.12, 0.46, 0.55), metal)
+	CityKit.add_box(holder, "LegR", Vector3(0.9, 0.23, 0.0), Vector3(0.12, 0.46, 0.55), metal)
+	return holder
+
+
+## Somewhere in the open a person can stand about: the middle of a lawn, the
+## foot of a monument. Not a bench, because standing is not sitting and a park
+## with nobody standing in it looks like a waiting room.
+static func park_spot(node_name: String, at: Vector3) -> Marker3D:
+	var marker := Marker3D.new()
+	marker.name = node_name
+	marker.position = at
+	marker.add_to_group(&"park_spot")
+	return marker

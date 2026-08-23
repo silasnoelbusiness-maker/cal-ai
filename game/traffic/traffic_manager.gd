@@ -20,6 +20,8 @@ const POPULATION := {Density.LOW: 6, Density.MEDIUM: 11, Density.HIGH: 16}
 @export var density: Density = Density.MEDIUM
 ## Fraction of the target kept overnight. Rush hours land in a later phase; this
 ## is enough for the streets to feel quieter at 3am.
+## Kept for the debug overlay and for anything that wants the old single
+## number. The hourly curve is what actually drives the population.
 @export var night_population_scale: float = 0.55
 ## Never spawn nearer to the player than this — cars must not pop into view.
 @export var min_spawn_distance_from_player: float = 55.0
@@ -82,14 +84,45 @@ func get_vehicles() -> Array[Vehicle]:
 	return _vehicles.duplicate()
 
 
+## How busy the roads are at each hour, as a fraction of the density setting.
+##
+## The night scale used to be the whole of it, which made every daylight hour
+## identical: nine in the morning looked like two in the afternoon. A city does
+## not do that. Two peaks, a midday lull between them, and the small hours
+## nearly empty — the same shape the pavements follow, so a rush hour is a rush
+## hour on foot and on the road at once.
+const HOURLY_TRAFFIC := [
+	0.30, 0.24, 0.20, 0.20, 0.26, 0.42,  # 00-05
+	0.70, 1.00, 1.25, 1.10, 0.88, 0.86,  # 06-11
+	0.92, 0.90, 0.86, 0.94, 1.15, 1.30,  # 12-17
+	1.12, 0.90, 0.74, 0.62, 0.50, 0.38,  # 18-23
+]
+## Weekends flatten the peaks: fewer people are going anywhere at eight in the
+## morning, and rather more of them are still out at midnight.
+const WEEKEND_PEAK_PULL := 0.72
+const WEEKEND_NIGHT_LIFT := 1.35
+
+
 func get_target_population() -> int:
 	var target := float(POPULATION.get(density, 11))
-	if TimeManager.get_phase() == TimeManager.Phase.NIGHT:
-		target *= night_population_scale
+	target *= hourly_scale(TimeManager.hour)
 	# Busy districts carry more cars. The pool follows the player rather than
 	# filling the whole city, so this is the density where they actually are.
 	target *= local_traffic_density()
 	return maxi(int(round(target)), 1)
+
+
+## The traffic multiplier for one hour, weekend included.
+func hourly_scale(hour: int) -> float:
+	var scale := float(HOURLY_TRAFFIC[clampi(hour, 0, 23)])
+	if TimeManager.is_weekend():
+		if scale > 1.0:
+			# Pull the peak back toward one rather than capping it, so a busy
+			# Saturday morning is still busier than a quiet Saturday noon.
+			scale = 1.0 + (scale - 1.0) * WEEKEND_PEAK_PULL
+		elif hour >= 22 or hour < 3:
+			scale *= WEEKEND_NIGHT_LIFT
+	return scale
 
 
 ## Traffic density of whatever part of the city the player is in. 1.0 when the

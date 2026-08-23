@@ -22,6 +22,54 @@ func _ready() -> void:
 		_filters[category] = true
 
 
+# --- Goals ---------------------------------------------------------------
+
+## Which kinds of place a goal is about.
+##
+## The map does not gain a "goal" pin. A goal is not a location — "own three
+## businesses" is not somewhere you can walk to — and dropping a marker in the
+## middle of the city for one would be a lie. What a goal does have is a kind
+## of place that moves it along, and this says which.
+const GOAL_CATEGORIES := {
+	&"shifts_worked": MapMarker.Category.JOB,
+	&"lifetime_income": MapMarker.Category.JOB,
+	&"businesses": MapMarker.Category.AVAILABLE_PROPERTY,
+	&"customers_served": MapMarker.Category.OWNED_BUSINESS,
+	&"employees": MapMarker.Category.OWNED_BUSINESS,
+	&"managers": MapMarker.Category.OWNED_BUSINESS,
+	&"company_value": MapMarker.Category.OWNED_BUSINESS,
+	&"brands": MapMarker.Category.OWNED_BUSINESS,
+	&"warehouses": MapMarker.Category.WAREHOUSE,
+	&"properties": MapMarker.Category.FOR_SALE,
+	&"vehicles_owned": MapMarker.Category.LANDMARK,
+	&"contacts_known": MapMarker.Category.CONTACT,
+	&"illegal_jobs": MapMarker.Category.CONTACT,
+	&"criminal_reputation": MapMarker.Category.CONTACT,
+	&"requests_filled": MapMarker.Category.CONTACT,
+	&"best_trust": MapMarker.Category.CONTACT,
+	&"illegal_income": MapMarker.Category.CONTACT,
+}
+
+
+## The categories the player's pinned goals point at, in the order they were
+## pinned and without repeats. Used by the map to say which of its filters are
+## worth looking at rather than to add anything to it.
+func goal_categories() -> Array[int]:
+	var out: Array[int] = []
+	for goal in Progression.pinned():
+		if not GOAL_CATEGORIES.has(goal.metric):
+			continue
+		var category: int = GOAL_CATEGORIES[goal.metric]
+		if not out.has(category):
+			out.append(category)
+	return out
+
+
+## Whether a category is one of those, for the filter row.
+func is_goal_category(category: int) -> bool:
+	return goal_categories().has(category)
+
+
 # --- Markers -------------------------------------------------------------
 
 ## Everything worth putting on the map, gathered fresh.

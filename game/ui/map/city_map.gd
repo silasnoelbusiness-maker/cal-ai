@@ -502,7 +502,12 @@ func _build_filters() -> void:
 	for child in _filters.get_children():
 		child.queue_free()
 	for category in MapMarker.Category.values():
-		var button := BusinessUIKit.button(MapMarker.category_name(category).to_upper(), 112.0)
+		var name := MapMarker.category_name(category).to_upper()
+		# A dot beside the filters a pinned goal is about. Not a new pin: a
+		# goal is not a place, and inventing a location for one would be a lie.
+		if MapManager.is_goal_category(category):
+			name = "• %s" % name
+		var button := BusinessUIKit.button(name, 112.0)
 		button.toggle_mode = true
 		button.button_pressed = MapManager.is_category_shown(category)
 		button.pressed.connect(_on_filter_toggled.bind(category))

@@ -916,6 +916,18 @@ func _build_park() -> void:
 	for i in bench_spots.size():
 		_add_bench(container, "Bench%d" % i, bench_spots[i][0], bench_spots[i][1])
 
+	# Room to stand as well as to sit. A park where the only destination is a
+	# bench reads as a waiting room: four people sitting in a row and nobody
+	# anywhere else on the grass.
+	var standing := [
+		Vector2(-25.0, 30.0), Vector2(-31.0, 42.0),
+		Vector2(-19.0, 34.0), Vector2(-27.0, 50.0),
+	]
+	for i in standing.size():
+		container.add_child(DistrictProps.park_spot(
+			"ParkSpot%d" % i, Vector3(standing[i].x, GRASS_BASE + GRASS_THICKNESS, standing[i].y)
+		))
+
 
 ## Seeded per tree from its name, so the crooked one is crooked in the same way
 ## on every run and in every screenshot.
