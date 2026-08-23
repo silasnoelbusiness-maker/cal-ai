@@ -16,6 +16,10 @@ signal screen_requested(screen_id: StringName, context: Node, requester: Node)
 ## Something asked for every open screen to close (Esc, or a teleport).
 signal menus_close_requested()
 signal player_teleported(destination: Transform3D)
+## Emitted the moment a message is accepted — shown now or queued to be shown
+## shortly. A message that is deduped or dropped for backlog does not emit,
+## because the player genuinely never sees one of those.
+signal notification_accepted(message: String, tone: int, priority: int)
 
 enum State { PLAYING, PAUSED }
 enum Tone { INFO, GOOD, BAD }
@@ -175,16 +179,19 @@ func notify(
 
 	# Nothing showing: straight up, whatever it is.
 	if now - _notify_shown_at >= NOTIFY_DWELL and _notify_queue.is_empty():
+		notification_accepted.emit(message, int(tone), int(priority))
 		_say(entry, now)
 		return
 
 	if priority == Priority.HIGH:
 		# Something the player must see does not wait behind a wage run.
+		notification_accepted.emit(message, int(tone), int(priority))
 		_notify_queue.push_front(entry)
 		_say(_notify_queue.pop_front(), now)
 		return
 	if priority == Priority.LOW and _notify_queue.size() >= NOTIFY_BACKLOG:
 		return
+	notification_accepted.emit(message, int(tone), int(priority))
 	_notify_queue.append(entry)
 
 

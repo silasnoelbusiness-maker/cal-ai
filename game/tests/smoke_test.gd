@@ -23,8 +23,13 @@ var _notifications: Array[String] = []
 func _ready() -> void:
 	_main = MAIN_SCENE.instantiate()
 	add_child(_main)
-	GameManager.notification_posted.connect(
-		func(message: String, _tone: int) -> void: _notifications.append(message)
+	# Accepted rather than posted: a message the player will be shown a second
+	# from now has still been said to them, and a synchronous test cannot wait
+	# out the queue's dwell. Anything deduped or dropped never emits, so this
+	# is still "the player is told" and not "the game tried to tell them".
+	GameManager.notification_accepted.connect(
+		func(message: String, _tone: int, _priority: int) -> void:
+			_notifications.append(message)
 	)
 	await _run()
 
@@ -3133,14 +3138,22 @@ func _test_progression_debug_drives_the_real_path() -> void:
 func _test_notification_priority() -> void:
 	GameManager.clear_notifications()
 	_notifications.clear()
+	var shown: Array[String] = []
+	var watch := func(message: String, _tone: int) -> void: shown.append(message)
+	GameManager.notification_posted.connect(watch)
+
 	GameManager.notify("FIRST", GameManager.Tone.INFO)
-	_check(_notifications.size() == 1, "the first message goes straight up")
+	_check(shown.size() == 1, "the first message goes straight up")
 	GameManager.notify("SECOND", GameManager.Tone.INFO)
 	_check(
-		_notifications.size() == 1,
+		shown.size() == 1,
 		"the next one waits its turn rather than replacing it"
 	)
-	_check(GameManager.pending_notifications() == 1, "and is held (%d waiting)" % GameManager.pending_notifications())
+	_check(
+		_notifications.size() == 2,
+		"though the player has been told both (%d)" % _notifications.size()
+	)
+	_check(GameManager.pending_notifications() == 1, "and one is held (%d waiting)" % GameManager.pending_notifications())
 	GameManager.notify("FIRST", GameManager.Tone.INFO)
 	_check(
 		GameManager.pending_notifications() == 1,
@@ -3148,7 +3161,7 @@ func _test_notification_priority() -> void:
 	)
 	GameManager.notify("URGENT", GameManager.Tone.BAD, GameManager.Priority.HIGH)
 	_check(
-		_notifications.back() == "URGENT",
+		shown.back() == "URGENT",
 		"something the player must see does not queue behind a wage run"
 	)
 	for i in 8:
@@ -3159,6 +3172,7 @@ func _test_notification_priority() -> void:
 			GameManager.pending_notifications()
 		)
 	)
+	GameManager.notification_posted.disconnect(watch)
 	GameManager.clear_notifications()
 	_notifications.clear()
 
