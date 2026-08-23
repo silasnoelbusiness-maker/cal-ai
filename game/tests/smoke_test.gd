@@ -380,6 +380,10 @@ func _run() -> void:
 	await _test_owner_eats_in_their_own_shop()
 	_test_vending_machines_are_open_all_night()
 	_test_venues_exist_in_the_city()
+	_test_traffic_by_hour()
+	_test_park_has_somewhere_to_be()
+	_test_goal_map_categories()
+	_test_progression_debug_drives_the_real_path()
 	_test_notification_priority()
 	_test_no_two_actions_share_a_key()
 	await _test_progression_save_load()
@@ -3022,6 +3026,109 @@ func _test_venues_exist_in_the_city() -> void:
 
 ## Two screens on one key is a bug that hides until somebody presses it. The
 ## legal and logistics screens both sat on L for a whole phase.
+## Nine in the morning used to look like two in the afternoon.
+func _test_traffic_by_hour() -> void:
+	var traffic: TrafficManager = _main.find_children("*", "TrafficManager", true, false).front()
+	_check(traffic != null, "the city has a traffic manager")
+	if traffic == null:
+		return
+	var morning := traffic.hourly_scale(8)
+	var midday := traffic.hourly_scale(13)
+	var evening := traffic.hourly_scale(17)
+	var small_hours := traffic.hourly_scale(3)
+	_check(morning > midday, "the morning is busier than midday (%.2f vs %.2f)" % [morning, midday])
+	_check(evening > midday, "and so is the evening (%.2f)" % evening)
+	_check(
+		small_hours < midday * 0.5,
+		"three in the morning is nearly empty (%.2f)" % small_hours
+	)
+	var quietest := 2.0
+	var busiest := 0.0
+	for hour in 24:
+		quietest = minf(quietest, traffic.hourly_scale(hour))
+		busiest = maxf(busiest, traffic.hourly_scale(hour))
+	_check(
+		busiest > quietest * 3.0,
+		"the difference across a day is worth having (x%.1f)" % (busiest / quietest)
+	)
+
+
+## A park routines can send people to, in both districts.
+func _test_park_has_somewhere_to_be() -> void:
+	var benches := get_tree().get_nodes_in_group(&"bench")
+	var spots := get_tree().get_nodes_in_group(&"park_spot")
+	_check(benches.size() >= 4, "there are benches to sit on (%d)" % benches.size())
+	_check(spots.size() >= 4, "and room to stand about (%d)" % spots.size())
+	# Both halves of the city, or half the population walks to the other one.
+	var harbour := 0
+	var central := 0
+	for node in benches + spots:
+		if (node as Node3D).global_position.z > -100.0:
+			harbour += 1
+		else:
+			central += 1
+	_check(
+		harbour > 0 and central > 0,
+		"in both districts (%d harbour, %d central)" % [harbour, central]
+	)
+	var venue := RoutineActivity.venue_for(
+		get_tree(), RoutineActivity.Kind.PARK, Vector3(-30.0, 0.0, -190.0),
+		RandomNumberGenerator.new()
+	)
+	_check(
+		venue != Vector3.INF,
+		"and somebody standing in Central can be sent to one"
+	)
+
+
+func _test_goal_map_categories() -> void:
+	Progression.clear()
+	_check(
+		MapManager.goal_categories().is_empty()
+		or not MapManager.goal_categories().is_empty(),
+		"the map can be asked what the goals are about"
+	)
+	var shift_goal := Progression.goal_by_id(&"first_shift")
+	if shift_goal != null and not Progression.is_complete(&"first_shift"):
+		Progression.clear_pins()
+		Progression.pin(&"first_shift")
+		_check(
+			MapManager.is_goal_category(MapMarker.Category.JOB),
+			"a goal about shifts points at the job filter"
+		)
+		_check(
+			not MapManager.is_goal_category(MapMarker.Category.CONTACT),
+			"and not at the ones it has nothing to do with"
+		)
+	Progression.clear_pins()
+
+
+## A debug helper that reaches a state by the back door makes every test
+## written against it worthless. These drive the real path or refuse.
+func _test_progression_debug_drives_the_real_path() -> void:
+	Progression.clear()
+	LifeStats.clear()
+	_check(
+		ProgressionDebug.reach_goal(&"first_shift"),
+		"the helper can complete a goal about shifts"
+	)
+	_check(
+		LifeStats.get_counter(&"shifts_worked") >= 1,
+		"by working one, not by marking it done"
+	)
+	_check(
+		not ProgressionDebug.reach_goal(&"street_capital"),
+		"and refuses a goal it cannot honestly reach"
+	)
+	Onboarding.clear()
+	ProgressionDebug.finish_onboarding()
+	_check(not Onboarding.is_running(), "the guide can be walked to its end")
+	_check(not ProgressionDebug.summary().is_empty(), "and there is a dump to read")
+	Progression.clear()
+	LifeStats.clear()
+	Onboarding.clear()
+
+
 ## A busy second used to show the player whichever message happened to be last.
 func _test_notification_priority() -> void:
 	GameManager.clear_notifications()
