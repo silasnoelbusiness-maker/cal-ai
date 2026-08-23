@@ -19,7 +19,7 @@ var _body: VBoxContainer = null
 
 
 func _ready() -> void:
-	_parts = ScreenKit.build_frame(self, Vector2(760, 620))
+	_parts = ScreenKit.build_frame(self, Vector2(780, 780))
 	_body = ScreenKit.scroller(_parts["body"])
 	visible = false
 
@@ -43,7 +43,7 @@ func show_arrest(arrest: ArrestRecord, hours_lost: int) -> void:
 
 	_body.add_child(ScreenKit.heading("WHAT THEY TOOK YOU IN FOR"))
 	for offence in arrest.offences:
-		_body.add_child(BusinessUIKit.label(offence.capitalize(), 16, ScreenKit.TEXT))
+		_body.add_child(BusinessUIKit.label(offence, 16, ScreenKit.TEXT))
 	_body.add_child(ScreenKit.row("Seriousness", arrest.severity_name().capitalize()))
 	_body.add_child(ScreenKit.row("Wanted level", arrest.stars()))
 

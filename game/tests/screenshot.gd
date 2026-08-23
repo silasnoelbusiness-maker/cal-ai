@@ -3329,9 +3329,17 @@ func _phase_r_scenario(main: Node, scenario: String) -> void:
 ## A record with some weight to it, built out of real arrests.
 func _r_history(serious: int = 3) -> void:
 	LegalManager.clear()
+	# Real crimes, filed before each arrest, so the record reads as a record
+	# rather than as a column of "arrested on suspicion".
+	var ladder := [
+		CrimeManager.CrimeType.ROBBERY,
+		CrimeManager.CrimeType.CARJACKING,
+		CrimeManager.CrimeType.BURGLARY,
+		CrimeManager.CrimeType.STORE_ROBBERY,
+	]
 	for i in serious:
-		LegalDebug.create_arrest(CrimeData.Severity.SEVERE, 4)
-	LegalDebug.create_arrest(CrimeData.Severity.MODERATE, 2)
+		LegalDebug.create_case(ladder[i % ladder.size()], 4)
+	LegalDebug.create_case(CrimeManager.CrimeType.VEHICLE_THEFT, 2)
 
 
 func _r_arrest_summary(main: Node) -> void:
@@ -3401,7 +3409,9 @@ func _r_civic_court(main: Node) -> void:
 	if doors.is_empty():
 		return
 	var door := doors[0] as Node3D
-	player.global_position = door.global_position + Vector3(0.0, 0.5, 9.0)
+	# Off the carriageway and off to one side: standing dead in front of it put
+	# a lamp post straight down the middle of the frame.
+	player.global_position = door.global_position + Vector3(-3.5, 0.5, 6.0)
 	await _wait(60)
 	_look_towards(main, player.global_position, door.global_position)
 	await _wait(20)

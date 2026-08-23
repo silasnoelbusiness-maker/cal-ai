@@ -256,7 +256,7 @@ func _arrest_card(arrest: ArrestRecord) -> PanelContainer:
 		BusinessUIKit.value_label(arrest.stars(), 13, ScreenKit.BAD),
 	]))
 	for offence in arrest.offences:
-		column.add_child(BusinessUIKit.label(offence.capitalize(), 15, ScreenKit.TEXT))
+		column.add_child(BusinessUIKit.label(offence, 15, ScreenKit.TEXT))
 	column.add_child(ScreenKit.row("Seriousness", arrest.severity_name().capitalize()))
 	if arrest.fine_paid > 0:
 		column.add_child(ScreenKit.row("Fine", ScreenKit.money(arrest.fine_paid)))

@@ -182,7 +182,13 @@ func _incident_offences() -> PackedStringArray:
 		func(a, b): return int(a.get("severity", 0)) > int(b.get("severity", 0))
 	)
 	for crime in ordered:
-		var label := String(crime.get("type_name", "Offence"))
+		# CrimeData's own display name rather than the record's, which is the
+		# enum key with the underscores taken out and reads as HIT AND RUN.
+		var data := CrimeData.for_type(int(crime.get("type", 0)))
+		var label := (
+			data.display_name if data != null and data.display_name != ""
+			else String(crime.get("type_name", "Offence"))
+		)
 		if seen.has(label):
 			continue
 		seen[label] = true
