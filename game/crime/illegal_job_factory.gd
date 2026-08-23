@@ -18,11 +18,21 @@ const VEHICLE_TARGETS: Array[StringName] = [
 ]
 
 ## What the work pays before reputation, by risk band.
+##
+## Cut by about a third in Phase S. At the old numbers a medium job paid more
+## in ninety minutes than a shop took in four days, which made every legal path
+## a formality on the way to the real game. It should still be far and away the
+## fastest money — that is the whole bargain — but a player who never breaks the
+## law must be playing the same game rather than a slower one.
+##
+## These are the figures before reputation, before the chain multiplier, and
+## before anything goes wrong. Fines, confiscation and hours in custody all
+## come off the top.
 const BASE_REWARD := {
-	IllegalJobData.Risk.LOW: 1200,
-	IllegalJobData.Risk.MEDIUM: 2600,
-	IllegalJobData.Risk.HIGH: 5200,
-	IllegalJobData.Risk.EXTREME: 9000,
+	IllegalJobData.Risk.LOW: 800,
+	IllegalJobData.Risk.MEDIUM: 1700,
+	IllegalJobData.Risk.HIGH: 3400,
+	IllegalJobData.Risk.EXTREME: 5800,
 }
 
 

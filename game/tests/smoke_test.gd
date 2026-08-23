@@ -385,7 +385,9 @@ func _run() -> void:
 	await _test_owner_eats_in_their_own_shop()
 	_test_vending_machines_are_open_all_night()
 	_test_venues_exist_in_the_city()
+	_test_economy_projection()
 	_test_traffic_by_hour()
+	_test_two_shift_jobs()
 	_test_park_has_somewhere_to_be()
 	_test_goal_map_categories()
 	_test_progression_debug_drives_the_real_path()
@@ -3031,6 +3033,76 @@ func _test_venues_exist_in_the_city() -> void:
 
 ## Two screens on one key is a bug that hides until somebody presses it. The
 ## legal and logistics screens both sat on L for a whole phase.
+## The projection is a tool, and a tool that disagrees with the game is worse
+## than no tool. These pin that it reads the real numbers, and that the ladder
+## it shows still climbs in the order it is meant to.
+func _test_economy_projection() -> void:
+	var rows := EconomySim.project()
+	_check(rows.size() >= 5, "every way of earning a living is projected (%d)" % rows.size())
+	var wages := EconomySim.by_name("Wages")
+	var courier := EconomySim.by_name("Courier")
+	var crime := EconomySim.by_name("Underworld")
+	_check(not wages.is_empty(), "wages are among them")
+	_check(
+		int(wages["gross_per_day"]) > 0,
+		"and read from the stations in the world ($%d a day)" % wages["gross_per_day"]
+	)
+	# The order of the ladder, which is the thing a balance pass is protecting.
+	_check(
+		int(courier["per_hour"]) > int(wages["per_hour"]),
+		"driving beats stacking ($%d/h against $%d/h)" % [
+			courier["per_hour"], wages["per_hour"]
+		]
+	)
+	_check(
+		int(crime["per_hour"]) > int(courier["per_hour"]),
+		"and crime beats driving ($%d/h)" % crime["per_hour"]
+	)
+	# But not by so much that everything else is a formality. This is the check
+	# that would have failed before Phase S touched the numbers.
+	_check(
+		int(courier["per_hour"]) < int(wages["per_hour"]) * 8,
+		"a courier is not worth eight shift workers (x%.1f)" % (
+			float(courier["per_hour"]) / maxf(float(wages["per_hour"]), 1.0)
+		)
+	)
+	_check(
+		int(wages["net_per_day"]) > 0,
+		"and honest work covers the cost of living ($%d clear)" % wages["net_per_day"]
+	)
+	_check(
+		EconomySim.daily_living_cost() > 0,
+		"which is itself read from the food and the rent ($%d)" % EconomySim.daily_living_cost()
+	)
+	_check(not EconomySim.report().is_empty(), "and there is a table to read")
+
+
+## Two shift jobs, so the legal start is a choice rather than a queue.
+func _test_two_shift_jobs() -> void:
+	var stations := get_tree().get_nodes_in_group(&"job_station")
+	_check(stations.size() >= 2, "the city offers more than one shift job (%d)" % stations.size())
+	var employers := PackedStringArray()
+	var hours := PackedStringArray()
+	for station in stations:
+		var job: JobData = station.get("job")
+		if job == null:
+			continue
+		employers.append(job.employer)
+		hours.append("%02d-%02d" % [job.opens_hour, job.closes_hour])
+	_check(
+		employers.size() == stations.size(),
+		"every one of them has work attached (%s)" % ", ".join(employers)
+	)
+	# One of them has to be workable at an hour the other is not, or a second
+	# job is only a second walk.
+	var night := false
+	for station in stations:
+		var job: JobData = station.get("job")
+		if job != null and job.opens_hour > job.closes_hour:
+			night = true
+	_check(night, "and one of them runs through the night (%s)" % ", ".join(hours))
+
+
 ## Nine in the morning used to look like two in the afternoon.
 func _test_traffic_by_hour() -> void:
 	var traffic: TrafficManager = _main.find_children("*", "TrafficManager", true, false).front()

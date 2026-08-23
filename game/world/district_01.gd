@@ -1246,8 +1246,11 @@ func _build_civic_court() -> void:
 	var holder := _make_container("CivicCourt")
 	# The south face of CivicHall, which spans x -40..-10 and z -80..-63.
 	var at := Vector3(-25.0, 0.0, -63.0)
-	var stone := _mat("pale")
-	var trim := _mat("concrete")
+	# "pale" and "concrete" are Central's palette names, not the harbour's, so
+	# every step and column of this portico has been built with a null material
+	# since the day it was added — untextured, and an error on every load.
+	var stone := _mat("plinth")
+	var trim := _mat("concrete_a")
 
 	# Three steps up to a portico on four columns. Civic, plain, and legible
 	# from the road without anything written on it.

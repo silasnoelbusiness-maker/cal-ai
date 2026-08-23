@@ -909,6 +909,13 @@ func _venue_table() -> Array:
 			"CentralDepot", Vector3(30.0, 1.2, -224.6), Vector3.BACK, "Start deliveries",
 			"courier", "",
 		],
+		# The second shift job in the city. Central had a depot and no work of
+		# its own, so a player without a car had no reason to be here before
+		# they could afford a lease.
+		[
+			"ArcadeCleaning", Vector3(-44.0, 1.2, -224.6), Vector3.BACK, "Start shift",
+			"job", "night_cleaner",
+		],
 		[
 			"MeridianHeights", Vector3(-60.0, 1.2, -153.4), Vector3.FORWARD, "View Apartment",
 			"residence", "meridian",
@@ -951,6 +958,8 @@ func _build_venue_doors() -> void:
 				door = _make_service_point(payload)
 			"courier":
 				door = _make_courier_depot()
+			"job":
+				door = _make_job_station(payload)
 			"residence":
 				door = _make_residence(point, facing, StringName(payload))
 			"dealership":
@@ -1649,3 +1658,17 @@ func _build_vending_machines() -> void:
 		machine.name = entry[0]
 		machine.shop_name = "Machine — %s" % entry[3]
 		_interactables.add_child(machine)
+
+
+## A shift job from one table line, named by its resource.
+func _make_job_station(job_id: String) -> JobStation:
+	var station := JobStation.new()
+	station.job = load("res://jobs/definitions/%s.tres" % job_id)
+	if station.job != null:
+		station.prompt_subtitle = station.job.employer
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(3.0, 2.4, 3.0)
+	shape.shape = box
+	station.add_child(shape)
+	return station

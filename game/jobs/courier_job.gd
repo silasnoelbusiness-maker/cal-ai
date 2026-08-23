@@ -14,10 +14,19 @@ signal run_failed()
 @export var save_id: StringName = &"courier_job"
 
 ## Base fee, plus this much for every hundred metres of the trip.
-@export var base_fee: int = 45
-@export var fee_per_hundred_metres: int = 12
+##
+## Set against the warehouse shift, which is $30 an hour. A run is about twenty
+## minutes of the day once the drive to the pickup is counted, so these numbers
+## put a courier on roughly a hundred an hour — three or four times a shift,
+## which is what a job deserves for needing a car, fuel and constant attention.
+##
+## They used to be 45 and 12, which worked out at five hundred an hour and made
+## every other way of earning a living pointless. The projection in
+## economy_sim.gd is where that showed up.
+@export var base_fee: int = 20
+@export var fee_per_hundred_metres: int = 3
 ## Paid on top when the run is finished inside the target time.
-@export var time_bonus: int = 20
+@export var time_bonus: int = 12
 ## In-game minutes allowed per hundred metres before the bonus is lost.
 @export var minutes_per_hundred_metres: float = 1.6
 ## The depot will not offer anywhere nearer than this.

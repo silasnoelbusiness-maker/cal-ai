@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="JobData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://jobs/job_data.gd" id="1_job_data"]
+
+[resource]
+script = ExtResource("1_job_data")
+id = &"night_cleaner"
+title = "Night Cleaner"
+employer = "Central Arcade"
+description = "The arcade after hours. Unsociable, and paid for being unsociable."
+shift_hours = 5.0
+pay = 235
+shifts_per_day = 2
+min_energy = 25.0
+energy_cost = 30.0
+opens_hour = 20
+closes_hour = 5
