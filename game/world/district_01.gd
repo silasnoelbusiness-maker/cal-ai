@@ -1473,7 +1473,7 @@ func _venue_table() -> Array:
 		[
 			# Real from Phase S: a counter, three plates and half an hour of the
 			# clock. It stood as a promise for six phases.
-			"DinerDoor", Vector3(20.5, 1.2, -26.4), Vector3.BACK, "Enter Diner",
+			"DinerDoor", Vector3(20.5, 1.2, -26.4), Vector3.BACK, "Order food",
 			"service", "The Galley Diner|DINER|6|22",
 		],
 		[

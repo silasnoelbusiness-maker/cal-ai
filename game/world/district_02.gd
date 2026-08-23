@@ -894,7 +894,7 @@ func _venue_table() -> Array:
 		# NPC-run places, so the district reads as occupied rather than as a set
 		# of empty units waiting for the player.
 		[
-			"ExchangeLobby", Vector3(30.0, 1.2, -279.6), Vector3.BACK, "Enter Cafe",
+			"ExchangeLobby", Vector3(30.0, 1.2, -279.6), Vector3.BACK, "Order a coffee",
 			"service", "Exchange Coffee House|CAFE|6|19",
 		],
 		[
