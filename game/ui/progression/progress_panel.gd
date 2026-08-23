@@ -127,7 +127,7 @@ func _build_goals() -> void:
 			13, BusinessUIKit.MUTED
 		))
 	for goal in pinned:
-		_body.add_child(_goal_row(goal, true))
+		_body.add_child(_goal_row(goal))
 
 	_body.add_child(ScreenKit.spacer(10))
 	var switcher := HBoxContainer.new()
@@ -168,11 +168,15 @@ func _build_goals() -> void:
 					"and %d more" % (in_tier.size() - shown), 12, BusinessUIKit.MUTED
 				))
 				break
-			_body.add_child(_goal_row(goal, false))
+			_body.add_child(_goal_row(goal))
 			shown += 1
 
 
-func _goal_row(goal: Goal, is_pinned: bool) -> PanelContainer:
+func _goal_row(goal: Goal) -> PanelContainer:
+	# Asked of the manager rather than taken from which list this row is in.
+	# The pinned section also shows the game's own suggestions, and those had
+	# an UNPIN button on them for something the player had never pinned.
+	var is_pinned := Progression.is_pinned(goal.goal_id)
 	var complete := Progression.is_complete(goal.goal_id)
 	var value := Progression.value_for(goal.metric)
 	var text := "DONE" if complete else _progress_text(goal, value)
@@ -187,11 +191,8 @@ func _goal_row(goal: Goal, is_pinned: bool) -> PanelContainer:
 		# The suggested list is not pinned, so its rows offer PIN even while
 		# they are on screen — pressing it is what makes the choice the
 		# player's and stops the list rearranging itself.
-		button.disabled = (
-			not is_pinned
-			and Progression.pinned().size() >= Progression.MAX_PINNED
-			and not Progression.is_pinned(goal.goal_id)
-		)
+		# A full list still lets you take one off; it only refuses another on.
+		button.disabled = not is_pinned and _pinned_by_player() >= Progression.MAX_PINNED
 		button.pressed.connect(func() -> void:
 			if Progression.is_pinned(goal.goal_id):
 				Progression.unpin(goal.goal_id)
@@ -200,6 +201,15 @@ func _goal_row(goal: Goal, is_pinned: bool) -> PanelContainer:
 		)
 		children.append(button)
 	return BusinessUIKit.row(children)
+
+
+## How many the player has chosen, as against how many the game is suggesting.
+func _pinned_by_player() -> int:
+	var total := 0
+	for goal in Progression.all_goals():
+		if Progression.is_pinned(goal.goal_id):
+			total += 1
+	return total
 
 
 func _progress_text(goal: Goal, value: float) -> String:

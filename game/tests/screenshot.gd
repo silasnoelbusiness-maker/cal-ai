@@ -1196,6 +1196,11 @@ func _s_history() -> void:
 	Onboarding.skip()
 	LifeStats.add(&"shifts_worked", 21)
 	LifeStats.add(&"shift_income", 3255)
+	# Through the real ledger, so lifetime income is lifetime income and the
+	# goals that watch it read what they should.
+	EconomyManager.deposit(
+		3255, "Wages", EconomyManager.Source.LEGAL, EconomyManager.Stream.EMPLOYMENT
+	)
 	LifeStats.add(&"deliveries_made", 46)
 	LifeStats.add(&"meals_eaten", 38)
 	LifeStats.add(&"coffees_drunk", 22)
