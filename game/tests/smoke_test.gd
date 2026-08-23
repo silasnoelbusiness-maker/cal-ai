@@ -385,6 +385,7 @@ func _run() -> void:
 	await _test_owner_eats_in_their_own_shop()
 	_test_vending_machines_are_open_all_night()
 	_test_venues_exist_in_the_city()
+	await _test_city_costs_what_it_should()
 	_test_economy_projection()
 	_test_traffic_by_hour()
 	_test_two_shift_jobs()
@@ -3042,6 +3043,44 @@ func _test_venues_exist_in_the_city() -> void:
 
 ## Two screens on one key is a bug that hides until somebody presses it. The
 ## legal and logistics screens both sat on L for a whole phase.
+## More life must not cost frames.
+##
+## The headless suite cannot measure a frame time worth trusting, so this
+## measures the thing that would move one: how much of the city is actually
+## being simulated at any moment. A crowd that doubles in size and doubles in
+## cost is the failure this is watching for.
+func _test_city_costs_what_it_should() -> void:
+	await _settle(30)
+	var people := get_tree().get_nodes_in_group(&"pedestrian")
+	var awake := 0
+	var out := 0
+	for person in people:
+		if person.is_stood_down():
+			continue
+		out += 1
+		if person.is_physics_processing():
+			awake += 1
+	_check(people.size() >= 30, "the city holds a real crowd (%d people)" % people.size())
+	_check(out < people.size(), "not all of whom are on the street (%d out)" % out)
+	_check(
+		awake <= 24,
+		"and only the ones near the player are simulated (%d awake of %d)" % [awake, out]
+	)
+	# The pool is fixed: the director stands people up and down, it never
+	# creates or destroys. A crowd that grows is a leak.
+	var before := people.size()
+	TimeManager.advance_minutes(180)
+	await _settle(30)
+	_check(
+		get_tree().get_nodes_in_group(&"pedestrian").size() == before,
+		"three hours later the pool is the same size (%d)" % (
+			get_tree().get_nodes_in_group(&"pedestrian").size()
+		)
+	)
+	var cars := get_tree().get_nodes_in_group(&"vehicle").size()
+	_check(cars < 60, "and traffic is bounded too (%d vehicles)" % cars)
+
+
 ## The projection is a tool, and a tool that disagrees with the game is worse
 ## than no tool. These pin that it reads the real numbers, and that the ladder
 ## it shows still climbs in the order it is meant to.

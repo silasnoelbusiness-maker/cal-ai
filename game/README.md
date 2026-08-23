@@ -101,9 +101,10 @@ end never stands between a test and the game.
 | `K` | Open the company: brands, locations, staff, operations, finance |
 | `P` | Open your profile: net worth, vehicles, home, lifestyle |
 | `H` | Open the property portfolio: holdings, mortgages, income |
-| `L` | Open logistics: the depot, its stock, shipments, rounds and vans |
+| `T` | Open logistics: the depot, its stock, shipments, rounds and vans |
 | `U` | Open the underworld: reputation, contacts, jobs, requests and career |
 | `L` | Open the legal screen: record, cases, court dates and what is owed |
+| `J` | Open progress: goals, the journey so far, statistics and the guide |
 | Left mouse | Attack with whatever is in your hand · place equipment · place furniture |
 | `R` | Rotate the equipment or furniture being placed |
 
@@ -139,6 +140,12 @@ Development keys, to be removed before release:
 
 Every overlay is hidden by default and draws nothing until it is switched on, so
 none of them intrudes on ordinary play or on a screenshot.
+
+Logistics moved from `L` to `T` in Phase S. It had shared `L` with the legal
+screen since Phase R, so pressing it opened whichever of the two the input
+system reached first. A check now fails if any two non-debug actions share a
+key, with one deliberate exception: placement mode is modal and reuses `R`
+while it is up.
 
 `F9` was quick-load in Phase D and is now clear-wanted. Quick-load has been
 retired altogether: loading is a considered choice made from the pause menu
@@ -1449,6 +1456,47 @@ wreck does not satisfy a request for a car in one piece; and that a speciality
 comes from what has been done rather than points spent. Plus the migration that
 matters: a save from before Phase R loads with no criminal history invented for
 it and its reputation preserved exactly.
+
+## Living in the city
+
+Phase S is the phase that turned the city from a place things happen in into a
+place somebody lives in.
+
+The crowd has a day. Eight archetypes carry a table of hour-to-activity blocks —
+home, commute, work, lunch, the shops, a cafe, the gym, the park, a night out —
+and every person gets a seeded offset so a street is not a timetable. Which
+archetypes are out depends on the hour and the district, from a density table
+that peaks at thirty in Central at lunchtime and fourteen on the harbour. Nobody
+is ever created or destroyed for this: a fixed pool is stood up and stood down,
+and a person stood down costs nothing at all. People near the player walk their
+day properly; people out of earshot are simply out of earshot.
+
+There is somewhere to go. The Galley Diner had stood behind a sign promising
+sit-down meals since Phase F and is now a counter with three plates on it;
+Exchange House has a cafe in its lobby. Ordering costs money and half an hour of
+the clock and leaves the player fed, and nothing goes in the bag — eating out is
+not shopping. Four vending machines are open when nothing else is. A gym, bar,
+cafe or restaurant the player owns gets the same counter wired to its own till,
+where the money moves from pocket to business and is never counted as trade.
+
+Needs are a rhythm rather than an alarm: two meals and a night's sleep. Being
+hungry burns energy faster and being tired is felt in the legs, never in a
+message. Health comes back on its own to somebody fed and rested, which is the
+whole recovery path.
+
+There is a shape to the whole thing. Thirty-five goals across two ladders, six
+tiers each, read live from whoever owns the number — so a debug tool that hands
+the player a million dollars moves them immediately, and a save from before they
+existed catches up on load without paying out twice or shouting thirty times.
+Up to three are pinned to the corner of the screen; pin nothing and the game
+suggests what you are closest to. A seven-step guide covers the first hour and
+gets out of the way, skippable at any point and never gating anything. One
+screen — `J` — holds the goals, the journey so far, the statistics and a plain
+guide to how the systems work.
+
+And the corner of the screen no longer loses things. Messages queue by
+priority, repeats inside six seconds are dropped, an arrest or a court date goes
+to the front, and pleasantries are discarded rather than made to wait.
 
 ## What is next
 
