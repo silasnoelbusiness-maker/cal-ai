@@ -321,6 +321,7 @@ func pin(id: StringName) -> bool:
 		return false
 	_pinned.append(id)
 	_pins_are_theirs = true
+	Onboarding.report(&"goal_pinned")
 	pinned_changed.emit()
 	return true
 

@@ -250,6 +250,8 @@ func buy(item: ItemData, buyer: Node) -> Result:
 		return Result.NOT_ENOUGH_CASH
 
 	inventory.add(item, 1)
+	if item.restores_hunger > 0.0:
+		Onboarding.report(&"food_bought")
 	purchase_made.emit(item, price)
 	return Result.OK
 

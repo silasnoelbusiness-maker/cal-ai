@@ -387,6 +387,7 @@ func _update_process_need() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("city_map"):
+		Onboarding.report(&"map_opened")
 		if _city_map.is_open():
 			_city_map.close()
 		else:
@@ -395,6 +396,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("profile"):
+		Onboarding.report(&"profile_opened")
 		if _profile_panel.is_open():
 			close_screens()
 		else:
@@ -527,6 +529,7 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 		&"residence":
 			_residence_panel.open(context as ResidenceProperty)
 		&"map":
+			Onboarding.report(&"map_opened")
 			_city_map.open()
 		&"dealership":
 			_dealership_panel.open()
@@ -549,6 +552,7 @@ func _on_screen_requested(screen_id: StringName, context: Node, requester: Node)
 			if cupboard != null:
 				_home_storage_panel.open(cupboard.residence_id)
 		&"profile":
+			Onboarding.report(&"profile_opened")
 			_profile_panel.open()
 		&"company":
 			_company_dashboard.open()
