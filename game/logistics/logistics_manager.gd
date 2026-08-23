@@ -595,7 +595,7 @@ func complete_transfer(order: TransferOrder) -> void:
 		"DELIVERY ARRIVED\n%s  ·  %d units" % [
 			_place_name(order.destination_kind, order.destination_id), landed
 		],
-		GameManager.Tone.GOOD, GameManager.Priority.LOW
+		GameManager.Tone.GOOD
 	)
 	AudioManager.play(&"delivery", AudioBuses.SFX, -10.0)
 

@@ -542,7 +542,7 @@ func transfer_employee(
 	company_changed.emit()
 	GameManager.notify(
 		"TRANSFERRED\n%s  ·  %s" % [worker.employee_name.to_upper(), target.business_name.to_upper()],
-		GameManager.Tone.INFO, GameManager.Priority.LOW
+		GameManager.Tone.INFO
 	)
 	return TransferResult.OK
 

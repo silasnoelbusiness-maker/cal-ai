@@ -32,7 +32,10 @@ enum Tone { INFO, GOOD, BAD }
 ## happened to be last. Now the police arriving wins, and the wage run waits
 ## its turn rather than being lost.
 ##
-##   LOW    — pleasant to know. Dropped when there is a queue.
+##   LOW    — pleasant to know, and repeats: low stock, rent landing, an
+##            enquiry. Dropped when there is a queue. Nothing the player
+##            deliberately paid for and waited on belongs here — a delivery
+##            arriving is not chatter, however often it happens.
 ##   NORMAL — the default. Queued in order.
 ##   HIGH   — the player must see this: arrests, court, foreclosure, death.
 enum Priority { LOW, NORMAL, HIGH }

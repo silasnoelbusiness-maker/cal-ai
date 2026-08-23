@@ -445,7 +445,7 @@ func _advance_deliveries() -> void:
 			"DELIVERY ARRIVED\n%s  ·  %d items received" % [
 				business.business_name.to_upper(), delivered
 			],
-			GameManager.Tone.GOOD, GameManager.Priority.LOW
+			GameManager.Tone.GOOD
 		)
 		order_delivered.emit(order)
 		business_changed.emit(business)
