@@ -1302,7 +1302,9 @@ func _s_crowd_at(where: Vector3, wait_hours: int) -> void:
 	var target := float(TimeManager.day_index * 1440 + wait_hours * 60)
 	if target > TimeManager.total_minutes:
 		TimeManager.set_total_minutes(target)
-	await _wait(150)
+	# Long enough for people to actually walk there. A shorter wait shows the
+	# moment they set off, which looks like an empty park.
+	await _wait(320)
 
 
 func _s_traffic_at(hour: int) -> void:

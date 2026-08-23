@@ -71,9 +71,12 @@ static func catalogue() -> Array[RoutineProfile]:
 	return [
 		# §7 — the example, with the gym-or-shop evening left as one block
 		# because which of them happens is the individual's business.
+		# The half hour in the plaza after lunch is why Central's plaza has
+		# anybody in it at one o'clock. Without it the benches were furniture.
 		make(Archetype.OFFICE_WORKER, [
 			[0.0, A.HOME], [7.5, A.COMMUTE], [9.0, A.WORK], [12.0, A.LUNCH],
-			[13.0, A.WORK], [17.0, A.SHOP], [19.0, A.RETURN_HOME], [20.0, A.HOME],
+			[12.5, A.PARK], [13.25, A.WORK], [17.0, A.SHOP],
+			[19.0, A.RETURN_HOME], [20.0, A.HOME],
 		], &"", &"central"),
 		# §8 — earlier hours, and the shop before work rather than after.
 		make(Archetype.HARBOUR_WORKER, [
@@ -100,7 +103,8 @@ static func catalogue() -> Array[RoutineProfile]:
 		], &"", &"central"),
 		make(Archetype.SHOPPER, [
 			[0.0, A.HOME], [10.0, A.SHOP], [12.5, A.LUNCH], [13.5, A.SHOP],
-			[17.0, A.CAFE], [18.5, A.RETURN_HOME], [19.5, A.HOME],
+			[15.0, A.PARK], [16.0, A.SHOP], [17.0, A.CAFE],
+			[18.5, A.RETURN_HOME], [19.5, A.HOME],
 		]),
 		# Somebody who is simply about: the filler that stops a street emptying
 		# between shifts.
