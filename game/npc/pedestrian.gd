@@ -258,34 +258,16 @@ func is_stood_down() -> bool:
 	return _stood_down
 
 
-## Comes back onto the street where the person's day says they should be,
-## rather than wherever they happened to be standing when they were stood down.
+## Repositioning somebody to their routine venue was tried in Phase S and
+## withdrawn. It filled the plaza, and it also teleported Central residents to
+## the harbour park when that park's bench happened to be their nearest one,
+## inverted both districts' headcounts, and dropped people into the road in
+## front of moving traffic. The suite caught all three.
 ##
-## This is the other half of standing down. Somebody off the street is not
-## frozen in place — they are elsewhere, doing what their day says — so when
-## the hour turns and they come back out, they come out at the park or the
-## shopfront that hour points at. Without it the plaza filled only with people
-## who already happened to be within earshot of it, and the benches were
-## furniture.
-##
-## Only ever called by the crowd director, and only for somebody far from the
-## player, so nobody sees anyone move.
-func place_at_routine() -> void:
-	if _schedule == null:
-		_schedule = RoutineManager.schedule_for(
-			StringName(get_path()), routine_district
-		)
-	var destination := RoutineManager.destination_for(_schedule, global_position)
-	if destination == Vector3.INF:
-		return
-	# Beside the venue rather than on top of it, so four people sent to one
-	# bench are four people near a bench.
-	var spread := Vector3(
-		_rng.randf_range(-3.5, 3.5), 0.0, _rng.randf_range(-3.5, 3.5)
-	)
-	global_position = destination + spread
-	velocity = Vector3.ZERO
-	_last_activity = int(RoutineManager.activity_for(_schedule))
+## The lesson is that a routine destination is only meaningful to somebody who
+## is going to walk there. If a future phase wants a fuller park, the answer is
+## more people, or a destination chosen inside the person's own district — not
+## a teleport.
 
 
 ## Called by the witness system when this civilian sees a crime.
