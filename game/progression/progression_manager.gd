@@ -11,6 +11,10 @@ extends Node
 ## is fetched live from whoever does own it, which is why loading an old save
 ## cannot double-count and why a debug tool that hands the player a million
 ## dollars moves the goals immediately.
+##
+## This file knows nothing about the opening guide. The guide watches it, not
+## the other way round: two autoloads naming each other is a compile cycle, and
+## a compile cycle in this project empties every .tres in it.
 
 signal goal_completed(goal: Goal)
 signal goals_changed()
@@ -321,7 +325,6 @@ func pin(id: StringName) -> bool:
 		return false
 	_pinned.append(id)
 	_pins_are_theirs = true
-	Onboarding.report(&"goal_pinned")
 	pinned_changed.emit()
 	return true
 

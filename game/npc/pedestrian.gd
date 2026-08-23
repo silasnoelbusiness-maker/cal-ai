@@ -130,6 +130,9 @@ var _last_activity: int = -1
 ## Set while they are inside a building, which is what makes §13's "enter" and
 ## §14's "leave" visible rather than a vanishing act on the pavement.
 var _indoors: bool = false
+## Stood down by the crowd director: off the street entirely for this part of
+## the day. Distinct from being far from the player, which is temporary.
+var _stood_down: bool = false
 
 
 func _ready() -> void:
@@ -215,18 +218,44 @@ func _process(delta: float) -> void:
 func _refresh_activation() -> void:
 	var player := GameManager.player
 	var active := (
-		not ambient_crowd
-		or player == null
-		or global_position.distance_to(player.global_position) <= active_distance
+		not _stood_down
+		and (
+			not ambient_crowd
+			or player == null
+			or global_position.distance_to(player.global_position) <= active_distance
+		)
 	)
-	if active == _active:
-		return
 	_active = active
+	# Applied every time rather than only on a change. The crowd director also
+	# touches these flags, and an early return here once let it leave somebody
+	# physics-processing on the far side of the city — a crowd that was meant to
+	# cost nothing quietly walking about with nobody watching.
+	#
 	# Somebody inside a building stays inside it. Walking away and back must not
 	# turn them out onto the pavement.
 	set_physics_process(active and not _indoors)
 	if not active:
 		velocity = Vector3.ZERO
+
+
+## Taken off the street, or put back on it, by the crowd director. The person
+## owns their own activation either way: the director says whether they are
+## out, and this file decides what that costs.
+func stand_down(down: bool) -> void:
+	if _stood_down == down:
+		return
+	_stood_down = down
+	visible = not down
+	if down:
+		velocity = Vector3.ZERO
+	# Idle processing is what notices the player coming back, so it stops only
+	# for somebody who is not on the street at all.
+	set_process(not down)
+	_refresh_activation()
+
+
+func is_stood_down() -> bool:
+	return _stood_down
 
 
 ## Called by the witness system when this civilian sees a crime.
@@ -557,7 +586,7 @@ func _leave_building() -> void:
 		return
 	_indoors = false
 	visible = true
-	set_physics_process(_active)
+	set_physics_process(_active and not _stood_down)
 	_state_timer = 0.5
 
 

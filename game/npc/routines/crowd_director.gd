@@ -40,7 +40,7 @@ func pool_size() -> int:
 func out_count() -> int:
 	var found := 0
 	for walker in _pool:
-		if is_instance_valid(walker) and walker.visible:
+		if is_instance_valid(walker) and not walker.is_stood_down():
 			found += 1
 	return found
 
@@ -79,10 +79,7 @@ func _apply() -> void:
 
 
 func _set_out(walker: Pedestrian, out: bool) -> void:
-	if walker.visible == out:
-		return
-	walker.visible = out
-	walker.set_physics_process(out)
-	walker.set_process(out)
-	if not out:
-		walker.velocity = Vector3.ZERO
+	# Asked, not done to them. Setting the processing flags from here fought
+	# with the pedestrian's own distance check and left people walking about
+	# unattended in an empty district.
+	walker.stand_down(not out)

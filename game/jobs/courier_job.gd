@@ -129,6 +129,8 @@ func _on_destination_reached(marker: MapMarker) -> void:
 		"DELIVERED\n+$%d%s" % [fee + bonus, "  (time bonus)" if bonus > 0 else ""],
 		GameManager.Tone.GOOD
 	)
+	LifeStats.add(&"deliveries_made")
+	LifeStats.add(&"shift_income", fee + bonus)
 	run_completed.emit(fee, bonus)
 
 

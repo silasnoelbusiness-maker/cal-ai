@@ -45,6 +45,9 @@ func _ready() -> void:
 	# it asks questions about the player's shifts and businesses and those are
 	# loaded by their own owners in an order this file must not depend on.
 	SaveManager.game_loaded.connect(_on_game_loaded)
+	# Watched rather than reported, so the progression side never has to know
+	# this file exists.
+	Progression.pinned_changed.connect(_on_pinned_changed)
 
 
 func _process(delta: float) -> void:
@@ -60,6 +63,11 @@ func _process(delta: float) -> void:
 
 func _on_game_loaded(_slot: int) -> void:
 	settle()
+
+
+func _on_pinned_changed() -> void:
+	if not Progression.pinned().is_empty():
+		report(&"goal_pinned")
 
 
 # --- State ---------------------------------------------------------------

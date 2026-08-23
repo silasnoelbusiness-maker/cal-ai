@@ -85,8 +85,6 @@ func use(user: Node) -> bool:
 	stats.add_hunger(restores_hunger)
 	stats.add_energy(restores_energy)
 	stats.add_health(restores_health)
-	# Counted where it is consumed rather than where it is bought, so a pantry
-	# full of tins is not a fortnight of meals.
 	if restores_hunger > 0.0:
 		LifeStats.add(&"meals_eaten")
 	if use_minutes > 0:

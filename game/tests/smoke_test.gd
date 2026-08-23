@@ -38,6 +38,7 @@ func _run() -> void:
 	# wrong behind it. Traffic is switched back on for its own section.
 	await _stop_traffic()
 
+	_test_resources_carry_their_data()
 	await _test_world_built()
 	await _test_spawn_and_gravity()
 	await _test_camera_framing()
@@ -369,6 +370,34 @@ func _run() -> void:
 
 
 # --- Checks --------------------------------------------------------------
+
+## TEST 0 — the data files still carry their data.
+##
+## Phase S cost a whole run to this: a Resource script named an autoload, the
+## autoload named its way back to items, and GDScript refused the cycle. Every
+## .tres in the project then loaded with a script attached and every property
+## at its default, which surfaces two hundred checks later as "the business is
+## created" failing for no visible reason. A resource whose fields are all
+## default is the symptom; this is the check that names it.
+func _test_resources_carry_their_data() -> void:
+	var store := BusinessCatalogue.by_id(&"convenience_store")
+	_check(store != null, "the business catalogue can be looked up by id")
+	if store != null:
+		_check(
+			store.display_name != "" and not store.required_roles.is_empty(),
+			"and a business type carries its own data (%s)" % store.display_name
+		)
+	for entry in BusinessCatalogue.TYPES:
+		_check(
+			entry.type_id != &"",
+			"business type %s is not an empty resource" % entry.resource_path.get_file()
+		)
+	var meal: ItemData = load("res://items/definitions/basic_meal.tres")
+	_check(
+		meal != null and meal.id != &"" and meal.display_name != "",
+		"an item definition carries its own data"
+	)
+
 
 func _test_world_built() -> void:
 	var district: District01 = _main.get_node("District01")

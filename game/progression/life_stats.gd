@@ -10,6 +10,13 @@ extends Node
 
 signal counter_changed(key: StringName, value: int)
 
+## This file deliberately names no other system. Counters are pushed in from
+## the place the thing happens, never pulled: an item is a Resource, and a
+## Resource script that reaches for an autoload which in turn reaches back
+## toward items is a compile cycle. When that cycle formed, every .tres in the
+## project loaded with default values and two hundred checks failed a long way
+## from the cause. Keep this file a leaf.
+##
 ## Grouped only so the statistics screen can print them under headings; the
 ## store underneath is flat.
 const COUNTERS := {
@@ -51,16 +58,10 @@ func _ready() -> void:
 	add_to_group(&"saveable")
 	_reset()
 	TimeManager.day_passed.connect(_on_day_changed)
-	CourierJob.run_completed.connect(_on_run_completed)
 
 
 func _on_day_changed(_day: int) -> void:
 	add(&"days_lived")
-
-
-func _on_run_completed(fee: int, bonus: int) -> void:
-	add(&"deliveries_made")
-	add(&"shift_income", fee + bonus)
 
 
 ## Every key that exists, in the order the screen shows them.
