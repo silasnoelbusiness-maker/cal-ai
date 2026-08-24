@@ -452,8 +452,23 @@ func _test_world_built() -> void:
 	_check(geometry.get_child_count() > 100, "district geometry was generated")
 	_check(buildings.get_child_count() == 12, "12 buildings placed")
 	_check(interactables.get_child_count() >= 9, "interaction points placed")
+	# Counted per district rather than as one total. The total was pinned at 44
+	# — the harbour's lamps — and stayed true only because Central's lamps had
+	# no lights behind them at all. Pinning both halves is what would have
+	# caught that, so that is what is pinned now.
+	var harbour_lamps := 0
+	var central_lamps := 0
+	for lamp in get_tree().get_nodes_in_group("street_light"):
+		if (lamp as Node3D).global_position.z > -100.0:
+			harbour_lamps += 1
+		else:
+			central_lamps += 1
 	_check(
-		get_tree().get_nodes_in_group("street_light").size() == 44, "44 street lights registered"
+		harbour_lamps == 44, "44 street lights on Harbour Row (%d)" % harbour_lamps
+	)
+	_check(
+		central_lamps > 0,
+		"and Central's lamps light the street rather than only glowing (%d)" % central_lamps
 	)
 	_check(GameManager.player == _player, "player registered with GameManager")
 
@@ -3090,10 +3105,16 @@ func _test_city_costs_what_it_should() -> void:
 		if person.is_physics_processing():
 			awake += 1
 	_check(people.size() >= 30, "the city holds a real crowd (%d people)" % people.size())
-	_check(out < people.size(), "not all of whom are on the street (%d out)" % out)
+	# What is being protected is the cost, not the headcount: at a busy hour the
+	# whole pool being out on the street is the system working. What must never
+	# grow with the crowd is how much of it is simulated.
 	_check(
 		awake <= 24,
-		"and only the ones near the player are simulated (%d awake of %d)" % [awake, out]
+		"and only the ones near the player are simulated (%d awake of %d out)" % [awake, out]
+	)
+	_check(
+		out <= people.size(),
+		"nobody is on the street twice (%d of %d)" % [out, people.size()]
 	)
 	# The pool is fixed: the director stands people up and down, it never
 	# creates or destroys. A crowd that grows is a leak.
