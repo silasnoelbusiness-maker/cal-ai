@@ -33,10 +33,14 @@ export function DashboardPreviewSection() {
         </div>
 
         <div className="mx-auto mt-12 grid max-w-5xl grid-cols-2 gap-3 sm:grid-cols-4">
-          <MetricCard label="Leads" value="142" change={18.2} />
-          <MetricCard label="Qualified" value="63" change={9.4} />
-          <MetricCard label="Appointments" value="28" change={22.1} />
-          <MetricCard label="Recovered revenue" value="$31,200" change={31.6} emphasize />
+          {/* Illustrative counts only. No revenue figure and no month-over-month
+              percentages: under a heading that says "in real time", those read as
+              results Converana produced for a real customer, which is a claim we
+              can't substantiate. Mirrors the hero preview. */}
+          <MetricCard label="Leads" value="142" />
+          <MetricCard label="Qualified" value="63" />
+          <MetricCard label="Appointments" value="28" />
+          <MetricCard label="Follow-ups" value="96" emphasize />
         </div>
 
         <Card className="mx-auto mt-6 max-w-5xl p-4 sm:p-6">
