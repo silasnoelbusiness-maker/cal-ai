@@ -71,6 +71,14 @@ func _build() -> void:
 	add_child(column)
 
 	column.add_child(MenuKit.title())
+	# A rule in the accent under the title. One line, and it is what turns a
+	# heading floating in a gradient into a masthead.
+	var rule := ColorRect.new()
+	rule.name = "Rule"
+	rule.color = Palette.UI_ACCENT
+	rule.custom_minimum_size = Vector2(72, 3)
+	column.add_child(rule)
+	column.add_child(MenuKit.spacer(6))
 	column.add_child(MenuKit.subtitle("An original city, and whatever you make of it."))
 	column.add_child(MenuKit.spacer(28))
 
@@ -81,6 +89,10 @@ func _build() -> void:
 	)
 	if continue_slot >= 0:
 		continue_button.pressed.connect(func() -> void: _load_slot(continue_slot))
+		# The one button the returning player wants, given the accent so the
+		# eye lands on it. Everything else on this screen is the same weight,
+		# which is why nothing on it read as the way in.
+		MenuKit.make_primary(continue_button)
 	column.add_child(continue_button)
 
 	var new_game := MenuKit.button("NEW GAME")

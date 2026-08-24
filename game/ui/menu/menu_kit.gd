@@ -75,6 +75,23 @@ static func button(text: String, minimum_width: float = 260.0) -> Button:
 
 ## A button that is present but cannot be used — CONTINUE with no save behind
 ## it. Disabled rather than hidden, so the menu does not change shape.
+## Marks a button as the screen's primary action: filled in the accent rather
+## than outlined in it. Applied to one button per screen and never two — a page
+## with two primary actions has none.
+static func make_primary(node: Button) -> void:
+	var fill := Palette.UI_ACCENT.darkened(0.32)
+	node.add_theme_stylebox_override(
+		"normal", UITheme.slab(fill, Palette.UI_ACCENT, 6, 10)
+	)
+	node.add_theme_stylebox_override(
+		"hover", UITheme.slab(Palette.UI_ACCENT.darkened(0.16), Color.WHITE, 6, 10)
+	)
+	node.add_theme_stylebox_override(
+		"pressed", UITheme.slab(Palette.UI_ACCENT, Color.WHITE, 6, 10)
+	)
+	node.add_theme_color_override("font_color", Color(0.949, 0.973, 1.0))
+
+
 static func disabled_button(text: String, minimum_width: float = 260.0) -> Button:
 	var node := button(text, minimum_width)
 	node.disabled = true
