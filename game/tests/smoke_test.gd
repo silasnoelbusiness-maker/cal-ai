@@ -397,6 +397,19 @@ func _run() -> void:
 	await _test_progression_save_load()
 	await _test_pre_progression_save()
 
+	# --- Phase T ---------------------------------------------------------
+	_test_asset_validator()
+	_test_material_library()
+	_test_visual_registry_falls_back()
+	_test_prop_library()
+	_test_character_rig()
+	_test_animation_states()
+	_test_vehicle_visual_parts()
+	_test_vehicle_ownership_survives_the_art()
+	_test_icon_glyphs()
+	_test_windows_are_not_all_lit()
+	_test_camera_framing_after_the_art_pass()
+
 	_report()
 
 
@@ -3456,6 +3469,297 @@ func _find_service_point(node_name: String) -> ServicePoint:
 ## does not have to wait half a second for it.
 func await_free_evaluate() -> void:
 	Onboarding.report(&"_tick")
+
+
+# --- Phase T -------------------------------------------------------------
+
+## The validator, run against the live world. A non-empty list fails, and the
+## message is the list — the point of the thing is that a problem says what it
+## is rather than being found by a player.
+func _test_asset_validator() -> void:
+	var issues := AssetValidator.run(get_tree())
+	_check(issues.is_empty(), AssetValidator.summary(issues))
+	_check(
+		not AssetValidator.coverage_report().is_empty(),
+		"and it reports how much of the game is still primitives (%s)" % (
+			AssetValidator.coverage_report()
+		)
+	)
+
+
+func _test_material_library() -> void:
+	# Every family Phase T asked for, by the name the city actually uses.
+	var wanted: Array[StringName] = [
+		&"asphalt", &"asphalt_worn", &"road_paint", &"concrete", &"paving_stone",
+		&"kerb", &"brick_warm", &"render_pale", &"wall_paint", &"glass_dark",
+		&"metal_dark", &"metal_pale", &"wood_floor", &"wood_dark", &"wood_pale",
+		&"leather", &"tile_floor", &"carpet_warm", &"grass", &"soil", &"bark",
+		&"foliage_mid", &"roof_flat", &"cloth", &"skin",
+	]
+	var missing := PackedStringArray()
+	for name in wanted:
+		if not Palette.LIBRARY.has(name):
+			missing.append(String(name))
+	_check(missing.is_empty(), "the material library covers the city (%s)" % (
+		"all present" if missing.is_empty() else ", ".join(missing)
+	))
+	_check(
+		Palette.LIBRARY.size() >= 50,
+		"and it is a library rather than a handful (%d)" % Palette.LIBRARY.size()
+	)
+	# The thing that made every surface read as static.
+	_check(
+		CityKit.MIN_DETAIL_METRES >= 2.0,
+		"nothing repeats faster than two metres (%.1f)" % CityKit.MIN_DETAIL_METRES
+	)
+	_check(
+		CityKit.NORMAL_STRENGTH < 1.0,
+		"and the authored bump is scaled back (x%.2f)" % CityKit.NORMAL_STRENGTH
+	)
+	# A shared material is shared, or a street of benches is a street of
+	# materials to bind.
+	_check(
+		Palette.of(&"metal_dark") == Palette.of(&"metal_dark"),
+		"asking twice gives the same material"
+	)
+
+
+## A missing visual must be a fallback, never a hole in the world.
+func _test_visual_registry_falls_back() -> void:
+	_check(
+		VisualRegistry.scene_for(VisualRegistry.Kind.VEHICLE, &"nothing_here") == null,
+		"an unregistered id has no scene"
+	)
+	_check(
+		not VisualRegistry.has_production_art(VisualRegistry.Kind.CHARACTER, &"0"),
+		"and honestly says it has no production art for it"
+	)
+	# The coverage figure is the honest one: today it is zero, and the report
+	# says so rather than claiming the game has art it does not have.
+	for kind: VisualRegistry.Kind in [
+		VisualRegistry.Kind.CHARACTER, VisualRegistry.Kind.VEHICLE,
+		VisualRegistry.Kind.PROP,
+	]:
+		var coverage := VisualRegistry.production_coverage(kind)
+		_check(
+			coverage >= 0.0 and coverage <= 1.0,
+			"coverage for kind %d is a fraction (%.2f)" % [kind, coverage]
+		)
+	_check(
+		not VisualRegistry.known_ids(VisualRegistry.Kind.VEHICLE).is_empty(),
+		"and the registry knows what it would be asked about"
+	)
+
+
+func _test_prop_library() -> void:
+	var ids := PropLibrary.ids()
+	_check(ids.size() >= 10, "the prop library has a street's worth (%d)" % ids.size())
+	_check(PropLibrary.exists(&"bench_01"), "including a bench")
+	_check(
+		PropLibrary.group_of(&"bench_01") == &"bench",
+		"which is somewhere a routine can be sent"
+	)
+	_check(
+		PropLibrary.group_of(&"bin_01") == &"",
+		"while a bin is only scenery"
+	)
+	_check(
+		not PropLibrary.is_solid(&"bin_01"),
+		"and the crowd walks through it rather than wedging against it"
+	)
+	_check(PropLibrary.is_solid(&"crate_stack_01"), "a crate stack is solid")
+
+
+## The rig the animator drives. Elbows are Phase T; everything else was there.
+func _test_character_rig() -> void:
+	var look := CharacterLook.player_default()
+	var host := Node3D.new()
+	add_child(host)
+	var rig := CharacterKit.build(host, look, false)
+	_check(rig.root != null, "a figure has a root")
+	for part in [
+		["hips", rig.hips], ["chest", rig.chest], ["head", rig.head],
+		["left arm", rig.arm_left], ["right arm", rig.arm_right],
+		["left leg", rig.leg_left], ["right leg", rig.leg_right],
+		["left elbow", rig.fore_left], ["right elbow", rig.fore_right],
+	]:
+		_check(part[1] != null, "and a %s" % part[0])
+	_check(
+		is_equal_approx(rig.height, look.height),
+		"built at the height it was asked for (%.2fm)" % rig.height
+	)
+	# A hand, a cuff and a shoe: the three things that stop an arm being a
+	# stick and a leg being a post.
+	_check(
+		rig.fore_left.get_node_or_null("Hand") != null,
+		"the arm ends in a hand"
+	)
+	_check(
+		rig.leg_left.get_node_or_null("Shoe") != null,
+		"and the leg in a shoe"
+	)
+	host.queue_free()
+
+
+func _test_animation_states() -> void:
+	var look := CharacterLook.random(RandomNumberGenerator.new())
+	var host := Node3D.new()
+	add_child(host)
+	var rig := CharacterKit.build(host, look, false)
+	var animator := CharacterAnimator.new()
+	host.add_child(animator)
+	animator.setup(rig)
+
+	# Every state the game can ask for must be a state the animator knows.
+	for state: CharacterAnimator.State in CharacterAnimator.State.values():
+		animator.set_state(state)
+		animator._process(0.1)
+		_check(
+			animator.get_state() == state,
+			"the animator holds state %d" % state
+		)
+	# The rest pose is the thing that stops a standing figure reading as a
+	# mannequin, so it is pinned rather than left to drift.
+	animator.set_state(CharacterAnimator.State.IDLE)
+	for i in 12:
+		animator._process(0.1)
+	_check(
+		absf(rig.fore_left.rotation.x) > 0.05,
+		"a standing figure has a bent elbow (%.2f rad)" % rig.fore_left.rotation.x
+	)
+	_check(
+		absf(rig.arm_left.rotation.z) > 0.01,
+		"and arms held clear of the body"
+	)
+	animator.set_state(CharacterAnimator.State.SIT)
+	for i in 20:
+		animator._process(0.1)
+	_check(
+		rig.leg_left.rotation.x < -0.5,
+		"somebody sitting has their thighs forward (%.2f rad)" % rig.leg_left.rotation.x
+	)
+	host.queue_free()
+
+
+## Every part Phase T asked a car to have, on a real spawned vehicle.
+func _test_vehicle_visual_parts() -> void:
+	var cars := get_tree().get_nodes_in_group(&"vehicle")
+	_check(not cars.is_empty(), "there are vehicles in the world (%d)" % cars.size())
+	if cars.is_empty():
+		return
+	var car: Node3D = cars[0]
+	var root := car.get_node_or_null("Body")
+	if root == null:
+		for child in car.get_children():
+			if child is Node3D and child.get_child_count() > 6:
+				root = child
+				break
+	_check(root != null, "and a car has a body to look at")
+	if root == null:
+		return
+	var found := {}
+	for child in root.get_children():
+		found[String(child.name)] = true
+	for part in ["Chassis", "Bonnet", "Boot", "Cabin", "Roof", "Windscreen", "RearScreen"]:
+		_check(found.has(part), "a car has a %s" % part.to_lower())
+	var wheels := 0
+	var arches := 0
+	for name: String in found:
+		if name.begins_with("Wheel"):
+			wheels += 1
+		if name.begins_with("Arch"):
+			arches += 1
+	_check(wheels == 4, "and four wheels (%d)" % wheels)
+	_check(arches == 4, "with an arch over each (%d)" % arches)
+
+
+## The whole reason the visual layer is separate: changing what a car looks
+## like must not touch what a car is.
+func _test_vehicle_ownership_survives_the_art() -> void:
+	var fleet := VehicleRegistry.get_fleet()
+	_check(not fleet.is_empty(), "the player owns something (%d)" % fleet.size())
+	if fleet.is_empty():
+		return
+	var record: OwnedVehicle = fleet[0]
+	var value_before: int = record.current_value()
+	var km_before: float = record.odometer_km
+	var model := record.model_id
+	# Rebuild the visual. Nothing about the record may move.
+	for car in get_tree().get_nodes_in_group(&"vehicle"):
+		if car.has_method("rebuild_visual"):
+			car.call("rebuild_visual")
+	await _settle(4)
+	_check(record.model_id == model, "and rebuilding the art leaves the model alone")
+	_check(
+		record.current_value() == value_before,
+		"the value alone ($%d)" % record.current_value()
+	)
+	_check(is_equal_approx(record.odometer_km, km_before), "and the mileage alone")
+
+
+func _test_icon_glyphs() -> void:
+	var drawn := 0
+	for kind: IconGlyph.Kind in IconGlyph.Kind.values():
+		var glyph := IconGlyph.make(kind, 16.0)
+		add_child(glyph)
+		glyph._draw()
+		drawn += 1
+		_check(
+			not IconGlyph.name_of(kind).is_empty(),
+			"icon %d has a name (%s)" % [kind, IconGlyph.name_of(kind)]
+		)
+		glyph.queue_free()
+	_check(drawn >= 15, "there is an icon set rather than a handful (%d)" % drawn)
+	# The needs bars read as icons rather than as three words.
+	var hud := _main.get_node_or_null("HUD")
+	var row := hud.get_node_or_null("Root/BottomLeft/HealthRow") if hud != null else null
+	_check(row != null, "the HUD has a needs row")
+	if row != null:
+		_check(
+			row.get_node_or_null("Icon") != null,
+			"with an icon on it"
+		)
+
+
+## Half the atmosphere of a night skyline is the windows that are dark.
+func _test_windows_are_not_all_lit() -> void:
+	_check(
+		BuildingKit.LIT_WINDOW_PERCENT > 20 and BuildingKit.LIT_WINDOW_PERCENT < 90,
+		"some windows light and some do not (%d%%)" % BuildingKit.LIT_WINDOW_PERCENT
+	)
+	# Deterministic: the same flat is lit on every run and in every screenshot.
+	var at := Vector3(12.0, 7.4, -18.0)
+	_check(
+		BuildingKit._is_lit(at) == BuildingKit._is_lit(at),
+		"and which ones is the same every time"
+	)
+	var lit := 0
+	for i in 200:
+		if BuildingKit._is_lit(Vector3(float(i) * 1.7, 6.0, float(i) * 0.9)):
+			lit += 1
+	_check(
+		lit > 40 and lit < 160,
+		"across an elevation it is a mix rather than all or nothing (%d of 200)" % lit
+	)
+
+
+## The framing changed in Phase T. This pins that it changed in the direction
+## it was meant to, and that it stayed inside what the game needs.
+func _test_camera_framing_after_the_art_pass() -> void:
+	var rig := _camera_rig
+	_check(
+		rig.distance < 20.0,
+		"the camera sits closer than it did (%.0fm)" % rig.distance
+	)
+	_check(
+		rig.pitch_degrees < 60.0 and rig.pitch_degrees > 45.0,
+		"and flatter, so façades are visible (%.0f degrees)" % rig.pitch_degrees
+	)
+	_check(
+		rig.max_distance >= 34.0,
+		"the old view of the block is still a scroll away (%.0fm)" % rig.max_distance
+	)
+	_check(rig.min_distance >= 6.0, "and it cannot be zoomed into the pavement")
 
 
 func _report() -> void:
