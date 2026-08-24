@@ -12,7 +12,13 @@ extends RefCounted
 ## Kept flat and static so the asset validator can walk the whole set, and so
 ## `VisualRegistry` has something to check production coverage against.
 
-## Each entry: [builder name, solid, group it joins, footprint metres].
+## Each entry: [builder name, solid, group it joins, footprint metres, wide].
+##
+## `wide` marks the few props that are legitimately larger than a pavement is
+## wide — a bus shelter is four metres across because bus shelters are. It is
+## an explicit exemption on one entry rather than a looser rule for all of them,
+## because the rule is the thing that stops somebody dropping a four-metre
+## planter across a route.
 ##
 ## `solid` is whether the player collides with it. Most street furniture is
 ## deliberately not solid — a bin the crowd wedges against is a bug the player
@@ -27,7 +33,7 @@ const PROPS := {
 	&"sign_01": ["street_sign", false, &"", Vector2(0.3, 0.3)],
 	&"meter_01": ["parking_meter", false, &"", Vector2(0.3, 0.3)],
 	&"bike_rack_01": ["bike_rack", false, &"", Vector2(1.8, 0.4)],
-	&"shelter_01": ["shelter", false, &"", Vector2(4.0, 1.6)],
+	&"shelter_01": ["shelter", false, &"", Vector2(4.0, 1.6), true],
 	&"crate_stack_01": ["crate_stack", true, &"", Vector2(1.6, 1.6)],
 	&"vending_01": ["vending_machine", true, &"", Vector2(0.9, 0.6)],
 	&"park_spot_01": ["park_spot", false, &"park_spot", Vector2(0.5, 0.5)],
@@ -63,6 +69,12 @@ static func group_of(id: StringName) -> StringName:
 static func footprint(id: StringName) -> Vector2:
 	var entry: Array = PROPS.get(id, [])
 	return entry[3] if entry.size() > 3 else Vector2.ONE
+
+
+## Whether this prop is allowed to be wider than a route. See PROPS.
+static func is_wide_by_design(id: StringName) -> bool:
+	var entry: Array = PROPS.get(id, [])
+	return entry.size() > 4 and bool(entry[4])
 
 
 static func builder_of(id: StringName) -> String:

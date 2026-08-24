@@ -105,8 +105,14 @@ func _process(delta: float) -> void:
 	var wave := sin(_phase)
 	var counter := sin(_phase + PI)
 
-	_rig.leg_left.rotation.x = wave * swing
-	_rig.leg_right.rotation.x = counter * swing
+	# Not while a pose owns the legs. SIT drives them to a fold in _apply_pose,
+	# and writing the swing here first — zero, for a state with no swing — reset
+	# that fold on every frame, so a seated figure crept a fifth of the way
+	# there and stayed. The test caught it; the shape of the bug is that two
+	# things were writing one rotation.
+	if not _pose_owns_legs():
+		_rig.leg_left.rotation.x = wave * swing
+		_rig.leg_right.rotation.x = counter * swing
 	# Arms swing against the legs. Half the amplitude reads as natural; equal
 	# amplitude reads as a march.
 	_rig.arm_left.rotation.x = counter * swing * 0.62 - REST_SHOULDER_BACK
@@ -119,6 +125,11 @@ func _process(delta: float) -> void:
 	_set_elbows(REST_ELBOW_BEND * lerpf(1.0, WALKING_ELBOW, _blend))
 
 	_apply_pose(delta, wave)
+
+
+## Whether the current state poses the legs itself rather than swinging them.
+func _pose_owns_legs() -> bool:
+	return _state == State.SIT
 
 
 ## Both elbows to the same bend. Negative rotation on x brings the forearm

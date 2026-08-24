@@ -3747,13 +3747,18 @@ func _test_windows_are_not_all_lit() -> void:
 ## it was meant to, and that it stayed inside what the game needs.
 func _test_camera_framing_after_the_art_pass() -> void:
 	var rig := _camera_rig
+	# The authored defaults, not whatever the camera happens to be doing: a
+	# portal into an interior overrides both while the player is inside one,
+	# and by this point in the suite the player has been through several.
+	var default_distance: float = rig.get("_default_distance")
+	var default_pitch: float = rig.get("_default_pitch")
 	_check(
-		rig.distance < 20.0,
-		"the camera sits closer than it did (%.0fm)" % rig.distance
+		default_distance < 20.0,
+		"the camera sits closer than it did (%.0fm)" % default_distance
 	)
 	_check(
-		rig.pitch_degrees < 60.0 and rig.pitch_degrees > 45.0,
-		"and flatter, so façades are visible (%.0f degrees)" % rig.pitch_degrees
+		default_pitch < 60.0 and default_pitch > 45.0,
+		"and flatter, so façades are visible (%.0f degrees)" % default_pitch
 	)
 	_check(
 		rig.max_distance >= 34.0,

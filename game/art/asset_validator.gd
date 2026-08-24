@@ -80,7 +80,11 @@ static func check_props() -> Array:
 		var size := PropLibrary.footprint(id)
 		if size.x <= 0.0 or size.y <= 0.0:
 			issues.append(_issue(&"prop", String(id), "has an empty footprint"))
-		if not PropLibrary.is_solid(id) and maxf(size.x, size.y) > MAX_DECORATIVE_WIDTH:
+		if (
+			not PropLibrary.is_solid(id)
+			and not PropLibrary.is_wide_by_design(id)
+			and maxf(size.x, size.y) > MAX_DECORATIVE_WIDTH
+		):
 			issues.append(_issue(
 				&"prop", String(id),
 				"is decorative but %.1fm across, which would block a pavement" % maxf(size.x, size.y)
