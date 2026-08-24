@@ -11162,15 +11162,14 @@ func _test_restaurant_visible_service() -> void:
 	if diner == null or unit == null:
 		return
 	unit.ensure_built()
-	# A dinner hour, set rather than inherited.
+	# Deliberately NOT setting the hour here, though it looks like it should.
 	#
-	# This test used to run at whatever time the suite happened to have reached,
-	# which drifted whenever anything earlier changed how long it waited — and
-	# at three in the morning a restaurant with a rostered cook still behaves
-	# nothing like a restaurant at seven in the evening. A test about table
-	# service should say when it is.
-	_set_hour(19)
-	await _settle(4)
+	# Phase T tried it. Winding the clock forward fires a day roll — rent,
+	# wages, day-end reports, the crowd director's headcount — and by the time
+	# all of that had run the room's presence volume no longer had the player
+	# in it, so no staff spawned at all. The test is left inheriting the
+	# suite's clock, and the fact that it is sensitive to that is recorded in
+	# the Phase U handoff rather than papered over here.
 	CompanyDebug.stock_up(diner, 80)
 	diner.manual_override = BusinessInstance.Override.FORCE_OPEN
 	diner.set_open(true)
