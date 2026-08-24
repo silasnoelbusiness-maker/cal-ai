@@ -407,6 +407,9 @@ func _setup_scenario(main: Node, scenario: String) -> void:
 		"map_goal_filters", "tired_player":
 			await _phase_s_scenario(main, scenario)
 
+		"hero_intersection", "camera_a", "camera_b", "camera_c":
+			await _t2_hero_intersection(main, scenario)
+
 		"characters":
 			# The five people the game draws, lined up at reading distance:
 			# player, civilian, office worker, retail worker, officer.
@@ -1336,6 +1339,62 @@ func _s_tired(main: Node) -> void:
 	player.global_position = Vector3(-20.0, 0.5, District01.MAIN_ST_Z - 9.4)
 	stats.restore_values(58.0, 11.0, 14.0)
 	await _wait(40)
+
+
+# --- Phase T2: the camera trial and the hero block ------------------------
+
+## One Central intersection, set up identically every time.
+##
+## The camera comparison in §7 is only worth anything if A, B and C differ by
+## nothing except the angle, so everything here is fixed: the corner, the hour,
+## the traffic, the crowd, the seed. The only thing the caller varies is pitch.
+func _t2_hero_intersection(main: Node, scenario: String) -> void:
+	var player: Node3D = GameManager.player
+	var corner := Vector3(
+		District02.PLAZA_ST_X + 11.0, 0.5, District02.KINGSTON_RD_Z + 11.0
+	)
+	player.global_position = corner
+	await _wait(20)
+
+	# Cars on both approaches, placed rather than waited for, so the same
+	# vehicles are in the same lanes in all three shots.
+	_traffic_manager().set_active(true)
+	var models := [
+		"res://vehicles/cars/sedan.tscn", "res://vehicles/cars/hatchback.tscn",
+		"res://vehicles/cars/suv.tscn", "res://vehicles/cars/van.tscn",
+		"res://vehicles/cars/compact.tscn",
+	]
+	# A restrained road palette rather than a toy box: white, graphite, silver,
+	# navy, oxide red, dark green. §42 — every traffic car in a primary colour
+	# is one of the things that reads as unfinished.
+	var paints := [
+		Color(0.878, 0.886, 0.894), Color(0.192, 0.204, 0.220),
+		Color(0.639, 0.655, 0.678), Color(0.180, 0.243, 0.361),
+		Color(0.478, 0.216, 0.184), Color(0.184, 0.286, 0.239),
+	]
+	for i in models.size():
+		_add_traffic_car(
+			load(models[i]),
+			Vector3(
+				District02.PLAZA_ST_X - District02.LANE_OFFSET,
+				0.0,
+				District02.KINGSTON_RD_Z + 30.0 - float(i) * 12.0
+			),
+			180.0, paints[i % paints.size()]
+		)
+	for i in 3:
+		_add_traffic_car(
+			load(models[(i + 2) % models.size()]),
+			Vector3(
+				District02.PLAZA_ST_X + 26.0 + float(i) * 13.0,
+				0.0,
+				District02.KINGSTON_RD_Z + District02.LANE_OFFSET
+			),
+			90.0, paints[(i + 3) % paints.size()]
+		)
+	# Long enough for the routines to walk people onto the corner rather than
+	# catching them the moment they set off.
+	await _wait(320)
 
 
 ## Phase L: the front end seen from inside a running game.

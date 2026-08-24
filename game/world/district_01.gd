@@ -1192,21 +1192,66 @@ func _add_street_light(parent: Node3D, index: int, base: Vector3, toward: Vector
 	holder.position = base + Vector3.UP * CURB_HEIGHT
 	parent.add_child(holder)
 
+	# An authored lamp rather than a bent pole.
+	#
+	# A cylinder with a box stuck on the end read as placeholder from any angle,
+	# and street lamps are everywhere — forty-four on Harbour Row alone — so
+	# whatever they look like is a large part of what the street looks like.
+	# This one has a base casting, a tapered column, a curved arm built from
+	# three segments, a housing with a shade over it, and a lit lens underneath.
+	var dark := Palette.of(&"metal_dark")
+	var steel := _mat("metal")
 	var pole_height := 6.4
+
+	CityKit.add_cylinder(holder, "Base", Vector3(0.0, 0.16, 0.0), 0.26, 0.32, dark)
 	CityKit.add_cylinder(
-		holder, "Pole", Vector3(0.0, pole_height * 0.5, 0.0), 0.13, pole_height, _mat("metal")
+		holder, "Plinth", Vector3(0.0, 0.44, 0.0), 0.185, 0.30, dark, false
+	)
+	CityKit.add_cylinder(
+		holder, "Pole", Vector3(0.0, pole_height * 0.5 + 0.3, 0.0),
+		0.105, pole_height - 0.3, steel
+	)
+	# The taper: a thinner column over the top third, which is what stops the
+	# pole reading as a length of pipe.
+	CityKit.add_cylinder(
+		holder, "Taper", Vector3(0.0, pole_height * 0.84, 0.0),
+		0.072, pole_height * 0.34, steel, false
 	)
 
-	var arm_length := 1.8
-	var arm_center := toward * (arm_length * 0.5) + Vector3.UP * pole_height
-	var arm_size := Vector3(
-		maxf(absf(toward.x) * arm_length, 0.14), 0.14, maxf(absf(toward.z) * arm_length, 0.14)
-	)
-	CityKit.add_box(holder, "Arm", arm_center, arm_size, _mat("metal"), false)
+	# The arm, as three short segments turning through the bend. From this
+	# camera the curve is most of what says "street lamp" rather than
+	# "sign post", and a single straight box never reads as one.
+	var arm_length := 1.9
+	var segments := [
+		[Vector3(0.24, pole_height + 0.06, 0.0), 0.46, 26.0],
+		[Vector3(0.78, pole_height + 0.30, 0.0), 0.62, 58.0],
+		[Vector3(1.44, pole_height + 0.40, 0.0), 0.62, 84.0],
+	]
+	for i in segments.size():
+		var entry: Array = segments[i]
+		var local: Vector3 = entry[0]
+		var piece := CityKit.add_cylinder(
+			holder, "Arm%d" % i,
+			toward * local.x + Vector3(0.0, local.y, 0.0),
+			0.062, float(entry[1]), steel, false
+		)
+		var tilt := deg_to_rad(float(entry[2]))
+		piece.rotation.z = -toward.x * tilt
+		piece.rotation.x = toward.z * tilt
 
-	var head_position := toward * arm_length + Vector3.UP * (pole_height - 0.16)
+	var head_position := toward * arm_length + Vector3.UP * (pole_height + 0.36)
+	# A shade over a lens, not a solid block: the lit part is underneath, where
+	# a lamp's lit part is.
 	CityKit.add_box(
-		holder, "Head", head_position, Vector3(0.52, 0.2, 0.52), _mat("lamp"), false, false
+		holder, "Shade", head_position + Vector3(0.0, 0.09, 0.0),
+		Vector3(0.62, 0.12, 0.40), dark, false, false
+	)
+	CityKit.add_box(
+		holder, "Housing", head_position, Vector3(0.52, 0.10, 0.34), steel, false, false
+	)
+	CityKit.add_box(
+		holder, "Lens", head_position + Vector3(0.0, -0.085, 0.0),
+		Vector3(0.44, 0.06, 0.28), _mat("lamp"), false, false
 	)
 
 	var light := OmniLight3D.new()

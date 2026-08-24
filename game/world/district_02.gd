@@ -101,6 +101,7 @@ func _ready() -> void:
 	_build_ground()
 	_build_roads()
 	_build_pavements()
+	_build_street_dressing()
 	_build_blocks()
 	_build_plaza()
 	_build_street_furniture()
@@ -1693,3 +1694,67 @@ func _make_job_station(job_id: String) -> JobStation:
 	shape.shape = box
 	station.add_child(shape)
 	return station
+
+
+## Furniture down every pavement in the district.
+##
+## Central's streets were, at the Phase T2 camera, mostly blank light grey — a
+## planting line and a frontage zone are what turn that into a street. Read off
+## `street_lines()` so the two never disagree about where a pavement is.
+func _build_street_dressing() -> void:
+	var container := _make_container("StreetDressing")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0x5CD2
+	var kit := _dressing_kit()
+	# Everything that must stay walkable up to: doors, boards, job stations.
+	var keep_clear: Array = []
+	for group in [&"building_entrance", &"interactable", &"job_station"]:
+		for node in get_tree().get_nodes_in_group(group):
+			if node is Node3D:
+				keep_clear.append((node as Node3D).global_position)
+
+	var index := 0
+	for entry in street_lines():
+		var east_west: bool = entry[0]
+		var centre: float = entry[1]
+		var from_v: float = entry[2]
+		var to_v: float = entry[3]
+		var half: float = entry[4]
+		# Service roads are back lanes; they get nothing but the odd bin, which
+		# `dress_run` gives them anyway by being short.
+		for side: float in [-1.0, 1.0]:
+			var kerb := centre + side * half
+			var a: Vector3
+			var b: Vector3
+			var inward: Vector3
+			if east_west:
+				a = Vector3(from_v + 6.0, CURB_HEIGHT, kerb)
+				b = Vector3(to_v - 6.0, CURB_HEIGHT, kerb)
+				inward = Vector3(0.0, 0.0, side)
+			else:
+				a = Vector3(kerb, CURB_HEIGHT, from_v + 6.0)
+				b = Vector3(kerb, CURB_HEIGHT, to_v - 6.0)
+				inward = Vector3(side, 0.0, 0.0)
+			StreetDressing.dress_run(
+				container, "Run%d" % index, a, b, inward, WALK_WIDTH, rng, kit, keep_clear
+			)
+			index += 1
+
+
+## The materials the dressing draws with, in this district's own palette.
+func _dressing_kit() -> Dictionary:
+	return {
+		"soil": Palette.of(&"soil"),
+		"kerb": Palette.of(&"kerb"),
+		"bark": Palette.of(&"bark"),
+		"foliage": [
+			Palette.of(&"foliage_mid"),
+			Palette.of(&"foliage_deep"),
+			Palette.of(&"foliage_light"),
+		],
+		"metal": Palette.of(&"metal_mid"),
+		"metal_dark": Palette.of(&"metal_dark"),
+		"glass": Palette.of(&"glass_dark"),
+		"stone": Palette.of(&"stone_trim"),
+		"wood": Palette.of(&"wood_dark"),
+	}

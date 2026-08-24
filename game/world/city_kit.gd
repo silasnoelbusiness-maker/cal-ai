@@ -416,6 +416,12 @@ static func add_roof(
 ## offset, unevenly scaled blobs with a little colour drift between them break
 ## the silhouette, and from an elevated camera that difference is most of what
 ## makes a street look planted rather than decorated.
+## Tree species. A street tree, a park tree and a scrubby industrial one are
+## three different silhouettes, and a city planted entirely with one of them
+## reads as a diagram of a city.
+enum TreeKind { STREET, PARK, SPARSE }
+
+
 static func add_tree(
 	parent: Node3D,
 	node_name: String,
@@ -424,7 +430,8 @@ static func add_tree(
 	trunk_material: StandardMaterial3D,
 	foliage_materials: Array,
 	rng: RandomNumberGenerator,
-	solid_trunk: bool = true
+	solid_trunk: bool = true,
+	kind: TreeKind = TreeKind.STREET
 ) -> Node3D:
 	var holder := Node3D.new()
 	holder.name = node_name
@@ -432,55 +439,95 @@ static func add_tree(
 	holder.rotation.y = rng.randf_range(0.0, TAU)
 	parent.add_child(holder)
 
-	var trunk_height := 2.6 * scale_factor
-	var trunk_radius := 0.19 * scale_factor
+	# Per-species proportions. A street tree is tall with a high canopy so a van
+	# passes under it; a park tree is broader and lower; a sparse one is thin
+	# and open, for a yard nobody maintains.
+	var trunk_height := 2.9 * scale_factor
+	var trunk_radius := 0.15 * scale_factor
+	var tiers := 3
+	var spread := 0.86 * scale_factor
+	var lift := 1.0
+	match kind:
+		TreeKind.PARK:
+			trunk_height = 2.4 * scale_factor
+			trunk_radius = 0.21 * scale_factor
+			tiers = 4
+			spread = 1.30 * scale_factor
+			lift = 0.92
+		TreeKind.SPARSE:
+			trunk_height = 3.2 * scale_factor
+			trunk_radius = 0.11 * scale_factor
+			tiers = 2
+			spread = 0.62 * scale_factor
+			lift = 1.06
+
 	add_cylinder(
 		holder, "Trunk", Vector3(0.0, trunk_height * 0.5, 0.0),
 		trunk_radius, trunk_height, trunk_material, solid_trunk
 	)
-	# A flare where the trunk meets the ground and two limbs reaching into the
-	# canopy. Three cylinders, and they are the difference between a tree and a
-	# broom handle with balls on it.
+	# A flare where the trunk meets the ground: a tree grows out of the pavement
+	# rather than being pushed into it.
 	add_cylinder(
-		holder, "Flare", Vector3(0.0, trunk_height * 0.06, 0.0),
-		trunk_radius * 1.55, trunk_height * 0.12, trunk_material, false
+		holder, "Flare", Vector3(0.0, trunk_height * 0.05, 0.0),
+		trunk_radius * 1.7, trunk_height * 0.11, trunk_material, false
 	)
-	for limb in 2:
-		var lean := TAU * (float(limb) / 2.0) + rng.randf_range(-0.5, 0.5)
+
+	# Branches, plural and reaching. Four of them, each leaning out and up into
+	# the tier it feeds, so the canopy has something holding it there instead of
+	# hovering over a pole.
+	var limbs := 4 if kind != TreeKind.SPARSE else 3
+	for limb in limbs:
+		var lean := TAU * (float(limb) / float(limbs)) + rng.randf_range(-0.35, 0.35)
+		# Short. The first pass made limbs nearly as long and thick as the
+		# trunk, and from above the whole tree read as leaning over at forty
+		# degrees. A branch only has to be visible where it enters the canopy.
+		var reach := trunk_height * rng.randf_range(0.20, 0.30)
 		var branch := add_cylinder(
 			holder, "Limb%d" % limb,
 			Vector3(
-				cos(lean) * 0.30 * scale_factor,
-				trunk_height * 0.80,
-				sin(lean) * 0.30 * scale_factor
+				cos(lean) * spread * 0.22,
+				trunk_height * rng.randf_range(0.86, 0.98),
+				sin(lean) * spread * 0.22
 			),
-			trunk_radius * 0.55, trunk_height * 0.55, trunk_material, false
+			trunk_radius * rng.randf_range(0.26, 0.38), reach, trunk_material, false
 		)
-		branch.rotation.z = cos(lean) * 0.42
-		branch.rotation.x = -sin(lean) * 0.42
+		branch.rotation.z = cos(lean) * rng.randf_range(0.30, 0.48)
+		branch.rotation.x = -sin(lean) * rng.randf_range(0.30, 0.48)
 
-	var blobs := rng.randi_range(3, 5)
-	var canopy_base := trunk_height * 0.82
-	var spread := 1.05 * scale_factor
-	for i in blobs:
-		# The first blob is the core; the rest hang off it.
-		var offset := Vector3.ZERO
-		var size := 2.5 * scale_factor
-		if i > 0:
-			var angle := TAU * (float(i) / float(blobs)) + rng.randf_range(-0.4, 0.4)
-			offset = Vector3(
-				cos(angle) * spread * rng.randf_range(0.5, 1.0),
-				rng.randf_range(-0.35, 0.75) * scale_factor,
-				sin(angle) * spread * rng.randf_range(0.5, 1.0)
+	# A layered canopy rather than a cluster of equal balls.
+	#
+	# The old version scattered three to five same-sized spheres and, at any
+	# distance, they merged into one lump on a stick. Tiers are what give a tree
+	# a silhouette: a broad low skirt, a fuller middle, a smaller crown, each
+	# made of several flattened lobes at different heights and none of them
+	# concentric with the trunk.
+	var base := trunk_height * (0.74 if kind == TreeKind.PARK else 0.80)
+	for tier in tiers:
+		var t := float(tier) / float(maxi(tiers - 1, 1))
+		# Widest at the bottom, narrowing to the crown.
+		var tier_spread: float = spread * lerpf(1.0, 0.42, t)
+		var tier_height: float = base + trunk_height * lift * (0.16 + t * 0.46)
+		var lobes := 4 if tier < tiers - 1 else 3
+		for lobe in lobes:
+			var angle := TAU * (float(lobe) / float(lobes)) + rng.randf_range(-0.5, 0.5) + float(tier)
+			var radius: float = tier_spread * rng.randf_range(0.42, 0.95)
+			# Sized for a street tree, not a park oak. The first pass at this
+			# put six-metre canopies over a three-metre pavement and the whole
+			# street read as woodland with a road through it.
+			var size: float = (0.86 - 0.24 * t) * scale_factor * rng.randf_range(0.82, 1.12)
+			add_sphere(
+				holder,
+				"Canopy%d_%d" % [tier, lobe],
+				Vector3(
+					cos(angle) * radius,
+					tier_height + rng.randf_range(-0.12, 0.18) * scale_factor,
+					sin(angle) * radius
+				),
+				# Flattened, not round. A sphere reads as a ball; a squashed
+				# ellipsoid reads as a mass of leaves.
+				Vector3(size, size * rng.randf_range(0.62, 0.82), size * rng.randf_range(0.88, 1.12)),
+				foliage_materials[rng.randi_range(0, foliage_materials.size() - 1)]
 			)
-			size = rng.randf_range(1.5, 2.3) * scale_factor
-		add_sphere(
-			holder,
-			"Canopy%d" % i,
-			Vector3(offset.x, canopy_base + size * 0.42 + offset.y, offset.z),
-			Vector3(size, size * rng.randf_range(0.78, 1.02), size),
-			foliage_materials[rng.randi_range(0, foliage_materials.size() - 1)]
-		)
 	return holder
 
 
