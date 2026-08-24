@@ -149,6 +149,7 @@ func _ready() -> void:
 	_pause_overlay.visible = false
 	_build_pause_menu()
 	_build_phase_m_screens()
+	_build_need_icons()
 	_speed_panel.visible = false
 	_wanted_label.visible = false
 	_escape_label.visible = false
@@ -801,6 +802,33 @@ func _on_autosave_finished(succeeded: bool) -> void:
 ## furniture shop, the furnishing list, the cupboard, the profile and the two
 ## property screens.
 ##
+## Swaps the word beside each needs bar for a glyph.
+##
+## HEALTH, ENERGY and HUNGER cost seventy-four pixels each and told the player
+## nothing the bar's colour did not. A sixteen-pixel icon says the same thing,
+## reads at a glance rather than being read, and gives the bars back most of
+## the corner. The labels are hidden rather than deleted so a screen reader or
+## a future accessibility pass still has the words.
+func _build_need_icons() -> void:
+	var rows := {
+		"HealthRow": [IconGlyph.Kind.HEALTH, Palette.LOSS],
+		"EnergyRow": [IconGlyph.Kind.ENERGY, Palette.CALM],
+		"HungerRow": [IconGlyph.Kind.FOOD, Palette.WARNING],
+	}
+	for row_name: String in rows:
+		var row := get_node_or_null("Root/BottomLeft/%s" % row_name) as Control
+		if row == null:
+			continue
+		for child in row.get_children():
+			if child is Label:
+				(child as Label).visible = false
+		var entry: Array = rows[row_name]
+		var glyph := IconGlyph.make(entry[0], 15.0, entry[1])
+		glyph.name = "Icon"
+		row.add_child(glyph)
+		row.move_child(glyph, 0)
+
+
 ## Built in code and parented here for the same reason the pause menu is —
 ## their contents are lists whose length depends on what the player owns, so
 ## there is nothing to lay out in a scene file that the code would not
