@@ -10,14 +10,21 @@ extends Node3D
 
 @export_group("Framing")
 ## Downward tilt in degrees. 50-70 gives the classic elevated look.
-@export_range(20.0, 89.0, 1.0) var pitch_degrees: float = 64.0:
+@export_range(20.0, 89.0, 1.0) var pitch_degrees: float = 56.0:
 	set(value):
 		pitch_degrees = value
 		if is_inside_tree():
 			_apply_pitch()
 ## Resting distance from the pivot to the camera.
-@export_range(4.0, 80.0, 0.5) var distance: float = 22.0
-@export_range(4.0, 80.0, 0.5) var min_distance: float = 11.0
+##
+## Phase T pulled this in from 22 metres and the pitch down from 64 degrees.
+## The old framing was built for development — it showed a great deal of road
+## and very little of anything worth looking at, and a person at that range was
+## forty pixels tall. Closer and flatter shows façades, shopfronts and the
+## shape of a figure, which is what the art is for. The zoom still reaches 38
+## metres for anybody who wants the old view of the block.
+@export_range(4.0, 80.0, 0.5) var distance: float = 17.0
+@export_range(4.0, 80.0, 0.5) var min_distance: float = 9.0
 @export_range(4.0, 80.0, 0.5) var max_distance: float = 38.0
 ## Pivot height above the target's origin, so the camera frames the torso.
 @export var height_offset: float = 1.4

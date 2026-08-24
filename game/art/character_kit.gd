@@ -25,6 +25,10 @@ class Rig extends RefCounted:
 	var head: Node3D = null
 	var arm_left: Node3D = null
 	var arm_right: Node3D = null
+	## Elbows. Separate from the shoulder so an arm can bend rather than only
+	## swing — the difference between somebody standing and a shop dummy.
+	var fore_left: Node3D = null
+	var fore_right: Node3D = null
 	var leg_left: Node3D = null
 	var leg_right: Node3D = null
 	## Height the figure was built at, so callers can place things on it.
@@ -154,13 +158,32 @@ static func build(parent: Node3D, look: CharacterLook, cast_shadow: bool = true)
 			arm, "Upper", Vector3(0.0, -upper * 0.5, 0.0),
 			Vector3(shoulders * 0.20, upper, depth * 0.52), cloth, false, cast_shadow
 		)
+		# The forearm hangs off its own joint at the elbow, so the animator can
+		# bend an arm instead of only swinging the whole thing from the
+		# shoulder. Two arms that are dead straight from shoulder to fingertip
+		# are what makes a standing figure read as a shop dummy.
+		var elbow := Node3D.new()
+		elbow.name = "ForeL" if side < 0.0 else "ForeR"
+		elbow.position = Vector3(0.0, -upper, 0.0)
+		arm.add_child(elbow)
+		if side < 0.0:
+			rig.fore_left = elbow
+		else:
+			rig.fore_right = elbow
 		CityKit.add_box(
-			arm, "Fore", Vector3(0.0, -upper - fore * 0.5, 0.0),
+			elbow, "Fore", Vector3(0.0, -fore * 0.5, 0.0),
 			Vector3(shoulders * 0.17, fore, depth * 0.46), cloth, false, cast_shadow
 		)
+		# A cuff in the skin colour where the sleeve ends, so the hand is not
+		# the only thing separating an arm from a stick.
+		CityKit.add_box(
+			elbow, "Cuff", Vector3(0.0, -fore - h * 0.006, 0.0),
+			Vector3(shoulders * 0.175, h * 0.014, depth * 0.47), skin, false, false
+		)
+		# Slightly wider than the forearm, or a hand does not read at all.
 		CityKit.add_sphere(
-			arm, "Hand", Vector3(0.0, -upper - fore - h * 0.018, 0.0),
-			Vector3(shoulders * 0.20, shoulders * 0.20, shoulders * 0.22), skin
+			elbow, "Hand", Vector3(0.0, -fore - h * 0.026, 0.0),
+			Vector3(shoulders * 0.24, shoulders * 0.26, shoulders * 0.25), skin
 		)
 
 	rig.head = Node3D.new()
