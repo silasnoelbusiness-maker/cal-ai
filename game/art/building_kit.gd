@@ -28,6 +28,10 @@ const PROUD := 0.05
 const SILL_DEPTH := 0.09
 const SILL_OUT := 0.16
 
+## How many of a building's windows are lit after dark. Not all of them: a
+## block where every window comes on at once reads as a switch being thrown.
+const LIT_WINDOW_PERCENT := 58
+
 
 ## A grid of windows on all four faces between two heights.
 ##
@@ -62,7 +66,12 @@ static func add_window_grid(
 	# calls, for geometry that never moves and shares one material. As
 	# MultiMeshes it is fifty draws. The glass is still one shared material, so
 	# the whole district still lights up at dusk for one write.
+	# Two piles of glass: the ones that light up after dark and the ones that
+	# do not. A block where every window comes on at ten at night reads as a
+	# switch being thrown, not as a building people live in — and half the
+	# atmosphere of a night skyline is the dark windows.
 	var panes: Array[Transform3D] = []
+	var dark_panes: Array[Transform3D] = []
 	var surrounds: Array[Transform3D] = []
 	var sills: Array[Transform3D] = []
 
@@ -122,15 +131,38 @@ static func add_window_grid(
 						Vector3(window_width + 0.44, SILL_DEPTH, SILL_OUT) if along_x
 						else Vector3(SILL_OUT, SILL_DEPTH, window_width + 0.44)
 					)
-					panes.append(Transform3D(Basis().scaled(pane), centre))
+					# Deterministic, so the same flat is lit on every run and in
+					# every screenshot. Hashed off the opening's own position
+					# rather than a counter, so inserting a floor does not
+					# reshuffle the whole elevation.
+					var lit := _is_lit(centre)
+					if lit:
+						panes.append(Transform3D(Basis().scaled(pane), centre))
+					else:
+						dark_panes.append(Transform3D(Basis().scaled(pane), centre))
 					surrounds.append(Transform3D(Basis().scaled(surround), frame_centre))
 					sills.append(Transform3D(Basis().scaled(sill), sill_centre))
 
-	if panes.is_empty():
+	if panes.is_empty() and dark_panes.is_empty():
 		return
-	_add_instanced(parent, "%sWindows" % node_name, panes, glass)
+	if not panes.is_empty():
+		_add_instanced(parent, "%sWindows" % node_name, panes, glass)
+	if not dark_panes.is_empty():
+		_add_instanced(parent, "%sDarkWindows" % node_name, dark_panes, Palette.of(&"glass_dark"))
 	_add_instanced(parent, "%sSurrounds" % node_name, surrounds, frame)
 	_add_instanced(parent, "%sSills" % node_name, sills, frame)
+
+
+## Whether this opening is one of the lit ones after dark.
+##
+## A hash of the position rounded to the nearest tenth of a metre. Stable
+## across runs, uncorrelated between neighbours, and free — no random number
+## generator to seed and no per-building state to store.
+static func _is_lit(at: Vector3) -> bool:
+	var key := hash(Vector3i(
+		roundi(at.x * 10.0), roundi(at.y * 10.0), roundi(at.z * 10.0)
+	))
+	return (absi(key) % 100) < LIT_WINDOW_PERCENT
 
 
 ## One MultiMeshInstance3D holding a pile of identically-shaped boxes.

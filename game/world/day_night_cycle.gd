@@ -20,13 +20,15 @@ signal daylight_changed(amount: float)
 @export var night_color: Color = Color(0.435, 0.541, 0.878)
 @export_group("Sky")
 @export var day_sky_energy: float = 1.0
-@export var night_sky_energy: float = 0.10
+@export var night_sky_energy: float = 0.16
 ## Dropping the daytime figure buys shadow contrast, but it was taken too far at
 ## first: 0.35 against a night value of 0.3 left almost no day/night difference
 ## in the fill light, and late afternoon — when the sun is low and the fill is
 ## doing most of the work — went nearly black. The two now sit clearly apart.
 @export var day_ambient_energy: float = 0.52
-@export var night_ambient_energy: float = 0.24
+## Enough that unlit tarmac is dark rather than absent. A road the player
+## cannot see is not atmosphere, it is a hole in the picture.
+@export var night_ambient_energy: float = 0.34
 @export_group("Street Lights")
 ## Street lights switch on once the sun drops below this height (-1..1).
 @export var street_light_threshold: float = 0.08
