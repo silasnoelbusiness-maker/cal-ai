@@ -785,6 +785,32 @@ func _build_body() -> void:
 		Vector3(cabin_w * 0.96, 0.10, cabin_len * float(shape["roof_length"])),
 		body_mat, false
 	)
+	# --- Screens ----------------------------------------------------------
+	# A raked windscreen and rear screen, which is what turns the greenhouse
+	# from a glass box on a body into a car. From the elevated camera the
+	# windscreen is one of the two or three surfaces actually facing the lens,
+	# so a flat vertical end reads as a bus whatever the rest of the shape does.
+	var screen_h: float = data.cabin_height * 0.94
+	var rake: float = float(shape.get("rake", 26.0))
+	for entry in [["Windscreen", -1.0, rake], ["RearScreen", 1.0, -rake * 0.78]]:
+		var sign_z: float = float(entry[1])
+		# Hinged at its bottom edge rather than its middle. Rotating a tall box
+		# about its centre swings the top corner up and out, which put a black
+		# wedge above the roofline of every car in the city.
+		var hinge := Node3D.new()
+		hinge.name = String(entry[0])
+		hinge.position = Vector3(
+			0.0,
+			cabin_y - data.cabin_height * 0.5,
+			cabin_z + sign_z * (cabin_len * 0.5 + 0.02)
+		)
+		hinge.rotation_degrees.x = float(entry[2]) * sign_z
+		_body_root.add_child(hinge)
+		CityKit.add_box(
+			hinge, "Glass", Vector3(0.0, screen_h * 0.5, 0.0),
+			Vector3(cabin_w * 0.94, screen_h, 0.07), glass_mat, false, false
+		)
+
 	for side: float in [-1.0, 1.0]:
 		# B-pillar: splits the side glass into a front and a rear window.
 		CityKit.add_box(
@@ -835,6 +861,24 @@ func _build_body() -> void:
 		)
 	_tail_material = tail_mat
 
+	# --- Wheel arches -----------------------------------------------------
+	# A flare over each wheel. Small, and it is the difference between wheels
+	# bolted to a slab and wheels that belong to the bodywork.
+	var arch_h: float = data.body_height * float(shape.get("arch", 0.28))
+	var axle_z := length * 0.32
+	for front in [true, false]:
+		for side: float in [-1.0, 1.0]:
+			CityKit.add_box(
+				_body_root, "Arch%s%d" % ["F" if front else "R", int(side)],
+				Vector3(
+					side * (width * 0.5 - 0.02),
+					clearance + data.wheel_radius * 0.92,
+					(-axle_z if front else axle_z)
+				),
+				Vector3(0.09, arch_h, data.wheel_radius * 2.5),
+				dark_mat, false, false
+			)
+
 	if data.livery == VehicleData.Livery.POLICE:
 		_build_police_livery(lower_y, cabin_y)
 
@@ -850,37 +894,37 @@ func _profile_shape() -> Dictionary:
 			return {
 				"nose_rise": 0.30, "nose_height": 0.72, "tail_rise": 0.34,
 				"tail_height": 1.06, "cabin_length": 0.62, "roof_length": 1.02,
-				"arch": 0.30,
+				"arch": 0.30, "rake": 14.0,
 			}
 		VehicleData.Profile.SUV:
 			return {
 				"nose_rise": 0.24, "nose_height": 0.80, "tail_rise": 0.26,
 				"tail_height": 0.92, "cabin_length": 0.52, "roof_length": 0.92,
-				"arch": 0.34,
+				"arch": 0.34, "rake": 22.0,
 			}
 		VehicleData.Profile.COUPE:
 			return {
 				"nose_rise": -0.10, "nose_height": 0.56, "tail_rise": -0.06,
 				"tail_height": 0.60, "cabin_length": 0.36, "roof_length": 0.66,
-				"arch": 0.26,
+				"arch": 0.26, "rake": 38.0,
 			}
 		VehicleData.Profile.HATCHBACK:
 			return {
 				"nose_rise": 0.04, "nose_height": 0.66, "tail_rise": 0.16,
 				"tail_height": 0.90, "cabin_length": 0.48, "roof_length": 0.86,
-				"arch": 0.28,
+				"arch": 0.28, "rake": 30.0,
 			}
 		VehicleData.Profile.CRUISER:
 			return {
 				"nose_rise": 0.02, "nose_height": 0.70, "tail_rise": 0.04,
 				"tail_height": 0.72, "cabin_length": 0.46, "roof_length": 0.78,
-				"arch": 0.28,
+				"arch": 0.28, "rake": 24.0,
 			}
 		_:
 			return {
 				"nose_rise": 0.02, "nose_height": 0.68, "tail_rise": 0.04,
 				"tail_height": 0.70, "cabin_length": 0.44, "roof_length": 0.76,
-				"arch": 0.28,
+				"arch": 0.28, "rake": 27.0,
 			}
 
 
