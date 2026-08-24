@@ -43,24 +43,30 @@ static var _cache: Dictionary = {}
 ## four-entry [colour, roughness, metallic, "flat"] for the smooth ones.
 const LIBRARY := {
 	# --- Ground and street ---
+	#
+	# Phase T2 took roughly a fifth of the value out of every pale ground
+	# material. They were authored against a brighter exposure, and once the sun
+	# and the ambient fill were pulled back to stop the city clipping to white,
+	# the pavement was still the brightest thing in every frame — a road with a
+	# snowfield beside it. Paving is grey, not white.
 	&"asphalt": [Color(0.157, 0.163, 0.180), 0.93, 6.0, 1.5, 0.22, 0.0, 2],
 	&"asphalt_worn": [Color(0.196, 0.200, 0.212), 0.95, 4.0, 1.9, 0.30, 0.0, 21],
 	&"road_paint": [Color(0.878, 0.878, 0.847), 0.72, 0.0, 0.0, 0.0, 0.0, 0],
 	&"road_paint_amber": [Color(0.902, 0.741, 0.298), 0.72, 0.0, 0.0, 0.0, 0.0, 0],
-	&"sidewalk": [Color(0.529, 0.529, 0.514), 0.90, 1.2, 0.9, 0.14, 0.0, 3],
-	&"sidewalk_fine": [Color(0.573, 0.573, 0.561), 0.86, 0.9, 0.7, 0.10, 0.0, 31],
-	&"kerb": [Color(0.686, 0.682, 0.663), 0.84, 2.0, 0.5, 0.08, 0.0, 32],
-	&"paving_stone": [Color(0.596, 0.584, 0.549), 0.82, 1.1, 1.0, 0.16, 0.0, 8],
+	&"sidewalk": [Color(0.436, 0.438, 0.428), 0.90, 1.2, 0.9, 0.14, 0.0, 3],
+	&"sidewalk_fine": [Color(0.472, 0.474, 0.466), 0.86, 0.9, 0.7, 0.10, 0.0, 31],
+	&"kerb": [Color(0.560, 0.558, 0.545), 0.84, 2.0, 0.5, 0.08, 0.0, 32],
+	&"paving_stone": [Color(0.498, 0.489, 0.462), 0.82, 1.1, 1.0, 0.16, 0.0, 8],
 	&"gravel": [Color(0.451, 0.443, 0.416), 0.96, 0.7, 2.0, 0.34, 0.0, 33],
 
 	# --- Walls ---
 	&"brick_warm": [Color(0.510, 0.322, 0.267), 0.90, 0.9, 1.4, 0.22, 0.0, 6],
 	&"brick_dark": [Color(0.376, 0.263, 0.239), 0.92, 0.9, 1.4, 0.24, 0.0, 34],
-	&"render_pale": [Color(0.769, 0.749, 0.706), 0.84, 2.5, 0.6, 0.12, 0.0, 35],
+	&"render_pale": [Color(0.678, 0.662, 0.626), 0.84, 2.5, 0.6, 0.12, 0.0, 35],
 	&"render_warm": [Color(0.757, 0.671, 0.573), 0.86, 2.5, 0.6, 0.13, 0.0, 36],
 	&"concrete": [Color(0.588, 0.596, 0.608), 0.86, 3.0, 0.7, 0.14, 0.0, 8],
 	&"concrete_dark": [Color(0.400, 0.412, 0.435), 0.88, 3.0, 0.7, 0.15, 0.0, 37],
-	&"stone_trim": [Color(0.729, 0.714, 0.678), 0.80, 2.0, 0.5, 0.09, 0.0, 38],
+	&"stone_trim": [Color(0.622, 0.610, 0.582), 0.80, 2.0, 0.5, 0.09, 0.0, 38],
 	&"panel_teal": [Color(0.243, 0.353, 0.365), 0.82, 2.0, 0.4, 0.10, 0.0, 39],
 	&"panel_navy": [Color(0.180, 0.220, 0.298), 0.80, 2.0, 0.4, 0.10, 0.0, 40],
 	&"panel_sand": [Color(0.741, 0.663, 0.510), 0.84, 2.0, 0.4, 0.10, 0.0, 41],

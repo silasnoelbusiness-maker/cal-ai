@@ -13,7 +13,10 @@ signal daylight_changed(amount: float)
 
 @export var environment_path: NodePath
 @export_group("Sun")
-@export var day_energy: float = 1.25
+## Pulled back in Phase T2. At 1.25 with the ambient fill behind it, every pale
+## surface in the city — and the pavement is pale — clipped to flat white, and a
+## white wall that shows no shape, shadow or material is the §100 test failing.
+@export var day_energy: float = 1.02
 @export var night_energy: float = 0.14
 @export var day_color: Color = Color(1.0, 0.965, 0.898)
 @export var golden_color: Color = Color(1.0, 0.72, 0.45)
@@ -25,7 +28,10 @@ signal daylight_changed(amount: float)
 ## first: 0.35 against a night value of 0.3 left almost no day/night difference
 ## in the fill light, and late afternoon — when the sun is low and the fill is
 ## doing most of the work — went nearly black. The two now sit clearly apart.
-@export var day_ambient_energy: float = 0.52
+## Less fill, so shadows are shadows. Most of the washed-out look was here
+## rather than in the sun: ambient light has no direction, so raising it flattens
+## everything at once.
+@export var day_ambient_energy: float = 0.38
 ## Enough that unlit tarmac is dark rather than absent. A road the player
 ## cannot see is not atmosphere, it is a hole in the picture.
 @export var night_ambient_energy: float = 0.34

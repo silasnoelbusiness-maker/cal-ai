@@ -218,7 +218,7 @@ func _build_palette() -> void:
 		"ground": CityKit.make_surface(Color(0.286, 0.294, 0.306), 0.6),
 		"asphalt": CityKit.make_surface(Color(0.176, 0.180, 0.196), 0.9),
 		"paving": CityKit.make_surface(Color(0.541, 0.541, 0.529), 0.78, 1.1, 0.8, 0.13, 0.0, 3),
-		"plaza": CityKit.make_surface(Color(0.596, 0.580, 0.545), 0.80, 1.2, 1.0, 0.16, 0.0, 8),
+		"plaza": CityKit.make_surface(Color(0.498, 0.486, 0.458), 0.80, 1.2, 1.0, 0.16, 0.0, 8),
 		"marking": CityKit.make_material(Color(0.878, 0.878, 0.855)),
 		"kerb": CityKit.make_material(Color(0.545, 0.545, 0.537)),
 		"glass": CityKit.make_material(Color(0.243, 0.290, 0.337), 0.25, 0.4),
