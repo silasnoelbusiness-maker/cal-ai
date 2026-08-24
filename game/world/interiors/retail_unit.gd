@@ -262,6 +262,7 @@ func _redress_if_style_changed() -> void:
 	_build_shell()
 	_build_lighting()
 	_build_signage()
+	_build_fittings()
 	_refresh_signage()
 	_style_built = _style_id()
 
@@ -539,6 +540,303 @@ func _mat(key: String) -> StandardMaterial3D:
 ## Which way a unit is dressed. A shop and a cafe are the same room with
 ## different floors, walls and light, which is exactly what separates them in
 ## real life — and it means one interior serves both without a second scene.
+## The fittings that belong to the room rather than to the business.
+##
+## A convenience store is not an empty box with the player's shelves standing in
+## it: it has wall shelving all the way round, a chiller run, signage over the
+## aisles and a stockroom door. None of that is equipment the player buys — it
+## is the shop — so it is built with the shell and stays whatever the player
+## does with the floor.
+##
+## Everything here is non-solid and sits within half a metre of a wall, so the
+## walkable floor the customers, staff and player use is exactly what it was.
+func _build_fittings() -> void:
+	var old := get_node_or_null("Fittings")
+	if old != null:
+		old.name = "FittingsOld"
+		old.queue_free()
+	var holder := Node3D.new()
+	holder.name = "Fittings"
+	add_child(holder)
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(property_id)
+	match _style_id():
+		&"convenience_store":
+			_fit_shop(holder, rng)
+		&"coffee_shop":
+			_fit_cafe(holder, rng)
+		&"restaurant":
+			_fit_restaurant(holder, rng)
+	# Nothing for the other styles yet; they keep the plain shell.
+
+
+## Wall shelving down both long walls, a chiller run on the back wall, and
+## category signs over each. The single biggest thing that makes the room read
+## as a shop from the door.
+func _fit_shop(holder: Node3D, rng: RandomNumberGenerator) -> void:
+	var shelf_mat := Palette.of(&"metal_mid")
+	var back_mat := Palette.of(&"metal_dark")
+	var left := room.position.x + 0.42
+	var right := room.end.x - 0.42
+	# Which wall is the back is not something to reason about from the sign of a
+	# coordinate — it is wherever the door is not. The threshold marker knows,
+	# so ask it.
+	var door_z := room.end.y - 0.6
+	var threshold := get_node_or_null("Threshold") as Marker3D
+	if threshold != null:
+		door_z = threshold.position.z
+	# The chillers take the left wall's far half — a back wall in this shell is
+	# mostly stockroom partition, and the side walls are where the depth is.
+
+
+	# Two side runs. Stopped short of the front wall so the doorway and the
+	# window frontage stay clear.
+	# Only the two walls that are certainly shop floor.
+	#
+	# The right-hand wall was tried and kept producing bays through the shell.
+	# This shell has a stockroom partition in it and the right wall of `room` is
+	# not always the right wall of the shop — reasoning about that from a Rect2
+	# is exactly the kind of thing that produces geometry in the street. Two
+	# good walls of shelving are worth more than three with one broken, and the
+	# limitation is written down rather than shipped.
+
+	# The back wall, behind the till line: ordinary bays turned to face the room.
+	var back_z := room.position.y + 0.42
+	var wall_from := room.position.x + 1.6
+	var wall_to := room.end.x - 1.6
+	# The chillers take the first third of the wall, so the ordinary bays start
+	# past them.
+	var wall_bays := maxi(int((wall_to - wall_from) * 0.62 / 2.3), 1)
+	for i in wall_bays:
+		var bx := wall_from + (wall_to - wall_from) * (0.38 + 0.62 * (float(i) + 0.5) / float(wall_bays))
+		_wall_unit(
+			holder, "BackBay%d" % i, _inside(Vector3(bx, 0.0, back_z)), 2.1,
+			shelf_mat, back_mat, rng, [&"household", &"snacks"][i % 2]
+		)
+
+	# Chillers take one end of the same back wall.
+	#
+	# Not a wall of their own: `room` is the shell's rectangle and the shop
+	# floor inside it is not the same rectangle — there is a stockroom partition
+	# — so a fitting placed off `room.position.x` can land in the street. The
+	# back wall is the one run that is certainly shop floor, so everything goes
+	# on it.
+	for i in 2:
+		var cx := wall_from + (wall_to - wall_from) * (0.08 + float(i) * 0.17)
+		_wall_unit(
+			holder, "Chiller%d" % i, _inside(Vector3(cx, 0.0, back_z)), 1.7,
+			shelf_mat, back_mat, rng, &"chilled", true
+		)
+
+	# Signs over the wall they name, on the one axis that is reliably shop floor.
+	_aisle_sign(
+		holder, "SignChilled",
+		_inside(Vector3(wall_from + (wall_to - wall_from) * 0.17, 2.55, back_z + 0.9)),
+		"CHILLED"
+	)
+	_aisle_sign(
+		holder, "SignGoods",
+		_inside(Vector3(wall_from + (wall_to - wall_from) * 0.70, 2.55, back_z + 0.9)),
+		"GROCERY"
+	)
+
+
+## Pulls a point inside the room, whatever size the room turns out to be.
+##
+## Every fitting goes through this. The shell's dimensions are an export and a
+## unit can be any size, so a fitting placed by arithmetic off `room` can end up
+## through a wall — which is exactly what happened, twice, before this existed.
+func _inside(at: Vector3) -> Vector3:
+	var margin := 0.40
+	return Vector3(
+		clampf(at.x, room.position.x + margin, room.end.x - margin),
+		at.y,
+		clampf(at.z, room.position.y + margin, room.end.y - margin)
+	)
+
+
+## One bay of wall shelving: an upright frame, four shelves, and stock on them.
+func _wall_unit(
+	holder: Node3D, unit_name: String, at: Vector3, width: float,
+	frame: StandardMaterial3D, back: StandardMaterial3D,
+	rng: RandomNumberGenerator, goods: StringName, chilled: bool = false
+) -> void:
+	var bay := Node3D.new()
+	bay.name = unit_name
+	bay.position = at
+	# Turned to face the middle of the room rather than to a hand-worked angle.
+	# The first attempt reasoned about which way +Z points on which wall, got it
+	# backwards, and gave the shop two runs of shelving with their backs to the
+	# customers.
+	var to_centre := Vector3(room.get_center().x, 0.0, room.get_center().y) - at
+	bay.rotation.y = atan2(to_centre.x, to_centre.z)
+	holder.add_child(bay)
+
+	CityKit.add_box(
+		bay, "Back", Vector3(0.0, 1.05, -0.22), Vector3(width, 2.10, 0.06),
+		back, false, false
+	)
+	for side: float in [-1.0, 1.0]:
+		CityKit.add_box(
+			bay, "Upright%d" % int(side), Vector3(side * width * 0.5, 1.05, -0.02),
+			Vector3(0.06, 2.10, 0.44), frame, false, false
+		)
+	# Four shelves with a lip, and stock standing on each.
+	for level in 4:
+		var y := 0.34 + float(level) * 0.52
+		CityKit.add_box(
+			bay, "Shelf%d" % level, Vector3(0.0, y, 0.0),
+			Vector3(width - 0.06, 0.045, 0.42), frame, false, false
+		)
+		CityKit.add_box(
+			bay, "Lip%d" % level, Vector3(0.0, y + 0.05, 0.19),
+			Vector3(width - 0.06, 0.06, 0.03), frame, false, false
+		)
+		PropKit.goods_row(
+			bay, "Goods%d" % level, Vector3(0.0, y + 0.03, 0.0),
+			width - 0.30, goods, rng
+		)
+	if not chilled:
+		return
+	# Glass doors, a mullion and a cold strip inside. The lit interior is what
+	# makes a cabinet read as chilled rather than as another dark cupboard.
+	for side: float in [-1.0, 1.0]:
+		CityKit.add_box(
+			bay, "Glass%d" % int(side), Vector3(side * width * 0.25, 1.06, 0.24),
+			Vector3(width * 0.46, 1.94, 0.04), Palette.of(&"glass_shop"), false, false
+		)
+	CityKit.add_box(
+		bay, "Mullion", Vector3(0.0, 1.06, 0.26), Vector3(0.05, 1.98, 0.05),
+		Palette.of(&"metal_pale"), false, false
+	)
+	CityKit.add_box(
+		bay, "ColdLight", Vector3(0.0, 2.02, 0.06), Vector3(width - 0.18, 0.05, 0.34),
+		Palette.glow(Color(0.784, 0.898, 0.988), 1.1), false, false
+	)
+
+
+## A hanging aisle sign. Fictional category words, in the shop's own colour.
+func _aisle_sign(
+	holder: Node3D, sign_name: String, at: Vector3, text: String
+) -> void:
+	var board := Node3D.new()
+	board.name = sign_name
+	board.position = at
+	holder.add_child(board)
+	CityKit.add_box(
+		board, "Panel", Vector3.ZERO, Vector3(1.6, 0.34, 0.05),
+		Palette.of(&"panel_navy"), false, false
+	)
+	CityKit.add_box(
+		board, "Face", Vector3(0.0, 0.0, -0.03), Vector3(1.44, 0.20, 0.02),
+		Palette.glow(Color(0.902, 0.925, 0.949), 0.5), false, false
+	)
+	for side: float in [-1.0, 1.0]:
+		CityKit.add_cylinder(
+			board, "Hanger%d" % int(side), Vector3(side * 0.6, 0.32, 0.0),
+			0.014, 0.62, Palette.of(&"metal_mid"), false
+		)
+
+
+func _fit_cafe(holder: Node3D, rng: RandomNumberGenerator) -> void:
+	# A back bar with a machine on it, cups on a shelf above, and a menu board.
+	var back := room.position.y + 0.5
+	var centre := room.get_center().x
+	CityKit.add_box(
+		holder, "BackBar", Vector3(centre, 0.46, back), Vector3(4.6, 0.92, 0.62),
+		Palette.of(&"wood_dark"), false, false
+	)
+	CityKit.add_box(
+		holder, "BarTop", Vector3(centre, 0.94, back), Vector3(4.8, 0.06, 0.70),
+		Palette.of(&"counter_top"), false, false
+	)
+	# The machine: a body, two group heads and a hopper.
+	CityKit.add_box(
+		holder, "Machine", Vector3(centre - 0.9, 1.24, back), Vector3(1.10, 0.54, 0.52),
+		Palette.of(&"metal_pale"), false, false
+	)
+	for i in 2:
+		CityKit.add_cylinder(
+			holder, "Group%d" % i,
+			Vector3(centre - 1.15 + float(i) * 0.5, 1.02, back + 0.24),
+			0.05, 0.18, Palette.of(&"metal_mid"), false
+		)
+	CityKit.add_cylinder(
+		holder, "Hopper", Vector3(centre + 0.2, 1.34, back), 0.14, 0.44,
+		Palette.of(&"metal_dark"), false
+	)
+	for level in 2:
+		var y := 1.85 + float(level) * 0.42
+		CityKit.add_box(
+			holder, "CupShelf%d" % level, Vector3(centre, y, back - 0.10),
+			Vector3(3.4, 0.04, 0.30), Palette.of(&"wood_pale"), false, false
+		)
+		PropKit.goods_row(
+			holder, "Cups%d" % level, Vector3(centre, y + 0.02, back - 0.10),
+			3.0, &"chilled", rng
+		)
+	CityKit.add_box(
+		holder, "Menu", Vector3(centre + 1.9, 2.30, back - 0.02), Vector3(1.5, 0.90, 0.04),
+		Palette.of(&"wall_slate"), false, false
+	)
+
+
+func _fit_restaurant(holder: Node3D, rng: RandomNumberGenerator) -> void:
+	# The kitchen line along the back wall: a pass, a range, a prep counter and
+	# a tall fridge, with a shelf of stock above the prep.
+	var back := room.position.y + 0.55
+	var left := room.position.x + 1.1
+	CityKit.add_box(
+		holder, "Pass", Vector3(room.get_center().x, 0.52, back + 0.30),
+		Vector3(3.2, 1.04, 0.60), Palette.of(&"metal_mid"), false, false
+	)
+	CityKit.add_box(
+		holder, "PassLamp", Vector3(room.get_center().x, 1.72, back + 0.30),
+		Vector3(3.0, 0.08, 0.30), Palette.glow(Color(1.0, 0.855, 0.588), 1.4), false, false
+	)
+	CityKit.add_box(
+		holder, "Range", Vector3(left + 1.0, 0.46, back), Vector3(1.9, 0.92, 0.72),
+		Palette.of(&"metal_dark"), false, false
+	)
+	for i in 4:
+		CityKit.add_cylinder(
+			holder, "Burner%d" % i,
+			Vector3(left + 0.42 + float(i % 2) * 0.62, 0.94, back - 0.16 + float(i / 2) * 0.32),
+			0.13, 0.03, Palette.of(&"metal_dark"), false
+		)
+	CityKit.add_box(
+		holder, "Extractor", Vector3(left + 1.0, 2.30, back - 0.05),
+		Vector3(2.1, 0.50, 0.90), Palette.of(&"metal_pale"), false, false
+	)
+	CityKit.add_box(
+		holder, "Prep", Vector3(room.end.x - 2.0, 0.46, back), Vector3(2.2, 0.92, 0.70),
+		Palette.of(&"metal_mid"), false, false
+	)
+	CityKit.add_box(
+		holder, "PrepTop", Vector3(room.end.x - 2.0, 0.94, back), Vector3(2.3, 0.05, 0.76),
+		Palette.of(&"metal_pale"), false, false
+	)
+	for level in 2:
+		var y := 1.60 + float(level) * 0.44
+		CityKit.add_box(
+			holder, "KitShelf%d" % level, Vector3(room.end.x - 2.0, y, back - 0.14),
+			Vector3(2.0, 0.04, 0.32), Palette.of(&"metal_mid"), false, false
+		)
+		PropKit.goods_row(
+			holder, "KitStock%d" % level, Vector3(room.end.x - 2.0, y + 0.02, back - 0.14),
+			1.7, &"household", rng
+		)
+	CityKit.add_box(
+		holder, "Fridge", Vector3(room.end.x - 0.6, 1.05, back + 1.6),
+		Vector3(0.86, 2.10, 0.78), Palette.of(&"metal_pale"), false, false
+	)
+	CityKit.add_box(
+		holder, "FridgeSeam", Vector3(room.end.x - 0.6, 1.05, back + 1.99),
+		Vector3(0.03, 1.94, 0.03), Palette.of(&"metal_dark"), false, false
+	)
+
+
 func _style_id() -> StringName:
 	if _business != null:
 		return _business.type_id
