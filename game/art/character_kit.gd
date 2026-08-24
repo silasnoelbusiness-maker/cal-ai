@@ -260,6 +260,44 @@ static func _add_hair(
 				Vector3(head_size * 0.84, head_size * 0.30, head_size * 0.88),
 				hair_mat, false, cast_shadow
 			)
+		CharacterLook.HairStyle.MEDIUM:
+			# Down to the jaw. A cap over the skull plus a shorter box behind
+			# it, which from above is the difference between this and a crop.
+			CityKit.add_box(
+				head, "Hair", Vector3(0.0, head_size * 0.30, 0.02),
+				Vector3(head_size * 0.90, head_size * 0.44, head_size * 0.92),
+				hair_mat, false, cast_shadow
+			)
+			CityKit.add_box(
+				head, "HairBack", Vector3(0.0, -head_size * 0.06, head_size * 0.34),
+				Vector3(head_size * 0.80, head_size * 0.52, head_size * 0.26),
+				hair_mat, false, cast_shadow
+			)
+		CharacterLook.HairStyle.LONG:
+			CityKit.add_box(
+				head, "Hair", Vector3(0.0, head_size * 0.30, 0.02),
+				Vector3(head_size * 0.92, head_size * 0.44, head_size * 0.94),
+				hair_mat, false, cast_shadow
+			)
+			# Past the shoulders. Built on the head rather than the chest so it
+			# turns with the look rather than lagging behind it.
+			CityKit.add_box(
+				head, "HairFall", Vector3(0.0, -head_size * 0.52, head_size * 0.32),
+				Vector3(head_size * 0.84, head_size * 1.10, head_size * 0.30),
+				hair_mat, false, cast_shadow
+			)
+		CharacterLook.HairStyle.TIED:
+			CityKit.add_box(
+				head, "Hair", Vector3(0.0, head_size * 0.34, 0.0),
+				Vector3(head_size * 0.86, head_size * 0.36, head_size * 0.90),
+				hair_mat, false, cast_shadow
+			)
+			# A tail down the back rather than a bun on top.
+			CityKit.add_box(
+				head, "Tail", Vector3(0.0, -head_size * 0.24, head_size * 0.52),
+				Vector3(head_size * 0.26, head_size * 0.78, head_size * 0.22),
+				hair_mat, false, cast_shadow
+			)
 		_:
 			CityKit.add_box(
 				head, "Hair", Vector3(0.0, head_size * 0.32, 0.02),
@@ -294,11 +332,98 @@ static func add_uniform(rig: Rig, look: CharacterLook) -> void:
 				rig.hips, "Belt", Vector3(0.0, h * 0.015, 0.0),
 				Vector3(shoulders * 0.80, h * 0.030, depth * 1.10), belt, false, false
 			)
-		CharacterLook.Category.RETAIL:
-			var apron := Palette.tinted(&"cloth", look.accent)
+		CharacterLook.Category.RETAIL, CharacterLook.Category.SERVICE:
+			_add_apron(rig, look, shoulders, depth, h)
+		CharacterLook.Category.RESTAURANT:
+			# Apron, and the hat that makes a cook a cook at forty pixels.
+			_add_apron(rig, look, shoulders, depth, h)
+			var white := Palette.tinted(&"cloth", Color(0.949, 0.945, 0.925))
 			CityKit.add_box(
-				rig.chest, "Apron", Vector3(0.0, -h * 0.03, -depth * 0.54),
-				Vector3(shoulders * 0.70, h * 0.20, h * 0.008), apron, false, false
+				rig.head, "Toque", Vector3(0.0, h * 0.072, 0.0),
+				Vector3(h * 0.082, h * 0.058, h * 0.086), white, false, false
+			)
+		CharacterLook.Category.WORKER, CharacterLook.Category.DELIVERY:
+			# A hi-vis tabard: the accent colour, over the shoulders and down
+			# the chest, which is the whole of how a working figure reads from
+			# above at any distance.
+			var vis := Palette.tinted(&"cloth", look.accent)
+			CityKit.add_box(
+				rig.chest, "HiVis", Vector3(0.0, -h * 0.012, 0.0),
+				Vector3(shoulders * 1.04, h * 0.15, depth * 1.10), vis, false, false
+			)
+			CityKit.add_box(
+				rig.chest, "VisBand", Vector3(0.0, h * 0.028, 0.0),
+				Vector3(shoulders * 1.05, h * 0.016, depth * 1.11),
+				Palette.tinted(&"metal_pale", Color(0.898, 0.925, 0.949)), false, false
+			)
+		CharacterLook.Category.GYM:
+			# A staff stripe down the side of the top rather than a whole
+			# garment: a gym receptionist is not in uniform, they are in a
+			# branded shirt.
+			var stripe := Palette.tinted(&"cloth", look.accent)
+			for side: float in [-1.0, 1.0]:
+				CityKit.add_box(
+					rig.chest, "Stripe%d" % int(side),
+					Vector3(side * shoulders * 0.40, 0.0, -depth * 0.52),
+					Vector3(shoulders * 0.10, h * 0.16, h * 0.006), stripe, false, false
+				)
+		CharacterLook.Category.NIGHTLIFE:
+			# Jacket lapels and an earpiece. Dark on dark, so what carries is
+			# the shape of the shoulders rather than any colour.
+			var lapel := Palette.tinted(&"cloth", look.accent)
+			for side: float in [-1.0, 1.0]:
+				CityKit.add_box(
+					rig.chest, "Lapel%d" % int(side),
+					Vector3(side * shoulders * 0.18, h * 0.008, -depth * 0.53),
+					Vector3(shoulders * 0.16, h * 0.11, h * 0.006), lapel, false, false
+				)
+			CityKit.add_sphere(
+				rig.head, "Earpiece", Vector3(h * 0.042, -h * 0.004, 0.0),
+				Vector3(h * 0.014, h * 0.014, h * 0.014),
+				Palette.tinted(&"leather", Color(0.114, 0.118, 0.129))
+			)
+		CharacterLook.Category.MANAGER:
+			# A jacket over the shirt: shoulders a shade wider and a collar in
+			# the accent, which is enough for "in charge" from this camera.
+			var jacket := Palette.tinted(&"cloth", look.top.darkened(0.18))
+			CityKit.add_box(
+				rig.chest, "Jacket", Vector3(0.0, -h * 0.006, 0.0),
+				Vector3(shoulders * 1.06, h * 0.14, depth * 1.08), jacket, false, false
+			)
+			CityKit.add_box(
+				rig.chest, "Tie", Vector3(0.0, h * 0.006, -depth * 0.56),
+				Vector3(shoulders * 0.08, h * 0.10, h * 0.006),
+				Palette.tinted(&"cloth", look.accent), false, false
+			)
+		CharacterLook.Category.CONTACT:
+			# A long coat, and nothing else. Somebody who does not want to be
+			# looked at twice — no costume, no stereotype, just a silhouette
+			# that is taller and squarer than the crowd around it.
+			var coat := Palette.tinted(&"cloth", look.top)
+			CityKit.add_box(
+				rig.chest, "Coat", Vector3(0.0, -h * 0.030, 0.0),
+				Vector3(shoulders * 1.08, h * 0.19, depth * 1.12), coat, false, false
+			)
+			CityKit.add_box(
+				rig.hips, "CoatSkirt", Vector3(0.0, -h * 0.075, 0.0),
+				Vector3(shoulders * 0.92, h * 0.15, depth * 1.02), coat, false, false
 			)
 		_:
 			pass
+
+
+## The shared apron. Retail, service and kitchen staff all wear one; only the
+## colour and what goes on top of it differ.
+static func _add_apron(
+	rig: Rig, look: CharacterLook, shoulders: float, depth: float, h: float
+) -> void:
+	var apron := Palette.tinted(&"cloth", look.accent)
+	CityKit.add_box(
+		rig.chest, "Apron", Vector3(0.0, -h * 0.03, -depth * 0.54),
+		Vector3(shoulders * 0.70, h * 0.20, h * 0.008), apron, false, false
+	)
+	# Down over the hips as well, or an apron is a bib.
+	CityKit.add_box(
+		rig.hips, "ApronSkirt", Vector3(0.0, -h * 0.055, -depth * 0.52),
+		Vector3(shoulders * 0.64, h * 0.13, h * 0.008), apron, false, false
+	)

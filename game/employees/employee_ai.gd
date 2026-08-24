@@ -49,10 +49,34 @@ func setup(worker: EmployeeData, unit: RetailUnit, entry: Vector3, exit_point: V
 	# Restyled rather than tinted: staff are built before they are told which
 	# role they are working, and a barista and a stocker are different uniforms
 	# rather than the same figure in a different colour.
-	restyle(_colour_for_role(), Color(0.918, 0.906, 0.878), CharacterLook.Category.RETAIL)
+	restyle(_colour_for_role(), Color(0.918, 0.906, 0.878), _category_for_role())
 	global_position = entry
 	_refresh_station()
 	_go_to(_approach)
+
+
+## What a member of staff is wearing, which is not the same question as what
+## colour they are. A cook in a kitchen white with a hat and a bouncer in a dark
+## jacket are two different figures; before Phase T they were the same shop
+## assistant painted differently.
+func _category_for_role() -> CharacterLook.Category:
+	if employee == null:
+		return CharacterLook.Category.RETAIL
+	match employee.role:
+		EmployeeData.Role.COOK:
+			return CharacterLook.Category.RESTAURANT
+		EmployeeData.Role.SERVER, EmployeeData.Role.BARISTA:
+			return CharacterLook.Category.SERVICE
+		EmployeeData.Role.MANAGER:
+			return CharacterLook.Category.MANAGER
+		EmployeeData.Role.STOCKER, EmployeeData.Role.CLEANER:
+			return CharacterLook.Category.WORKER
+		EmployeeData.Role.RECEPTIONIST:
+			return CharacterLook.Category.GYM
+		EmployeeData.Role.SECURITY, EmployeeData.Role.BARTENDER, \
+		EmployeeData.Role.ENTERTAINER:
+			return CharacterLook.Category.NIGHTLIFE
+	return CharacterLook.Category.RETAIL
 
 
 ## Staff are told apart at a glance: the till, the machine, the floor, the boss.

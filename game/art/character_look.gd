@@ -6,9 +6,18 @@ extends RefCounted
 ## of these and one builder, so a new kind of NPC is an entry in `for_category`
 ## instead of a model, and the whole city can be re-dressed by editing this file.
 
-enum Category { CIVILIAN, OFFICE, RETAIL, POLICE, PLAYER }
+## Appended to, never reordered — a look is stored as an integer in saves and
+## in the crowd. Phase T added the eight after PLAYER, so that a cook, a
+## bouncer and a fence are told apart by what they are wearing rather than by
+## being the same shop assistant in a different colour.
+enum Category {
+	CIVILIAN, OFFICE, RETAIL, POLICE, PLAYER,
+	WORKER, SERVICE, RESTAURANT, GYM, NIGHTLIFE, DELIVERY, MANAGER, CONTACT,
+}
 enum Build { SLIM, AVERAGE, HEAVY }
-enum HairStyle { SHORT, CROP, BUN, CAP, BALD }
+## MEDIUM, LONG and TIED are Phase T. A crowd where everybody has the same
+## three haircuts reads as clones however varied the clothing is.
+enum HairStyle { SHORT, CROP, BUN, CAP, BALD, MEDIUM, LONG, TIED }
 
 var category: Category = Category.CIVILIAN
 var build: Build = Build.AVERAGE
@@ -77,8 +86,10 @@ static func random(rng: RandomNumberGenerator, of_category: Category = Category.
 	look.shoes = SHOE_TONES[rng.randi_range(0, SHOE_TONES.size() - 1)]
 	look.legs = LEG_TONES[rng.randi_range(0, LEG_TONES.size() - 1)]
 	look.hair_style = [
-		HairStyle.SHORT, HairStyle.SHORT, HairStyle.CROP, HairStyle.BUN, HairStyle.BALD
-	][rng.randi_range(0, 4)]
+		HairStyle.SHORT, HairStyle.SHORT, HairStyle.CROP, HairStyle.BUN,
+		HairStyle.BALD, HairStyle.MEDIUM, HairStyle.MEDIUM, HairStyle.LONG,
+		HairStyle.TIED,
+	][rng.randi_range(0, 8)]
 
 	match of_category:
 		Category.OFFICE:
@@ -98,6 +109,51 @@ static func random(rng: RandomNumberGenerator, of_category: Category = Category.
 			look.legs = Color(0.106, 0.129, 0.180)
 			look.shoes = Color(0.098, 0.102, 0.114)
 			look.hair_style = HairStyle.CAP
+		Category.WORKER:
+			# Workwear and a hi-vis over it. The vest is the accent, so the
+			# uniform builder can paint it without a second field.
+			look.top = Color(0.310, 0.333, 0.376)
+			look.accent = Color(0.933, 0.729, 0.176)
+			look.legs = Color(0.208, 0.239, 0.290)
+			look.shoes = Color(0.129, 0.118, 0.106)
+		Category.SERVICE:
+			look.top = Color(0.400, 0.451, 0.510)
+			look.accent = Color(0.918, 0.906, 0.878)
+			look.legs = Color(0.224, 0.235, 0.263)
+		Category.RESTAURANT:
+			# Kitchen whites, with the apron in the accent.
+			look.top = Color(0.906, 0.898, 0.867)
+			look.accent = Color(0.867, 0.847, 0.804)
+			look.legs = Color(0.278, 0.290, 0.318)
+			look.shoes = Color(0.161, 0.165, 0.176)
+		Category.GYM:
+			look.top = Color(0.192, 0.263, 0.310)
+			look.accent = Color(0.400, 0.780, 0.671)
+			look.legs = Color(0.169, 0.184, 0.212)
+		Category.NIGHTLIFE:
+			# Dark and formal. A bouncer reads by silhouette and value, not by
+			# anything written on them.
+			look.top = Color(0.106, 0.114, 0.129)
+			look.accent = Color(0.196, 0.204, 0.227)
+			look.legs = Color(0.098, 0.102, 0.114)
+			look.shoes = Color(0.078, 0.082, 0.090)
+		Category.DELIVERY:
+			look.top = Color(0.243, 0.365, 0.451)
+			look.accent = Color(0.949, 0.612, 0.239)
+			look.legs = Color(0.204, 0.216, 0.247)
+			look.hair_style = HairStyle.CAP
+		Category.MANAGER:
+			look.top = Color(0.216, 0.235, 0.298)
+			look.accent = Color(0.694, 0.616, 0.482)
+			look.legs = Color(0.184, 0.196, 0.239)
+			look.shoes = Color(0.114, 0.118, 0.129)
+		Category.CONTACT:
+			# Not a costume. Somebody who does not want to be looked at twice:
+			# a long dark coat and nothing bright anywhere on them.
+			look.top = Color(0.192, 0.180, 0.176)
+			look.accent = Color(0.271, 0.251, 0.239)
+			look.legs = Color(0.161, 0.157, 0.161)
+			look.shoes = Color(0.106, 0.102, 0.102)
 		_:
 			look.top = CASUAL_TOPS[rng.randi_range(0, CASUAL_TOPS.size() - 1)]
 			look.accent = look.top.lightened(0.22)

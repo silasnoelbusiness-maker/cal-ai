@@ -12,11 +12,42 @@ extends Interactable
 ## Which contact this is the door of.
 @export var contact_id: StringName = &"quayside_fence"
 
+var _figure_rig: CharacterKit.Rig = null
+
 
 func _ready() -> void:
 	add_to_group(&"criminal_contact")
 	focus_priority = 3
+	_build_figure()
 	_refresh()
+
+
+## Somebody actually standing there.
+##
+## Until Phase T these three addresses were doors with nobody behind them, which
+## is why the underworld read as a menu rather than as a place. This is a
+## figure, not a pedestrian: no navigation, no physics, no place in the crowd
+## pool — they are furniture that happens to be a person, and they never move.
+##
+## The look is the CONTACT wardrobe: a long dark coat and nothing bright. Not a
+## costume and not a stereotype — somebody who does not want to be looked at
+## twice.
+func _build_figure() -> void:
+	var pivot := Node3D.new()
+	pivot.name = "Figure"
+	# Beside the door rather than in it, and turned to face the street.
+	pivot.position = Vector3(1.25, -1.10, 0.35)
+	pivot.rotation_degrees.y = 180.0
+	add_child(pivot)
+
+	var rng := RandomNumberGenerator.new()
+	# Seeded off the contact's own id, so the same person is standing there in
+	# every session and every screenshot.
+	rng.seed = hash(contact_id)
+	var look := CharacterLook.random(rng, CharacterLook.Category.CONTACT)
+	var rig := CharacterKit.build(pivot, look, true)
+	CharacterKit.add_uniform(rig, look)
+	_figure_rig = rig
 
 
 func contact() -> CriminalContactData:
