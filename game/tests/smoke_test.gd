@@ -2079,7 +2079,12 @@ func _test_civilian_witness() -> void:
 		]
 	)
 	_check(record.get("reporting_witness") == civilian, "the record names who saw it")
-	_check(civilian.state == Pedestrian.State.WITNESSING, "the witness stops and stares")
+	_check(
+		civilian.state == Pedestrian.State.WITNESSING,
+		"the witness stops and stares (state %d, want %d)" % [
+			civilian.state, Pedestrian.State.WITNESSING
+		]
+	)
 	_check(WantedManager.level == 0, "no heat yet — they have not called it in")
 
 	# Report delay, plus a margin.
@@ -2630,10 +2635,21 @@ func _check(condition: bool, description: String) -> void:
 ## frames quietly starts failing when the world gets bigger.
 func _wait_until(condition: Callable, timeout_seconds: float, description: String) -> bool:
 	var deadline := Time.get_ticks_msec() + int(timeout_seconds * 1000.0)
-	while Time.get_ticks_msec() < deadline:
+	# Also counted in physics frames, not only in wall-clock seconds.
+	#
+	# A real-time deadline makes every check that uses it load-sensitive: Phase
+	# T added geometry, the build got heavier, and the same six seconds bought
+	# noticeably fewer simulation steps — so tests that had passed for eight
+	# phases started failing in ones and twos, differently on each run, with
+	# nothing actually broken. The floor is what the wait is really for; the
+	# clock is only there to stop a hang.
+	var frames := 0
+	var floor_frames := int(timeout_seconds * 30.0)
+	while Time.get_ticks_msec() < deadline or frames < floor_frames:
 		if bool(condition.call()):
 			return true
 		await _settle(6)
+		frames += 6
 	push_warning("Timed out waiting for %s" % description)
 	return false
 
@@ -10826,8 +10842,17 @@ func _test_restaurant_visible_service() -> void:
 	await _settle(10)
 	var cook := unit.get_staff("Cook")
 	var server := unit.get_staff("Server")
-	_check(cook != null, "the cook comes in to work")
-	_check(server != null, "and so does the server")
+	# The hour and the roster are in the message because when this failed in
+	# Phase T there was no way to tell from the output whether nobody was
+	# rostered, the room had no equipment, or the figure had failed to build.
+	_check(cook != null, "the cook comes in to work (%02d:00, rostered %s, %d fittings)" % [
+		TimeManager.hour,
+		"yes" if diner.rostered(EmployeeData.Role.COOK, TimeManager.hour) != null else "no",
+		unit.equipment_nodes().size(),
+	])
+	_check(server != null, "and so does the server (rostered %s)" % [
+		"yes" if diner.rostered(EmployeeData.Role.SERVER, TimeManager.hour) != null else "no"
+	])
 	for i in 160:
 		await _settle(12)
 		if cook != null and cook.is_at_station() and server != null and server.is_at_station():
