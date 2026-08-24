@@ -1203,7 +1203,11 @@ func _add_street_light(parent: Node3D, index: int, base: Vector3, toward: Vector
 	var steel := _mat("metal")
 	var pole_height := 6.4
 
-	CityKit.add_cylinder(holder, "Base", Vector3(0.0, 0.16, 0.0), 0.26, 0.32, dark)
+	# Not solid. The pole below already carries the lamp's collision, and adding
+	# a second solid cylinder at the base put a knee-high obstacle on forty-four
+	# stretches of pavement — enough to break a witness's line of sight to a car
+	# theft, which is how the suite found it.
+	CityKit.add_cylinder(holder, "Base", Vector3(0.0, 0.16, 0.0), 0.26, 0.32, dark, false)
 	CityKit.add_cylinder(
 		holder, "Plinth", Vector3(0.0, 0.44, 0.0), 0.185, 0.30, dark, false
 	)

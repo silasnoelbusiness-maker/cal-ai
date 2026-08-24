@@ -410,6 +410,15 @@ func _run() -> void:
 	_test_windows_are_not_all_lit()
 	_test_camera_framing_after_the_art_pass()
 
+	# --- Phase T2 --------------------------------------------------------
+	_test_asset_manifest()
+	_test_import_conventions()
+	_test_production_camera()
+	_test_tree_species()
+	_test_street_dressing()
+	await _test_store_fittings()
+	_test_exposure_sanity()
+
 	_report()
 
 
@@ -707,7 +716,13 @@ func _test_life_loop() -> void:
 		"leaving puts the player back on the street outside Larkspur"
 	)
 	_check(
-		_camera_rig.distance > 16.0, "the camera returns to street framing (%.0f)" % _camera_rig.distance
+		# Against the rig's own resting distance rather than a number typed in
+		# when that distance was 22. What is being pinned is that leaving an
+		# interior gives the street camera back, not what the street camera is.
+		is_equal_approx(_camera_rig.distance, _camera_rig.get("_default_distance")),
+		"the camera returns to street framing (%.0f of %.0f)" % [
+			_camera_rig.distance, _camera_rig.get("_default_distance")
+		]
 	)
 
 	# --- Walk to work, then a full shift ---
@@ -3786,6 +3801,209 @@ func _test_camera_framing_after_the_art_pass() -> void:
 		"the old view of the block is still a scroll away (%.0fm)" % rig.max_distance
 	)
 	_check(rig.min_distance >= 6.0, "and it cannot be zoomed into the pavement")
+
+
+# --- Phase T2 ------------------------------------------------------------
+
+## Provenance is a legal question, so an unaccounted asset fails the build.
+func _test_asset_manifest() -> void:
+	var issues := AssetValidator.check_manifest()
+	_check(issues.is_empty(), AssetValidator.summary(issues))
+	var manifest := FileAccess.get_file_as_string("res://assets/ASSET_MANIFEST.md")
+	_check(not manifest.is_empty(), "the manifest exists and says something")
+	_check(
+		manifest.contains("STREET CAPITAL ORIGINAL"),
+		"and marks the project's own work as its own"
+	)
+	# The honest statement is the point of the document, so it is pinned.
+	_check(
+		manifest.contains("There are no external assets"),
+		"and says plainly that there is no imported art yet"
+	)
+
+
+func _test_import_conventions() -> void:
+	var doc := FileAccess.get_file_as_string("res://assets/IMPORT_CONVENTIONS.md")
+	_check(not doc.is_empty(), "there are import conventions to follow")
+	for expected in [
+		"GLB", "wheel_fl", "headlight_l", "driver_seat",
+		"hips", "head", "entrance", "sign_anchor",
+	]:
+		_check(doc.contains(expected), "they name the %s anchor" % expected)
+	_check(
+		doc.contains("collision capsule is **not** part of the mesh"),
+		"and say that swapping a mesh must not move gameplay collision"
+	)
+
+
+## The camera the trial settled on.
+func _test_production_camera() -> void:
+	var rig := _camera_rig
+	var pitch: float = rig.get("_default_pitch")
+	var distance: float = rig.get("_default_distance")
+	_check(
+		pitch >= 44.0 and pitch <= 52.0,
+		"the camera is a three-quarter view rather than near top-down (%.0f degrees)" % pitch
+	)
+	_check(
+		distance <= 17.0,
+		"and close enough that a person reads as a person (%.0fm)" % distance
+	)
+	_check(rig.max_distance >= 34.0, "the wide view of the block is still there")
+	_check(
+		rig.min_distance >= 6.0,
+		"and it cannot be zoomed into third person (%.0fm)" % rig.min_distance
+	)
+
+
+## Three species, and each one a different shape.
+func _test_tree_species() -> void:
+	var host := Node3D.new()
+	add_child(host)
+	var rng := RandomNumberGenerator.new()
+	var counts := {}
+	for kind: CityKit.TreeKind in [
+		CityKit.TreeKind.STREET, CityKit.TreeKind.PARK, CityKit.TreeKind.SPARSE,
+	]:
+		rng.seed = 99
+		var tree := CityKit.add_tree(
+			host, "T%d" % kind, Vector3.ZERO, 1.0,
+			Palette.of(&"bark"), [Palette.of(&"foliage_mid")], rng, false, kind
+		)
+		var canopy := 0
+		var limbs := 0
+		for child in tree.get_children():
+			if String(child.name).begins_with("Canopy"):
+				canopy += 1
+			if String(child.name).begins_with("Limb"):
+				limbs += 1
+		counts[kind] = canopy
+		_check(canopy >= 6, "a tree has a layered canopy (%d lobes)" % canopy)
+		_check(limbs >= 3, "and branches into it (%d)" % limbs)
+		_check(
+			tree.get_node_or_null("Trunk") != null and tree.get_node_or_null("Flare") != null,
+			"on a trunk with a flare at the ground"
+		)
+	_check(
+		int(counts[CityKit.TreeKind.PARK]) > int(counts[CityKit.TreeKind.SPARSE]),
+		"a park tree is fuller than a yard one (%d against %d)" % [
+			counts[CityKit.TreeKind.PARK], counts[CityKit.TreeKind.SPARSE]
+		]
+	)
+	host.queue_free()
+
+
+## The pavements are not blank any more, and nothing on them blocks a door.
+func _test_street_dressing() -> void:
+	var central := WorldManager.by_id(&"central")
+	_check(central != null, "Central is in the world")
+	if central == null:
+		return
+	var dressing: Node = central.get_node_or_null("StreetDressing")
+	_check(dressing != null, "and its pavements are dressed")
+	if dressing == null:
+		return
+	var runs: int = dressing.get_child_count()
+	_check(runs >= 8, "down every street (%d runs)" % runs)
+
+	var items := 0
+	var pieces: Array[Node3D] = []
+	for run in dressing.get_children():
+		for piece in run.get_children():
+			items += 1
+			if piece is Node3D:
+				pieces.append(piece)
+	_check(items >= 120, "with a real amount of furniture on them (%d pieces)" % items)
+
+	# Nothing decorative may sit on a door. This is the check that would catch
+	# a bench across a shopfront, which is worse than an empty pavement.
+	var blocking := 0
+	for door in get_tree().get_nodes_in_group(&"building_entrance"):
+		var at := (door as Node3D).global_position
+		for piece in pieces:
+			if Vector2(
+				piece.global_position.x - at.x, piece.global_position.z - at.z
+			).length() < 2.5:
+				blocking += 1
+	_check(blocking == 0, "and none of it stands in a doorway (%d did)" % blocking)
+
+
+## A shop has to look like a shop, which means stock on shelves.
+func _test_store_fittings() -> void:
+	var market := BusinessManager.primary_business()
+	if market == null:
+		return
+	var unit := RetailUnit.for_business(market, get_tree())
+	if unit == null:
+		return
+	unit.ensure_built()
+	await _settle(6)
+	var fittings: Node = unit.get_node_or_null("Fittings")
+	_check(fittings != null, "the shop has fittings of its own")
+	if fittings == null:
+		return
+	var bays := 0
+	var chillers := 0
+	var signs := 0
+	var goods := 0
+	for child in fittings.get_children():
+		var name := String(child.name)
+		if name.begins_with("Chiller"):
+			chillers += 1
+		elif name.begins_with("BackBay"):
+			bays += 1
+		elif name.begins_with("Sign"):
+			signs += 1
+		for grandchild in child.get_children():
+			if String(grandchild.name).begins_with("Goods") \
+					or String(grandchild.name).begins_with("Stock"):
+				goods += 1
+	_check(bays >= 2, "with wall shelving (%d bays)" % bays)
+	_check(chillers >= 1, "and a chiller (%d)" % chillers)
+	_check(signs >= 1, "and a category sign (%d)" % signs)
+	_check(goods >= 8, "and stock actually on the shelves (%d rows)" % goods)
+
+	# The fittings are the room's, not the business's, and they are not solid:
+	# the walkable floor is exactly what it was before they existed.
+	var solid := 0
+	for child in fittings.get_children():
+		for grandchild in child.get_children():
+			if grandchild is StaticBody3D:
+				solid += 1
+	_check(solid == 0, "and none of it is something to walk into (%d were)" % solid)
+
+
+## Neither end of the day may clip. A white wall that shows no shape is the
+## §100 test failing, and a black street is the §103 test failing.
+func _test_exposure_sanity() -> void:
+	var sun := _main.find_children("*", "DayNightCycle", true, false)
+	_check(not sun.is_empty(), "the city has a day/night cycle")
+	if sun.is_empty():
+		return
+	var cycle = sun[0]
+	_check(
+		cycle.day_energy <= 1.10,
+		"the midday sun does not blow the pavement out (%.2f)" % cycle.day_energy
+	)
+	_check(
+		cycle.day_ambient_energy <= 0.45,
+		"and the fill light leaves shadows in the shadows (%.2f)" % cycle.day_ambient_energy
+	)
+	_check(
+		cycle.night_ambient_energy >= 0.28,
+		"night is dark rather than absent (%.2f)" % cycle.night_ambient_energy
+	)
+	_check(
+		cycle.night_ambient_energy < cycle.day_ambient_energy,
+		"and still darker than day"
+	)
+	# Paving is grey. It was authored against a brighter exposure and read as
+	# snow beside the road.
+	var paving := Palette.colour_of(&"sidewalk")
+	_check(
+		paving.r < 0.50,
+		"the pavement is grey rather than white (%.2f)" % paving.r
+	)
 
 
 func _report() -> void:
