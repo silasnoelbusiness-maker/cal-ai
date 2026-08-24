@@ -1498,6 +1498,60 @@ And the corner of the screen no longer loses things. Messages queue by
 priority, repeats inside six seconds are dropped, an arrest or a court date goes
 to the front, and pleasantries are discarded rather than made to wait.
 
+## How it is dressed
+
+Phase T was a presentation pass, not a feature pass. Nothing about how the game
+works changed.
+
+The largest single thing it fixed was the materials. Every surface in the city
+carried four octaves of noise repeating as often as every ninety centimetres,
+with a bump strength of six on top of each material's own scale. From a camera
+twenty-five metres up that is not wear on concrete, it is black-and-white
+speckle — and it was the loudest thing making the game look unfinished. Two
+octaves, a seventh of the bump, and nothing repeating faster than three metres.
+The authored mottle is kept almost in full: the swing was never the problem, the
+scale it swung at was.
+
+The camera came in from twenty-two metres to seventeen and down from
+sixty-four degrees to fifty-six. The old framing was built for development — it
+showed a lot of road, very little worth looking at, and a person forty pixels
+tall. The zoom still reaches thirty-eight metres.
+
+Windows are set back into their walls with a sill under each, so an opening
+reads as an opening rather than as a sticker; still three MultiMeshes for a
+whole building. Fifty-eight per cent of them light after dark, chosen by a hash
+of the opening's own position, because a block where every window comes on at
+once reads as a switch being thrown.
+
+Cars gained a raked windscreen and rear screen hinged at the base, and an arch
+over each wheel. Rake varies by profile — fourteen degrees on a van,
+thirty-eight on a coupe.
+
+People gained elbows. Arms rest out from the body with a bend and straighten as
+they swing, standing still is a slow weight shift, and there are four more
+animation states the city was already doing without showing: sitting, eating,
+cleaning, a gym repetition. Eight more wardrobe categories mean a cook, a
+bouncer, a stocker and a manager are four different figures rather than the same
+shop assistant in four colours, and each of the three underworld addresses now
+has somebody standing at it.
+
+Central's street lamps had been emissive heads on posts with no light behind
+them since the district was built, so half the city went black after dark while
+the harbour's forty-four lamps lit their pavements perfectly well. There are
+eighty-six lights there now, cooler and tighter than the harbour's sodium.
+
+The game has iconography for the first time: eighteen glyphs drawn in `_draw`
+from lines inside a unit square, so one definition serves a fourteen-pixel HUD
+icon and a thirty-two-pixel heading. Drawn rather than imported on purpose — the
+game is flat-shaded stylized geometry, and a glyph made of the same straight
+lines belongs to it.
+
+`assets/` is the replacement point for real art, and `assets/README.md` says
+plainly that it is empty. `VisualRegistry` maps a semantic id to a scene and
+falls back to the builder when none is registered; `AssetValidator` walks
+materials, props, the registry, every figure and vehicle in the world and the
+doors the map navigates to.
+
 ## What is next
 
 Nothing is started. The audio and front-end pass left the most obvious thread of
