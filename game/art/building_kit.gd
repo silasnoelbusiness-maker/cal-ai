@@ -19,6 +19,15 @@ extends RefCounted
 const WINDOW_ROWS_FROM := 4.6
 const FLOOR_HEIGHT := 3.4
 
+## How far the glass sits back into the wall, and how far the reveal around it
+## stands out. Both small: a deep reveal on a stylized building reads as a
+## fortress, and the point is only to catch a shadow.
+const RECESS := 0.13
+const PROUD := 0.05
+## The ledge under each opening.
+const SILL_DEPTH := 0.09
+const SILL_OUT := 0.16
+
 
 ## A grid of windows on all four faces between two heights.
 ##
@@ -55,6 +64,7 @@ static func add_window_grid(
 	# the whole district still lights up at dusk for one write.
 	var panes: Array[Transform3D] = []
 	var surrounds: Array[Transform3D] = []
+	var sills: Array[Transform3D] = []
 
 	for along_x: bool in [true, false]:
 		var run: float = rect.size.x if along_x else rect.size.y
@@ -75,33 +85,52 @@ static func add_window_grid(
 					var y := base_y + FLOOR_HEIGHT * float(level) + window_height * 0.5 + 0.5
 					if y + window_height * 0.5 > top_y:
 						break
+					# The glass sits BACK from the wall face, not proud of it.
+					# A pane stuck on the outside of a wall reads as a sticker;
+					# the same pane set into a reveal reads as a window, and the
+					# only difference is the sign of this number.
+					var glass_at := face * (RECESS - 0.02)
 					var centre := (
-						Vector3(travel, y, fixed + face * 0.06) if along_x
-						else Vector3(fixed + face * 0.06, y, travel)
+						Vector3(travel, y, fixed + glass_at) if along_x
+						else Vector3(fixed + glass_at, y, travel)
 					)
 					var pane := (
-						Vector3(window_width, window_height, 0.14) if along_x
-						else Vector3(0.14, window_height, window_width)
+						Vector3(window_width, window_height, 0.10) if along_x
+						else Vector3(0.10, window_height, window_width)
+					)
+					# The reveal stands proud, so the shadow it casts is what
+					# gives the recess away from the elevated camera.
+					var frame_at := face * PROUD
+					var frame_centre := (
+						Vector3(travel, y, fixed + frame_at) if along_x
+						else Vector3(fixed + frame_at, y, travel)
 					)
 					var surround := (
-						Vector3(window_width + 0.28, window_height + 0.28, 0.08) if along_x
-						else Vector3(0.08, window_height + 0.28, window_width + 0.28)
+						Vector3(window_width + 0.30, window_height + 0.30, 0.10) if along_x
+						else Vector3(0.10, window_height + 0.30, window_width + 0.30)
+					)
+					# A sill under each opening. One slab, and it is the single
+					# strongest thing that says "building" rather than "box with
+					# rectangles on it".
+					var sill_y := y - window_height * 0.5 - SILL_DEPTH * 0.5
+					var sill_at := face * (PROUD + SILL_OUT * 0.5)
+					var sill_centre := (
+						Vector3(travel, sill_y, fixed + sill_at) if along_x
+						else Vector3(fixed + sill_at, sill_y, travel)
+					)
+					var sill := (
+						Vector3(window_width + 0.44, SILL_DEPTH, SILL_OUT) if along_x
+						else Vector3(SILL_OUT, SILL_DEPTH, window_width + 0.44)
 					)
 					panes.append(Transform3D(Basis().scaled(pane), centre))
-					surrounds.append(
-						Transform3D(
-							Basis().scaled(surround),
-							centre - Vector3(
-								0.0 if along_x else face * 0.02, 0.0,
-								face * 0.02 if along_x else 0.0
-							)
-						)
-					)
+					surrounds.append(Transform3D(Basis().scaled(surround), frame_centre))
+					sills.append(Transform3D(Basis().scaled(sill), sill_centre))
 
 	if panes.is_empty():
 		return
 	_add_instanced(parent, "%sWindows" % node_name, panes, glass)
 	_add_instanced(parent, "%sSurrounds" % node_name, surrounds, frame)
+	_add_instanced(parent, "%sSills" % node_name, sills, frame)
 
 
 ## One MultiMeshInstance3D holding a pile of identically-shaped boxes.
