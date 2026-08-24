@@ -660,6 +660,27 @@ func _add_lamp(
 		parent, lamp_name + "Head", base + Vector3(0.0, 4.85, 0.0),
 		Vector3(0.5, 0.18, 0.28), glass, false, false
 	)
+	# An actual light, not only a glowing head.
+	#
+	# Central's lamps have been emissive material and nothing else since the
+	# district was built, so the whole half of the city went to a black void
+	# after dark while the harbour's forty-four lamps lit their pavements. The
+	# lamp looked lit; the street it stood on did not.
+	#
+	# No shadows, as in the harbour: a hundred shadow-casting street lamps is
+	# not a lighting pass, it is a frame rate.
+	var light := OmniLight3D.new()
+	light.name = lamp_name + "Light"
+	light.position = base + Vector3(0.0, 4.55, 0.0)
+	# Cooler and a shade tighter than the harbour's sodium. Central is newer,
+	# and the two districts should not be lit by the same lamp.
+	light.light_color = Color(0.925, 0.945, 1.0)
+	light.light_energy = 4.4
+	light.omni_range = 16.0
+	light.omni_attenuation = 1.1
+	light.shadow_enabled = false
+	light.add_to_group(&"street_light")
+	parent.add_child(light)
 
 
 # --- Navigation ----------------------------------------------------------
