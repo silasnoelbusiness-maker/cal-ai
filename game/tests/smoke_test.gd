@@ -11220,8 +11220,15 @@ func _test_restaurant_visible_service() -> void:
 	var sat := false
 	var ordered := false
 	var paid := false
-	for i in 220:
-		await _settle(10)
+	# Sampled every other frame rather than every tenth.
+	#
+	# A customer passes through SEATED on the way to AWAITING_FOOD and out the
+	# other side; at ten frames between looks the whole visit could happen
+	# between two samples, and this check failed while every other check in the
+	# sequence — the ticket, the payment, the ingredients — passed. The bug was
+	# in the watching, not in the restaurant.
+	for i in 1100:
+		await _settle(2)
 		if is_instance_valid(customer):
 			sat = sat or customer.stage == CustomerAI.Stage.SEATED \
 				or customer.stage == CustomerAI.Stage.AWAITING_FOOD
