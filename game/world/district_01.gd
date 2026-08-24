@@ -1262,7 +1262,7 @@ func _add_street_light(parent: Node3D, index: int, base: Vector3, toward: Vector
 	light.name = "Lamp"
 	light.position = head_position + Vector3.DOWN * 0.3
 	light.light_color = Color(1.0, 0.878, 0.678)
-	light.light_energy = 5.0
+	light.light_energy = 6.4
 	light.omni_range = 18.0
 	light.omni_attenuation = 1.0
 	light.shadow_enabled = false

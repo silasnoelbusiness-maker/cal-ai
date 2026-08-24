@@ -17,13 +17,13 @@ signal daylight_changed(amount: float)
 ## surface in the city — and the pavement is pale — clipped to flat white, and a
 ## white wall that shows no shape, shadow or material is the §100 test failing.
 @export var day_energy: float = 1.02
-@export var night_energy: float = 0.14
+@export var night_energy: float = 0.20
 @export var day_color: Color = Color(1.0, 0.965, 0.898)
 @export var golden_color: Color = Color(1.0, 0.72, 0.45)
 @export var night_color: Color = Color(0.435, 0.541, 0.878)
 @export_group("Sky")
 @export var day_sky_energy: float = 1.0
-@export var night_sky_energy: float = 0.16
+@export var night_sky_energy: float = 0.26
 ## Dropping the daytime figure buys shadow contrast, but it was taken too far at
 ## first: 0.35 against a night value of 0.3 left almost no day/night difference
 ## in the fill light, and late afternoon — when the sun is low and the fill is
@@ -32,9 +32,13 @@ signal daylight_changed(amount: float)
 ## rather than in the sun: ambient light has no direction, so raising it flattens
 ## everything at once.
 @export var day_ambient_energy: float = 0.38
-## Enough that unlit tarmac is dark rather than absent. A road the player
-## cannot see is not atmosphere, it is a hole in the picture.
-@export var night_ambient_energy: float = 0.34
+## Enough that unlit tarmac is dark rather than absent. A road the player cannot
+## see is not atmosphere, it is a hole in the picture.
+##
+## Raised again in Phase T2. Pulling the day exposure back to stop the pavement
+## clipping to white took night down with it — the tonemap does not know what
+## time it is — and Central went to a black frame with three light pools in it.
+@export var night_ambient_energy: float = 0.50
 @export_group("Street Lights")
 ## Street lights switch on once the sun drops below this height (-1..1).
 @export var street_light_threshold: float = 0.08

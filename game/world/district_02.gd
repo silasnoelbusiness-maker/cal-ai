@@ -676,7 +676,7 @@ func _add_lamp(
 	# Cooler and a shade tighter than the harbour's sodium. Central is newer,
 	# and the two districts should not be lit by the same lamp.
 	light.light_color = Color(0.925, 0.945, 1.0)
-	light.light_energy = 4.4
+	light.light_energy = 5.8
 	light.omni_range = 16.0
 	light.omni_attenuation = 1.1
 	light.shadow_enabled = false
