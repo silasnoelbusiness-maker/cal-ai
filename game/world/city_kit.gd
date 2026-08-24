@@ -77,6 +77,16 @@ static func make_material(
 ##
 ## `detail_scale` is in metres per noise tile. `bump` is relief strength; `mottle`
 ## is how much the albedo varies. Either may be zero.
+## Global scale on every material's authored bump. One knob, so the whole city
+## can be flattened or roughened in one edit rather than sixty.
+const NORMAL_STRENGTH := 0.45
+
+## Nothing repeats faster than this many metres. A brick wall authored at 0.9
+## metres per repeat was carrying four octaves of noise across ninety
+## centimetres, which is grain rather than brick.
+const MIN_DETAIL_METRES := 3.2
+
+
 static func make_surface(
 	color: Color,
 	roughness: float = 0.92,
@@ -92,11 +102,14 @@ static func make_surface(
 
 	material.uv1_triplanar = true
 	material.uv1_world_triplanar = true
-	material.uv1_scale = Vector3.ONE / maxf(detail_scale, 0.01)
+	material.uv1_scale = Vector3.ONE / maxf(detail_scale, MIN_DETAIL_METRES)
 
 	if bump > 0.0:
 		material.normal_enabled = true
-		material.normal_scale = bump
+		# Scaled back hard for the same reason as the octave count. Relief that
+		# is legible at arm's length is noise at twenty-five metres, and the
+		# camera never comes closer than about eight.
+		material.normal_scale = bump * NORMAL_STRENGTH
 		material.normal_texture = _noise(noise_seed, true, mottle)
 
 	if mottle > 0.0:
@@ -119,9 +132,14 @@ static func _noise(noise_seed: int, as_normal: bool, mottle: float) -> NoiseText
 	var noise := FastNoiseLite.new()
 	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	noise.seed = noise_seed
-	noise.frequency = 0.03
-	noise.fractal_octaves = 4
-	noise.fractal_gain = 0.55
+	# Two octaves, not four. Four gave every surface a fine grain that, from a
+	# camera twenty-five metres up, aliased into black-and-white speckle — the
+	# single loudest "prototype" cue in the whole build. What a surface wants
+	# from this distance is broad patchiness at the scale of a paving slab, not
+	# detail at the scale of a grain of sand.
+	noise.frequency = 0.016
+	noise.fractal_octaves = 2
+	noise.fractal_gain = 0.38
 
 	var texture := NoiseTexture2D.new()
 	texture.width = 256
@@ -129,10 +147,16 @@ static func _noise(noise_seed: int, as_normal: bool, mottle: float) -> NoiseText
 	texture.seamless = true
 	texture.noise = noise
 	texture.as_normal_map = as_normal
-	texture.bump_strength = 6.0
+	# Was 6.0, which turned gentle noise into corrugated iron once a material
+	# also applied its own normal_scale on top.
+	texture.bump_strength = 1.7
 	if not as_normal:
 		var ramp := Gradient.new()
-		var floor_value := clampf(1.0 - mottle, 0.0, 1.0)
+		# The authored mottle, very nearly in full — the swing was never the
+		# problem. What made it read as static was the *scale* it swung at.
+		# Spread over three metres instead of ninety centimetres the same
+		# number reads as wear on paving, which is what it was always for.
+		var floor_value := clampf(1.0 - mottle * 0.85, 0.0, 1.0)
 		ramp.set_color(0, Color(floor_value, floor_value, floor_value))
 		ramp.set_color(1, Color.WHITE)
 		texture.color_ramp = ramp
