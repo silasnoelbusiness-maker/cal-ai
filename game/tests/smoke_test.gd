@@ -3993,9 +3993,21 @@ func _test_exposure_sanity() -> void:
 		cycle.night_ambient_energy >= 0.28,
 		"night is dark rather than absent (%.2f)" % cycle.night_ambient_energy
 	)
+	# Total light, not the ambient term alone.
+	#
+	# Night ambient is legitimately higher than day ambient: it is standing in
+	# for moonlight, skyglow and bounced city light, and at night the sun
+	# contributes nothing, so all of the fill has to come from somewhere. What
+	# must hold is that the night is darker overall, which the first version of
+	# this check did not say — it compared one term of two and failed the moment
+	# the night was lifted for being unreadable.
+	var day_total: float = cycle.day_energy + cycle.day_ambient_energy
+	var night_total: float = cycle.night_energy + cycle.night_ambient_energy
 	_check(
-		cycle.night_ambient_energy < cycle.day_ambient_energy,
-		"and still darker than day"
+		night_total < day_total * 0.7,
+		"and the night is markedly darker overall (%.2f against %.2f)" % [
+			night_total, day_total
+		]
 	)
 	# Paving is grey. It was authored against a brighter exposure and read as
 	# snow beside the road.
