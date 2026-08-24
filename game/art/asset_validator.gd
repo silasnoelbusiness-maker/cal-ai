@@ -36,6 +36,7 @@ static func run(tree: SceneTree = null) -> Array:
 	issues.append_array(check_materials())
 	issues.append_array(check_props())
 	issues.append_array(check_visual_registry())
+	issues.append_array(check_manifest())
 	if tree != null:
 		issues.append_array(check_characters(tree))
 		issues.append_array(check_vehicles(tree))
@@ -107,6 +108,55 @@ static func check_visual_registry() -> Array:
 					"points at '%s', which does not exist" % table[id]
 				))
 	return issues
+
+
+## Every external asset has to be accounted for in the manifest.
+##
+## §152 — an asset with no known provenance is a legal problem, not a tidiness
+## problem, so an unlisted file under `assets/` fails development validation
+## rather than being noted for later. The check is deliberately blunt: any
+## importable file that the manifest does not mention by name is an issue.
+static func check_manifest() -> Array:
+	var issues: Array = []
+	var manifest_path := "res://assets/ASSET_MANIFEST.md"
+	if not FileAccess.file_exists(manifest_path):
+		issues.append(_issue(&"manifest", "ASSET_MANIFEST.md", "is missing"))
+		return issues
+	var manifest := FileAccess.get_file_as_string(manifest_path)
+	if manifest.is_empty():
+		issues.append(_issue(&"manifest", "ASSET_MANIFEST.md", "is empty"))
+		return issues
+	for path in _imported_assets("res://assets"):
+		if not manifest.contains(path.get_file()):
+			issues.append(_issue(
+				&"manifest", path,
+				"has no manifest row; every asset needs a known source and licence"
+			))
+	return issues
+
+
+## Importable art under a directory, recursively. Markdown, .gitkeep and Godot's
+## own import sidecars are not assets.
+static func _imported_assets(root: String) -> PackedStringArray:
+	var found := PackedStringArray()
+	var dir := DirAccess.open(root)
+	if dir == null:
+		return found
+	dir.list_dir_begin()
+	var name := dir.get_next()
+	while name != "":
+		var path := "%s/%s" % [root, name]
+		if dir.current_is_dir():
+			found.append_array(_imported_assets(path))
+		elif name.get_extension().to_lower() in [
+			"glb", "gltf", "fbx", "obj", "dae", "blend",
+			"png", "jpg", "jpeg", "webp", "svg", "exr", "hdr",
+			"ogg", "wav", "mp3", "ttf", "otf",
+		]:
+			found.append(path)
+		name = dir.get_next()
+	dir.list_dir_end()
+	return found
 
 
 ## Every figure in the world: right scale, feet on the ground, collision intact.
