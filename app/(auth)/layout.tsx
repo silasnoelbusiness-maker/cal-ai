@@ -11,7 +11,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </Link>
       </header>
       <main className="flex flex-1 items-center justify-center px-4 pb-16">
-        <div className="w-full max-w-sm">{children}</div>
+        {/* Wide enough for the two-column signup page; the single-column
+            pages constrain themselves to max-w-sm. */}
+        <div className="w-full max-w-5xl">{children}</div>
       </main>
       <WhopPixel />
     </div>

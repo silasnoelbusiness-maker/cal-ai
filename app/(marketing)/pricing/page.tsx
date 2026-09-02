@@ -5,7 +5,9 @@ import { FinalCtaSection } from "@/components/marketing/final-cta-section";
 
 export const metadata: Metadata = {
   title: "Pricing",
-  description: "Simple, transparent pricing for Converana's AI-powered lead recovery platform.",
+  description:
+    "Starter, Growth and Pro plans for Converana. Every plan includes every feature — only the monthly lead and AI message allowances differ. No credit card required to start.",
+  alternates: { canonical: "/pricing" },
 };
 
 export default function PricingPage() {
@@ -16,8 +18,8 @@ export default function PricingPage() {
           Simple, transparent pricing
         </h1>
         <p className="mt-4 text-lg text-muted">
-          Every plan includes AI lead qualification and automated follow-up. Billed monthly,
-          cancel anytime — no long-term contracts.
+          Every plan includes every feature. The only thing that changes is how much you can run
+          through it each month. Billed monthly, cancel anytime — no long-term contracts.
         </p>
       </div>
       <div className="pb-8">

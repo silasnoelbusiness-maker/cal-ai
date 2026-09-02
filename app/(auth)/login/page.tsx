@@ -13,7 +13,9 @@ export default async function LoginPage({
   const next = typeof params.next === "string" ? params.next : undefined;
 
   return (
-    <div className="space-y-6">
+    // Constrained here rather than in the layout: the signup page needs the
+    // full width for its two-column design.
+    <div className="mx-auto w-full max-w-sm space-y-6">
       <div className="space-y-1.5 text-center">
         <h1 className="text-xl font-semibold text-foreground">Welcome back</h1>
         <p className="text-sm text-muted">Log in to your Converana dashboard.</p>

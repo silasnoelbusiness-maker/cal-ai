@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/auth/supabase-server";
 import { isSupabaseConfigured } from "@/lib/auth/config";
+import { PLAN_ORDER } from "@/lib/plans";
 
 export interface AuthFormState {
   error?: string;
@@ -43,13 +44,24 @@ export async function signUpAction(
   const passwordResult = passwordSchema.safeParse(password);
   if (!passwordResult.success) return { error: passwordResult.error.issues[0].message };
 
+  // The plan the visitor picked on the pricing page, carried through signup so
+  // the choice survives into onboarding. Narrowed against the real plan list
+  // here rather than trusted: it ends up in a redirect URL, and an unchecked
+  // value from a form field has no business going there.
+  const rawPlan = String(formData.get("plan") || "").toUpperCase();
+  const plan = PLAN_ORDER.find((p) => p === rawPlan) ?? null;
+  const planQuery = plan ? `?plan=${plan.toLowerCase()}` : "";
+  const onboardingPath = `/onboarding${planQuery}`;
+
   const supabase = await createSupabaseServerClient();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { emailRedirectTo: `${appUrl}/auth/callback?next=/onboarding` },
+    options: {
+      emailRedirectTo: `${appUrl}/auth/callback?next=${encodeURIComponent(onboardingPath)}`,
+    },
   });
 
   if (error) return { error: error.message };
@@ -77,7 +89,7 @@ export async function signUpAction(
   // leaves /signup — the only place the pixel is loaded — before any
   // client code has run.
   if (data.session) {
-    return { registered, redirectTo: "/onboarding" };
+    return { registered, redirectTo: onboardingPath };
   }
 
   return { success: confirmationMessage, registered };
