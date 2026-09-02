@@ -144,7 +144,8 @@ function SliderField({
         max={100}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-2 w-full cursor-pointer appearance-none rounded-full bg-border accent-[#2451e8]"
+        className="range-slider"
+        aria-label={label}
       />
     </div>
   );

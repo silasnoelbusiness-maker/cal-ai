@@ -95,3 +95,53 @@ body {
   background-size: 400% 100%;
   animation: shimmer 1.4s ease infinite;
 }
+
+/*
+ * Range slider (ROI calculator).
+ *
+ * The input's own box is the draggable hit area, so an 8px-tall track meant
+ * only an 8px band responded to touch — the visible thumb spilled outside it
+ * and dragging on a phone kept missing. The input is now 24px tall and
+ * transparent, with the 8px track and the thumb painted by pseudo-elements,
+ * so it looks identical and is actually grabbable.
+ */
+.range-slider {
+  height: 1.5rem;
+  width: 100%;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+}
+.range-slider:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+.range-slider::-webkit-slider-runnable-track {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--border);
+}
+.range-slider::-moz-range-track {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--border);
+}
+.range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 1.125rem;
+  width: 1.125rem;
+  /* Centres an 18px thumb on an 8px track. */
+  margin-top: -0.3125rem;
+  border-radius: 999px;
+  background: var(--brand);
+  border: none;
+}
+.range-slider::-moz-range-thumb {
+  height: 1.125rem;
+  width: 1.125rem;
+  border-radius: 999px;
+  background: var(--brand);
+  border: none;
+}
