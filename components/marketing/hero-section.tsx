@@ -12,10 +12,14 @@ export function HeroSection() {
           <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-muted">
             Built for home-service businesses
           </div>
-          {/* text-balance keeps the long headline from stranding a single word
-              on its own line at 390px; font sizes are unchanged. */}
+          {/* "Customers Ready to Book", not "Booked Jobs": Converana qualifies
+              a lead and tells the team it's ready — it never books a calendar.
+              Measured at 390/768/1440 against the shorter alternative; both
+              wrap identically (4/3/3 lines, no overflow), so this one wins on
+              being concrete rather than on fitting better. text-balance keeps
+              it from stranding a lone word. */}
           <h1 className="text-balance text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-            Turn Missed Leads Into Booked Jobs—Automatically.
+            Turn Missed Leads Into Customers Ready to Book—Automatically.
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted">
             Converana responds to new and forgotten leads, qualifies them through AI-powered

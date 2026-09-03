@@ -6,6 +6,11 @@ import { Avatar } from "@/components/ui/avatar";
 /**
  * A real (non-screenshot) preview of the Converana dashboard, built from the
  * same UI primitives as the app itself. Illustrative data only.
+ *
+ * Labels stop at "Ready to book" and "Qualified" on purpose. Converana
+ * qualifies a lead and notifies the business; it never writes to anyone's
+ * calendar. A mock-up implying the calendar was filled automatically would
+ * promise something the product deliberately does not do.
  */
 export function ProductPreview() {
   return (
@@ -19,7 +24,7 @@ export function ProductPreview() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MiniMetric label="New leads" value="24" />
         <MiniMetric label="Qualified" value="11" />
-        <MiniMetric label="Appointments" value="7" />
+        <MiniMetric label="Ready to book" value="7" />
         <MiniMetric label="Follow-ups" value="18" emphasize />
       </div>
 
@@ -68,13 +73,13 @@ export function ProductPreview() {
             <Calendar className="h-4 w-4" />
           </div>
           <div>
-            <p className="text-xs font-medium text-foreground">Appointment booked</p>
-            <p className="text-[11px] text-muted">Marcus Yu · Tomorrow, 9:00 AM</p>
+            <p className="text-xs font-medium text-foreground">Ready to book</p>
+            <p className="text-[11px] text-muted">Marcus Yu · Confirm a time</p>
           </div>
         </div>
         <div className="flex items-center gap-1 text-xs font-medium text-success">
-          <TrendingUp className="h-3.5 w-3.5" />
-          Converted
+          <TrendingUp className="h-3.5 w-3.5" aria-hidden />
+          Qualified
         </div>
       </Card>
     </div>

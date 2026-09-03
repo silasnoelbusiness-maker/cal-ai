@@ -7,16 +7,27 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { MetricCard } from "@/components/ui/metric-card";
 
+/**
+ * Sources name the route a lead actually arrives by. A bare "Google Ads"
+ * label reads as a one-click integration, and there isn't one — ad-platform
+ * leads come in through the lead capture API or a CSV export, which is what
+ * the lead-sources section says too.
+ */
 const LEADS = [
-  { name: "Marcus Yu", service: "AC Repair", source: "Website", temp: "hot" as const },
-  { name: "Dana Price", service: "Roof Inspection", source: "Google Ads", temp: "warm" as const },
-  { name: "Priya Nair", service: "Water Heater Install", source: "Referral", temp: "warm" as const },
-  { name: "Chris Ibe", service: "Duct Cleaning", source: "Facebook Ads", temp: "cold" as const },
+  { name: "Marcus Yu", service: "AC Repair", source: "Website form", temp: "hot" as const },
+  { name: "Dana Price", service: "Roof Inspection", source: "Google Ads · via API", temp: "warm" as const },
+  { name: "Priya Nair", service: "Water Heater Install", source: "Lead capture API", temp: "warm" as const },
+  { name: "Chris Ibe", service: "Duct Cleaning", source: "Facebook Ads · via CSV", temp: "cold" as const },
 ];
 
-const APPOINTMENTS = [
-  { name: "Marcus Yu", service: "AC Repair", time: "Tomorrow, 9:00 AM" },
-  { name: "Priya Nair", service: "Water Heater Install", time: "Thu, 1:30 PM" },
+/**
+ * Times the customer asked for, not slots Converana booked. Under a tab
+ * labelled "Ready to book", a confirmed time would say the opposite of what
+ * the product does — your team still confirms the appointment.
+ */
+const READY_TO_BOOK = [
+  { name: "Marcus Yu", service: "AC Repair", time: "Wants tomorrow AM" },
+  { name: "Priya Nair", service: "Water Heater Install", time: "Wants Thu PM" },
 ];
 
 export function DashboardPreviewSection() {
@@ -39,7 +50,7 @@ export function DashboardPreviewSection() {
               can't substantiate. Mirrors the hero preview. */}
           <MetricCard label="Leads" value="142" />
           <MetricCard label="Qualified" value="63" />
-          <MetricCard label="Appointments" value="28" />
+          <MetricCard label="Ready to book" value="28" />
           <MetricCard label="Follow-ups" value="96" emphasize />
         </div>
 
@@ -47,7 +58,7 @@ export function DashboardPreviewSection() {
           <Tabs defaultValue="leads">
             <TabsList>
               <TabsTrigger value="leads">Leads</TabsTrigger>
-              <TabsTrigger value="appointments">Appointments</TabsTrigger>
+              <TabsTrigger value="appointments">Ready to book</TabsTrigger>
             </TabsList>
             <TabsContent value="leads" className="space-y-1">
               {LEADS.map((lead) => (
@@ -67,7 +78,7 @@ export function DashboardPreviewSection() {
               ))}
             </TabsContent>
             <TabsContent value="appointments" className="space-y-1">
-              {APPOINTMENTS.map((appt) => (
+              {READY_TO_BOOK.map((appt) => (
                 <div
                   key={appt.name}
                   className="flex items-center gap-3 rounded-md px-2 py-2.5 hover:bg-muted-surface"

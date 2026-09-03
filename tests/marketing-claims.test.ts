@@ -114,6 +114,51 @@ describe("capabilities the site must NOT claim", () => {
   });
 });
 
+describe("the demo button promises only what exists", () => {
+  const modal = read("components/marketing/demo-modal.tsx");
+
+  it("has no demo video, so the button must not name a runtime", () => {
+    const hasVideo = !/const DEMO_VIDEO_URL: string \| null = null;/.test(modal);
+    if (hasVideo) return; // A real recording exists; "60-Second Demo" is fair.
+    expect(modal).toMatch(/"See Product Preview"/);
+    expect(modal).toMatch(/DEMO_VIDEO_URL \? "Watch 60-Second Demo" : "See Product Preview"/);
+  });
+
+  it("makes no promise that a recording is coming", () => {
+    expect(modal).not.toMatch(/on its way|coming soon|will be available/i);
+  });
+
+  it("keeps the illustrative-data disclaimer", () => {
+    expect(modal).toMatch(/aren&apos;t results from a customer account|Illustrative data/i);
+  });
+});
+
+describe("public mock-ups never imply automatic booking", () => {
+  const mockups = [
+    "components/marketing/product-preview.tsx",
+    "components/marketing/dashboard-preview-section.tsx",
+  ].map(read).join("\n");
+
+  it("shows \"Ready to book\", not a booked appointment", () => {
+    expect(mockups).not.toMatch(/Appointment booked/);
+    expect(mockups).toMatch(/Ready to book/);
+  });
+
+  it("does not label a lead \"Converted\" in a marketing mock-up", () => {
+    expect(mockups).not.toMatch(/>\s*Converted/);
+  });
+
+  it("labels ad-platform leads with the route they actually arrive by", () => {
+    // A bare "Google Ads" source reads as a one-click integration.
+    for (const m of mockups.matchAll(/source: "([^"]+)"/g)) {
+      const source = m[1];
+      if (/google ads|facebook ads/i.test(source)) {
+        expect(source, `bare ad-platform source: ${source}`).toMatch(/·\s*via (API|CSV)/i);
+      }
+    }
+  });
+});
+
 describe("no fabricated social proof", () => {
   it("ships with zero testimonials and zero case studies", () => {
     // Both stay empty until a real customer has agreed to be quoted. The

@@ -14,21 +14,25 @@ import {
 import { ProductPreview } from "./product-preview";
 
 /**
- * "Watch 60-Second Demo".
+ * The product preview modal.
  *
  * ─────────────────────────────────────────────────────────────────────────
- *  PLACEHOLDER — NO DEMO VIDEO EXISTS YET
+ *  NO DEMO VIDEO EXISTS YET
  *
  *  There is no video file anywhere in this project (public/ contains only
- *  icon.svg). Rather than claim a recording exists, this modal shows the
- *  real product interface and says plainly that the walkthrough is coming.
+ *  icon.svg). So the button says "See Product Preview" and the modal shows
+ *  the real interface — it does not name a runtime it can't deliver, and it
+ *  makes no promise about a recording arriving later.
  *
  *  TO ACTIVATE: drop the recording somewhere it can be served, then set
- *  DEMO_VIDEO_URL below. The modal switches to the player automatically and
- *  the placeholder copy disappears — no other change needed.
+ *  DEMO_VIDEO_URL below. The button label, the title and the body all switch
+ *  to the video wording automatically — that constant is the only edit.
  * ─────────────────────────────────────────────────────────────────────────
  */
 const DEMO_VIDEO_URL: string | null = null;
+
+/** Never promises a runtime unless a recording actually exists. */
+const TRIGGER_LABEL = DEMO_VIDEO_URL ? "Watch 60-Second Demo" : "See Product Preview";
 
 export function DemoModalTrigger({
   variant = "outline",
@@ -47,19 +51,19 @@ export function DemoModalTrigger({
     <>
       <Button variant={variant} size={size} className={className} onClick={() => setOpen(true)}>
         <PlayCircle className="h-4 w-4" aria-hidden />
-        {children ?? "Watch 60-Second Demo"}
+        {children ?? TRIGGER_LABEL}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>
-              {DEMO_VIDEO_URL ? "Converana in 60 seconds" : "A look at Converana"}
+              {DEMO_VIDEO_URL ? "Converana in 60 seconds" : "Explore Converana"}
             </DialogTitle>
             <DialogDescription>
               {DEMO_VIDEO_URL
-                ? "How a missed lead becomes a booked job."
-                : "The recorded walkthrough is on its way. In the meantime, this is the actual Converana interface — not a mock-up of a different product."}
+                ? "How a missed lead becomes a qualified opportunity."
+                : "See how Converana captures, qualifies, and organizes leads inside the real product interface."}
             </DialogDescription>
           </DialogHeader>
 
